@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMT 生產管理系統 (v4.0 Final)</title>
+    <title>SMT 生產管理系統 (v4.1 Model Split)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -26,7 +26,7 @@
     <aside class="w-64 bg-slate-900 text-white flex flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v4.0 Auto & Merge</p>
+            <p class="text-xs text-slate-400 mt-1">v4.1 Model Split</p>
         </div>
         <nav class="flex-1 py-6 space-y-2">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -61,23 +61,31 @@
                             <i class="fas fa-pen mr-1"></i>編輯模式
                         </div>
                         <h3 class="font-bold text-lg mb-4 text-blue-800">步驟 1: 設定今日生產數據</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <div>
                                 <label class="block text-sm font-bold mb-1 text-gray-500">生產日期</label>
                                 <input type="date" v-model="report.date" @change="fetchDailyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500">
                             </div>
+
                             <div>
                                 <label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label>
-                                <select v-model="report.wo_id" @change="fetchDailyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white">
+                                <select v-model="report.wo_id" @change="fetchDailyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-mono text-blue-800 font-bold">
                                     <option :value="null" disabled>-- 請選擇工單 --</option>
-                                    <option v-for="wo in data.workOrders" :value="wo.id">{{ wo.wo_number }} ({{ wo.models?.name }})</option>
+                                    <option v-for="wo in data.workOrders" :value="wo.id">{{ wo.wo_number }}</option>
                                 </select>
                             </div>
-                            <div class="md:col-span-2">
+
+                            <div>
+                                <label class="block text-sm font-bold mb-1 text-gray-500">對應機種 (自動)</label>
+                                <input type="text" :value="currentReportModelName" disabled class="w-full border p-2 rounded bg-gray-100 text-gray-600 cursor-not-allowed font-bold" placeholder="選擇工單後顯示">
+                            </div>
+
+                            <div class="md:col-span-3 mt-2">
                                 <label class="block text-sm font-bold mb-1 text-gray-500">當日投入總數</label>
                                 <div class="flex">
-                                    <input type="number" v-model="report.inputQty" class="w-full border p-2 rounded-l focus:ring-2 focus:ring-blue-500" placeholder="0">
-                                    <button @click="saveDailyInput" class="bg-blue-600 text-white px-4 rounded-r hover:bg-blue-700 whitespace-nowrap">
+                                    <input type="number" v-model="report.inputQty" class="w-full border p-2 rounded-l focus:ring-2 focus:ring-blue-500 text-lg" placeholder="0">
+                                    <button @click="saveDailyInput" class="bg-blue-600 text-white px-6 rounded-r hover:bg-blue-700 whitespace-nowrap font-bold">
                                         <i class="fas fa-save mr-1"></i> {{ report.currentId ? '更新投入數' : '建立新紀錄' }}
                                     </button>
                                 </div>
@@ -209,11 +217,9 @@
                             <td class="p-4 text-sm">{{ wo.models?.name }}</td>
                             <td class="p-4 text-right">{{ wo.target_quantity }}</td>
                             <td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td>
-                            
                             <td class="p-4 text-right font-bold" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 ? 'text-green-600' : 'text-orange-500'">
                                 {{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}
                             </td>
-                            
                             <td class="p-4 text-center">
                                 <span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" 
                                       class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold">
@@ -223,7 +229,6 @@
                                     生產中
                                 </span>
                             </td>
-
                             <td class="p-4 text-center space-x-2">
                                 <button @click="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button>
                                 <button @click="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button>
@@ -232,7 +237,6 @@
                     </tbody>
                 </table>
             </div>
-
             <div v-if="showWoModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
                 <div class="bg-white p-6 rounded shadow-lg w-96">
                     <h3 class="text-xl font-bold mb-4">{{ isEditingWo ? '編輯工單' : '開立新工單' }}</h3>
@@ -265,7 +269,6 @@
 
         <div v-if="currentTab === 'stats'" class="max-w-6xl mx-auto animate-fade-in">
             <h2 class="text-2xl font-bold mb-6 text-gray-700"><i class="fas fa-chart-bar mr-2"></i>統計與導出</h2>
-            
             <div class="bg-white p-4 rounded shadow mb-6 flex flex-wrap gap-4 items-end">
                 <div>
                     <label class="block text-xs font-bold text-gray-500 mb-1">開始日期</label>
@@ -296,7 +299,6 @@
                     </button>
                 </div>
             </div>
-
             <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="bg-white p-4 rounded shadow">
                     <h3 class="font-bold border-b pb-2 mb-4">總合統計</h3>
@@ -337,7 +339,6 @@
 
         <div v-if="currentTab === 'settings'" class="max-w-6xl mx-auto animate-fade-in">
             <h2 class="text-2xl font-bold mb-6 text-gray-700"><i class="fas fa-cog mr-2"></i>系統基礎設定</h2>
-            
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div v-for="(cfg, key) in settingConfig" :key="key" class="bg-white p-4 rounded shadow h-96 flex flex-col">
                     <h3 class="font-bold border-b pb-2 mb-2" :class="cfg.colorClass">{{ cfg.title }}</h3>
@@ -382,14 +383,20 @@
             // --- 功能 1: 每日報工 (含歷史紀錄) ---
             const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, inputQty: 0, currentId: null, logs: [] });
             const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
-            const historyList = ref([]); // 近期生產紀錄
+            const historyList = ref([]);
 
-            // 載入歷史紀錄 (排序: 日期新 -> 舊)
+            // Computed: 根據選取的 wo_id 自動找到機種名稱
+            const currentReportModelName = computed(() => {
+                if (!report.value.wo_id) return '';
+                const wo = data.value.workOrders.find(w => w.id === report.value.wo_id);
+                return wo ? wo.models?.name : '未知機種';
+            });
+
             const loadHistory = async () => {
                 const { data: list, error } = await _supabase.from('daily_production')
                     .select('*, work_orders(wo_number, models(name)), defect_logs(id)')
                     .order('production_date', { ascending: false })
-                    .limit(50); // 顯示最近50筆
+                    .limit(50);
                 
                 if (list) {
                     historyList.value = list.map(item => ({
@@ -399,7 +406,6 @@
                 }
             };
 
-            // 點擊歷史紀錄載入編輯
             const loadRecordForEdit = async (rec) => {
                 report.value.date = rec.production_date;
                 report.value.wo_id = rec.wo_id;
@@ -434,8 +440,8 @@
                         if (error) throw error;
                         report.value.currentId = newProd.id;
                     }
-                    await loadHistory(); // 刷新歷史列表
-                    await loadBaseData(); // 刷新工單剩餘數量
+                    await loadHistory();
+                    await loadBaseData();
                     alert("投入數已儲存");
                 } catch (e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; }
             };
@@ -447,7 +453,7 @@
                 try {
                     await _supabase.from('defect_logs').insert({ production_id: report.value.currentId, defect_type_id: defectForm.value.typeId, location_id: defectForm.value.locationId, quantity: defectForm.value.qty });
                     await fetchDailyRecord(); 
-                    await loadHistory(); // 更新不良數顯示
+                    await loadHistory();
                     defectForm.value.qty = 1;
                 } catch (e) { alert("新增失敗"); } finally { loading.value = false; }
             };
@@ -459,13 +465,12 @@
             };
 
             const deleteDailyRecord = async (id) => {
-                if(!confirm("⚠️ 確定刪除整筆生產紀錄？(包含底下的不良紀錄)")) return;
+                if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return;
                 loading.value = true;
-                await _supabase.from('defect_logs').delete().eq('production_id', id); // 先刪子表 (如果沒設cascade)
+                await _supabase.from('defect_logs').delete().eq('production_id', id);
                 await _supabase.from('daily_production').delete().eq('id', id);
                 await loadHistory();
-                await loadBaseData(); // 更新工單剩餘量
-                // 如果刪除的是當前編輯的，清空畫面
+                await loadBaseData();
                 if (report.value.currentId === id) {
                     report.value.currentId = null;
                     report.value.logs = [];
@@ -474,7 +479,7 @@
                 loading.value = false;
             };
 
-            // --- 功能 2: 工單管理 (自動計算剩餘量) ---
+            // --- 功能 2: 工單管理 ---
             const woForm = ref({ id: null, number: '', modelId: null, targetQty: '' });
             const isEditingWo = ref(false);
 
@@ -510,16 +515,15 @@
             };
 
             const deleteWorkOrder = async (id) => {
-                if(!confirm("⚠️ 警告：刪除工單將會移除該工單所有生產數據！建議改為結案。確定刪除？")) return;
+                if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return;
                 loading.value = true;
                 try {
-                    // 這裡只是簡單刪除，實際建議要有完整 Cascade 或後端邏輯
                     await _supabase.from('work_orders').delete().eq('id', id);
                     loadBaseData();
                 } catch (e) { alert("刪除失敗"); } finally { loading.value = false; }
             };
 
-            // --- 功能 3: 統計 (合併 Sheet) ---
+            // --- 功能 3: 統計 ---
             const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
             const statsResult = ref(null);
             
@@ -557,41 +561,27 @@
 
             const exportToExcel = () => {
                 if (!statsResult.value) return alert("請先執行統計");
-                
-                // 建立單一 Sheet 的數據結構
                 const combinedData = [];
-                
-                // 1. 總結區塊
                 combinedData.push(["=== 總結報告 ==="]);
                 combinedData.push(["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`]);
                 combinedData.push(["總投入數", statsResult.value.totalInput]);
                 combinedData.push(["總不良數", statsResult.value.totalDefects]);
                 combinedData.push(["良率", `${statsResult.value.yieldRate}%`]);
-                combinedData.push([]); // 空行
-
-                // 2. 不良現象區塊
+                combinedData.push([]); 
                 combinedData.push(["=== 不良現象分析 ==="]);
                 combinedData.push(["不良現象", "數量", "佔比"]);
-                statsResult.value.byType.forEach(d => {
-                    combinedData.push([d.name, d.qty, `${d.ratio}%`]);
-                });
-                combinedData.push([]); // 空行
-
-                // 3. 位置區塊
+                statsResult.value.byType.forEach(d => { combinedData.push([d.name, d.qty, `${d.ratio}%`]); });
+                combinedData.push([]); 
                 combinedData.push(["=== 位置異常分析 ==="]);
                 combinedData.push(["位置", "數量"]);
-                statsResult.value.byLocation.forEach(d => {
-                    combinedData.push([d.code, d.qty]);
-                });
-
-                // 寫入檔案
+                statsResult.value.byLocation.forEach(d => { combinedData.push([d.code, d.qty]); });
                 const wb = XLSX.utils.book_new();
                 const ws = XLSX.utils.aoa_to_sheet(combinedData);
                 XLSX.utils.book_append_sheet(wb, ws, "SMT完整報告");
                 XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
             };
 
-            // --- 功能 4: 基礎設定 (不變) ---
+            // --- 功能 4: 基礎設定 ---
             const settingConfig = ref({
                 models: { title: '機種清單', colorClass: 'text-indigo-600', btnColor: 'bg-indigo-600', input: '', placeholder: '新機種名稱', field: 'name' },
                 defect_types: { title: '不良項目', colorClass: 'text-red-600', btnColor: 'bg-red-600', input: '', placeholder: '不良現象', field: 'name' },
@@ -626,13 +616,10 @@
                     _supabase.from('defect_types').select('*'),
                     _supabase.from('defect_locations').select('*')
                 ]);
-                
-                // 計算工單已投入總數
                 const woWithSum = (wo.data || []).map(w => {
                     const totalInput = w.daily_production.reduce((sum, d) => sum + d.input_quantity, 0);
                     return { ...w, current_input: totalInput };
                 });
-
                 data.value.workOrders = woWithSum;
                 data.value.models = mo.data || [];
                 data.value.defectTypes = dt.data || [];
@@ -645,7 +632,7 @@
 
             onMounted(() => {
                 loadBaseData();
-                loadHistory(); // 載入歷史
+                loadHistory();
                 const today = new Date();
                 statsFilter.value.end = today.toISOString().split('T')[0];
                 today.setDate(today.getDate() - 7);
@@ -658,7 +645,8 @@
                 woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder,
                 statsFilter, statsResult, calculateStats, exportToExcel,
                 settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
-                sortedModels, sortedDefectTypes, sortedLocations
+                sortedModels, sortedDefectTypes, sortedLocations,
+                currentReportModelName // 新增的 computed
             };
         }
     }).mount('#app');

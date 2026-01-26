@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMT 生產日報表系統</title>
+    
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans">
+
+<div id="app" class="max-w-3xl mx-auto mt-10 p-6 bg-white rounded-lg shadow-lg border border-gray-200">
+    
+    <h1 class="text-3xl font-bold mb-6 text-center text-blue-800">SMT 每日生產日報表</h1>
+
+    <div v-if="loading" class="text-center text-gray-500 py-4">
+        正在連線至資料庫...
+    </div>
+
+    <div v-else>
+        <div class="bg-blue-50 p-4 rounded-md mb-6 border border-blue-100">
+            <h2 class="text-lg font-bold mb-3 text-blue-700">1. 生產資訊</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                <div>
+                    <label class="block text-sm font-semibold mb-1">生產日期</label>
+                    <input type="date" v-model="form.date" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold mb-1">工單號碼</label>
+                    <select v-model="form.wo_id" @change="onWorkOrderChange" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                        <option :value="null" disabled>-- 請選擇工單 --</option>
+                        <option v-for="wo in data.workOrders" :key="wo.id" :value="wo.id">
+                            {{ wo.wo_number }}
+                        </option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold mb-1 text-gray-500">對應機種</label>
+                    <input type="text" :value="currentModelName" disabled class="w-full bg-gray-200 border p-2 rounded text-gray-600 cursor-not-allowed">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold mb-1">當日投入數量</label>
+                    <input type="number" v-model="form.inputQty" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="例如: 5000">
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <div class="flex justify-between items-end mb-2">
+                <h2 class="text-lg font-bold text-red-700">2. 不良品紀錄</h2>
+                <button @click="addDefectRow" class="text-sm bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 font-bold transition">
+                    + 新增一筆
+                </button>
+            </div>
+
+            <div v-if="form.defects.length === 0" class="text-center py-6 bg-gray-50 border border-dashed border-gray-300 rounded text-gray-400">
+                本日無不良紀錄 (Perfect!)
+            </div>
+
+            <div v-for="(item, index) in form.defects" :key="index" class="flex flex-col md:flex-row gap-2 mb-3 bg-red-50 p-3 rounded border border-red-100 items-start md:items-center animate-fade-in">
+                
+                <div class="flex-1 w-full">
+                    <span class="text-xs text-gray-500 mb-1 block md:hidden">不良現象</span>
+                    <select v-model="item.typeId" class="w-full border p-2 rounded bg-white">
+                        <option :value="null" disabled>選擇不良現象</option>
+                        <option v-for="type in data.defectTypes" :key="type.id" :value="type.id">{{ type.name }}</option>
+                    </select>
+                </div>
+
+                <div class="flex-1 w-full">
+                    <span class="text-xs text-gray-500 mb-1 block md:hidden">不良位置</span>
+                    <select v-model="item.locationId" class="w-full border p-2 rounded bg-white">
+                        <option :value="null" disabled>選擇位置</option>
+                        <option v-for="loc in data.defectLocations" :key="loc.id" :value="loc.id">{{ loc.code }}</option>
+                    </select>
+                </div>
+
+                <div class="w-full md:w-24">
+                    <span class="text-xs text-gray-500 mb-1 block md:hidden">數量</span>
+                    <input type="number" v-model="item.qty" class="w-full border p-2 rounded text-center" min="1">
+                </div>
+
+                <button @click="removeDefectRow(index)" class="text-red-500 hover:text-red-700 font-bold px-2 py-1">
+                    ✕
+                </button>
+            </div>
+        </div>
+
+        <div class="text-right border-t pt-4">
+            <button 
+                @click="submitReport" 
+                :disabled="isSubmitting"
+                class="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold shadow hover:bg-blue-700 transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                {{ isSubmitting ? '儲存中...' : '送出日報表' }}
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted } = Vue;
+    const { createClient } = supabase;
+
+    // =============== 設定區 (已自動填入) ===============
+    const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co'; 
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
+    // =================================================
+
+    const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    createApp({
+        setup() {
+            const loading = ref(true);
+            const isSubmitting = ref(false);
+            
+            // 資料庫抓下來的選項資料
+            const data = ref({
+                workOrders: [],
+                defectTypes: [],
+                defectLocations: []
+            });
+
+            // 表單輸入的資料
+            const form = ref({
+                date: new Date().toISOString().split('T')[0], // 預設今天
+                wo_id: null,
+                inputQty: '',
+                defects: [] // 這裡會放多筆 { typeId, locationId, qty }
+            });
+
+            // 計算屬性：根據選到的工單 ID，自動顯示機種名稱
+            const currentModelName = computed(() => {
+                const selected = data.value.workOrders.find(w => w.id === form.value.wo_id);
+                return selected ? selected.models.name : '';
+            });
+
+            // 初始化：從 Supabase 抓取下拉選單的資料
+            onMounted(async () => {
+                try {
+                    // 1. 抓工單 (包含機種名稱)
+                    const { data: woList, error: woError } = await _supabase
+                        .from('work_orders')
+                        .select('id, wo_number, models(name)')
+                        .eq('is_closed', false); 
+                    
+                    if(woError) throw woError;
+
+                    // 2. 抓不良類型
+                    const { data: typeList, error: typeError } = await _supabase.from('defect_types').select('*');
+                    if(typeError) throw typeError;
+                    
+                    // 3. 抓位置代碼
+                    const { data: locList, error: locError } = await _supabase.from('defect_locations').select('*');
+                    if(locError) throw locError;
+
+                    data.value.workOrders = woList || [];
+                    data.value.defectTypes = typeList || [];
+                    data.value.defectLocations = locList || [];
+                } catch (e) {
+                    console.error("Supabase 連線錯誤:", e);
+                    alert("連線資料庫失敗，請確認你的 Table 是否已建立？錯誤訊息: " + e.message);
+                } finally {
+                    loading.value = false;
+                }
+            });
+
+            // 操作：新增一行不良品
+            const addDefectRow = () => {
+                form.value.defects.push({ typeId: null, locationId: null, qty: 1 });
+            };
+
+            // 操作：刪除一行
+            const removeDefectRow = (idx) => {
+                form.value.defects.splice(idx, 1);
+            };
+
+            // 核心：送出資料到 Supabase
+            const submitReport = async () => {
+                // 簡易防呆
+                if (!form.value.wo_id) return alert("請選擇工單！");
+                if (!form.value.inputQty) return alert("請輸入投入數量！");
+
+                isSubmitting.value = true;
+
+                try {
+                    // 步驟 1: 寫入「每日生產紀錄」表
+                    const { data: mainData, error: mainError } = await _supabase
+                        .from('daily_production')
+                        .insert({
+                            wo_id: form.value.wo_id,
+                            production_date: form.value.date,
+                            input_quantity: form.value.inputQty
+                        })
+                        .select() // 為了拿回剛產生的 ID
+                        .single();
+
+                    if (mainError) throw mainError;
+
+                    const productionId = mainData.id;
+
+                    // 步驟 2: 如果有填寫不良品，寫入「不良詳情」表
+                    if (form.value.defects.length > 0) {
+                        // 檢查是否有未填寫完整的行
+                        const validDefects = form.value.defects.filter(d => d.typeId && d.locationId);
+                        
+                        if (validDefects.length > 0) {
+                            const defectRows = validDefects.map(d => ({
+                                production_id: productionId,
+                                defect_type_id: d.typeId,
+                                location_id: d.locationId,
+                                quantity: d.qty
+                            }));
+
+                            const { error: detailError } = await _supabase
+                                .from('defect_logs')
+                                .insert(defectRows);
+
+                            if (detailError) throw detailError;
+                        }
+                    }
+
+                    alert("✅ 報表提交成功！");
+                    
+                    // 重置表單 (保留日期，清空數量)
+                    form.value.inputQty = '';
+                    form.value.defects = [];
+                    
+                } catch (error) {
+                    alert("❌ 提交失敗：" + error.message);
+                    console.error(error);
+                } finally {
+                    isSubmitting.value = false;
+                }
+            };
+
+            return { 
+                loading, isSubmitting, data, form, currentModelName,
+                addDefectRow, removeDefectRow, submitReport 
+            };
+        }
+    }).mount('#app');
+</script>
+
+<style>
+    @keyframes fade-in {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in {
+        animation: fade-in 0.3s ease-out;
+    }
+</style>
+</body>
+</html>

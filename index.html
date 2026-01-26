@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMT 生產管理系統 (v4.1 Model Split)</title>
+    <title>SMT 生產管理系統 (v4.2 Multi-Model)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -17,6 +17,8 @@
         th { position: sticky; top: 0; background-color: #f3f4f6; z-index: 10; }
         /* 讓選中的行高亮 */
         .selected-row { background-color: #eff6ff; border-left: 4px solid #2563eb; }
+        /* Checkbox 自定義 */
+        .checkbox-wrapper input:checked + div { background-color: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans h-screen flex overflow-hidden">
@@ -26,7 +28,7 @@
     <aside class="w-64 bg-slate-900 text-white flex flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v4.1 Model Split</p>
+            <p class="text-xs text-slate-400 mt-1">v4.2 Multi-Model</p>
         </div>
         <nav class="flex-1 py-6 space-y-2">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -70,15 +72,18 @@
 
                             <div>
                                 <label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label>
-                                <select v-model="report.wo_id" @change="fetchDailyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-mono text-blue-800 font-bold">
+                                <select v-model="report.selectedWoNumber" @change="onWoNumberChange" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-mono text-blue-800 font-bold">
                                     <option :value="null" disabled>-- 請選擇工單 --</option>
-                                    <option v-for="wo in data.workOrders" :value="wo.id">{{ wo.wo_number }}</option>
+                                    <option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option>
                                 </select>
                             </div>
 
                             <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">對應機種 (自動)</label>
-                                <input type="text" :value="currentReportModelName" disabled class="w-full border p-2 rounded bg-gray-100 text-gray-600 cursor-not-allowed font-bold" placeholder="選擇工單後顯示">
+                                <label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label>
+                                <select v-model="report.wo_id" @change="fetchDailyRecord" :disabled="!report.selectedWoNumber" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-bold">
+                                    <option :value="null" disabled>-- 請選擇機種 --</option>
+                                    <option v-for="wo in availableModelsForSelectedWo" :value="wo.id">{{ wo.models?.name }}</option>
+                                </select>
                             </div>
 
                             <div class="md:col-span-3 mt-2">
@@ -95,7 +100,6 @@
 
                     <div v-if="report.currentId" class="bg-white p-6 rounded-lg shadow border-l-4 border-red-500 animate-fade-in">
                         <h3 class="font-bold text-lg mb-4 text-red-800">步驟 2: 不良品紀錄</h3>
-                        
                         <div class="flex flex-col md:flex-row gap-2 mb-6 items-end bg-red-50 p-4 rounded border border-red-100">
                             <div class="flex-1 w-full">
                                 <label class="text-xs font-bold text-gray-500">不良現象</label>
@@ -169,17 +173,13 @@
                             </div>
                             <div class="text-blue-600 font-bold mb-1">{{ rec.work_orders?.wo_number }}</div>
                             <div class="text-gray-600 text-xs mb-2">{{ rec.work_orders?.models?.name }}</div>
-                            
                             <div class="flex justify-between items-center border-t pt-2">
                                 <span class="text-gray-600">投入: <b>{{ rec.input_quantity }}</b></span>
                                 <span v-if="rec.defect_count > 0" class="text-red-600 font-bold bg-red-100 px-2 py-0.5 rounded text-xs">
                                     不良: {{ rec.defect_count }}
                                 </span>
-                                <span v-else class="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs">
-                                    無不良
-                                </span>
+                                <span v-else class="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs">無不良</span>
                             </div>
-                            
                             <button @click.stop="deleteDailyRecord(rec.id)" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-white text-red-400 hover:text-red-600 shadow-sm border px-2 rounded">
                                 <i class="fas fa-trash"></i>
                             </button>
@@ -187,7 +187,6 @@
                         <div v-if="historyList.length === 0" class="text-center text-gray-400 py-10">尚無紀錄</div>
                     </div>
                 </div>
-
             </div>
         </div>
 
@@ -221,13 +220,8 @@
                                 {{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}
                             </td>
                             <td class="p-4 text-center">
-                                <span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" 
-                                      class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold">
-                                    <i class="fas fa-check mr-1"></i>已完成
-                                </span>
-                                <span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">
-                                    生產中
-                                </span>
+                                <span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span>
+                                <span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">生產中</span>
                             </td>
                             <td class="p-4 text-center space-x-2">
                                 <button @click="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button>
@@ -237,29 +231,47 @@
                     </tbody>
                 </table>
             </div>
+            
             <div v-if="showWoModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
-                <div class="bg-white p-6 rounded shadow-lg w-96">
-                    <h3 class="text-xl font-bold mb-4">{{ isEditingWo ? '編輯工單' : '開立新工單' }}</h3>
-                    <div class="space-y-3">
+                <div class="bg-white p-6 rounded shadow-lg w-[500px] max-h-[90vh] overflow-y-auto">
+                    <h3 class="text-xl font-bold mb-4 border-b pb-2">{{ isEditingWo ? '編輯單一工單' : '開立新工單' }}</h3>
+                    
+                    <div class="space-y-4">
                         <div>
-                            <label class="text-xs font-bold text-gray-500">工單號碼</label>
-                            <input v-model="woForm.number" placeholder="例如 C510..." class="w-full border p-2 rounded">
+                            <label class="block text-sm font-bold text-gray-500 mb-1">工單號碼</label>
+                            <input v-model="woForm.number" placeholder="例如 C510..." class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500">
                         </div>
+
                         <div>
-                            <label class="text-xs font-bold text-gray-500">對應機種</label>
-                            <select v-model="woForm.modelId" class="w-full border p-2 rounded">
+                            <label class="block text-sm font-bold text-gray-500 mb-1">預計生產數量</label>
+                            <input v-model="woForm.targetQty" type="number" placeholder="數量" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-bold text-gray-500 mb-2">
+                                {{ isEditingWo ? '對應機種 (編輯模式僅能改單一)' : '選擇生產機種 (可多選)' }}
+                            </label>
+                            
+                            <div v-if="!isEditingWo" class="border rounded p-2 max-h-48 overflow-y-auto bg-gray-50 grid grid-cols-2 gap-2">
+                                <label v-for="m in sortedModels" :key="m.id" class="checkbox-wrapper cursor-pointer">
+                                    <input type="checkbox" :value="m.id" v-model="woForm.selectedModelIds" class="hidden">
+                                    <div class="px-3 py-2 border rounded bg-white hover:bg-gray-100 text-sm font-medium transition text-center">
+                                        {{ m.name }}
+                                        <i v-if="woForm.selectedModelIds.includes(m.id)" class="fas fa-check-circle text-blue-500 ml-1"></i>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <select v-else v-model="woForm.modelId" class="w-full border p-2 rounded bg-gray-100">
                                 <option :value="null" disabled>選擇機種</option>
                                 <option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="text-xs font-bold text-gray-500">預計生產數量</label>
-                            <input v-model="woForm.targetQty" type="number" placeholder="數量" class="w-full border p-2 rounded">
-                        </div>
+
                     </div>
-                    <div class="mt-6 flex justify-end gap-2">
+                    <div class="mt-6 flex justify-end gap-2 border-t pt-4">
                         <button @click="showWoModal = false" class="px-4 py-2 text-gray-600">取消</button>
-                        <button @click="saveWorkOrder" class="px-4 py-2 bg-blue-600 text-white rounded">
+                        <button @click="saveWorkOrder" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold">
                             {{ isEditingWo ? '更新' : '建立' }}
                         </button>
                     </div>
@@ -381,33 +393,45 @@
             const data = ref({ workOrders: [], models: [], defectTypes: [], defectLocations: [] });
 
             // --- 功能 1: 每日報工 (含歷史紀錄) ---
-            const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, inputQty: 0, currentId: null, logs: [] });
+            // selectedWoNumber: 用來暫存第一個下拉選單選到的工單號
+            const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [] });
             const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
             const historyList = ref([]);
 
-            // Computed: 根據選取的 wo_id 自動找到機種名稱
-            const currentReportModelName = computed(() => {
-                if (!report.value.wo_id) return '';
-                const wo = data.value.workOrders.find(w => w.id === report.value.wo_id);
-                return wo ? wo.models?.name : '未知機種';
+            // Computed: 取得不重複的工單號碼 (給第一個下拉選單用)
+            const uniqueWoNumbers = computed(() => {
+                const numbers = data.value.workOrders.map(w => w.wo_number);
+                return [...new Set(numbers)]; // 去除重複
             });
+
+            // Computed: 根據選到的工單號碼，篩選出該號碼底下的所有機種 (給第二個下拉選單用)
+            const availableModelsForSelectedWo = computed(() => {
+                if (!report.value.selectedWoNumber) return [];
+                return data.value.workOrders.filter(w => w.wo_number === report.value.selectedWoNumber);
+            });
+
+            // 當工單號碼改變時，清空機種選擇
+            const onWoNumberChange = () => {
+                report.value.wo_id = null;
+                report.value.currentId = null;
+                report.value.logs = [];
+                report.value.inputQty = 0;
+            };
 
             const loadHistory = async () => {
                 const { data: list, error } = await _supabase.from('daily_production')
                     .select('*, work_orders(wo_number, models(name)), defect_logs(id)')
                     .order('production_date', { ascending: false })
                     .limit(50);
-                
                 if (list) {
-                    historyList.value = list.map(item => ({
-                        ...item,
-                        defect_count: item.defect_logs.length
-                    }));
+                    historyList.value = list.map(item => ({ ...item, defect_count: item.defect_logs.length }));
                 }
             };
 
             const loadRecordForEdit = async (rec) => {
                 report.value.date = rec.production_date;
+                // 反向設定：先設工單號，再設 ID
+                report.value.selectedWoNumber = rec.work_orders.wo_number;
                 report.value.wo_id = rec.wo_id;
                 await fetchDailyRecord();
             };
@@ -430,7 +454,7 @@
             };
 
             const saveDailyInput = async () => {
-                if (!report.value.wo_id) return alert("請先選擇工單");
+                if (!report.value.wo_id) return alert("請先選擇工單與機種");
                 loading.value = true;
                 try {
                     if (report.value.currentId) {
@@ -457,12 +481,7 @@
                     defectForm.value.qty = 1;
                 } catch (e) { alert("新增失敗"); } finally { loading.value = false; }
             };
-            const deleteDefect = async (id) => { 
-                if(!confirm("確定刪除此紀錄？")) return; 
-                await _supabase.from('defect_logs').delete().eq('id', id); 
-                await fetchDailyRecord(); 
-                await loadHistory();
-            };
+            const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); };
 
             const deleteDailyRecord = async (id) => {
                 if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return;
@@ -471,56 +490,70 @@
                 await _supabase.from('daily_production').delete().eq('id', id);
                 await loadHistory();
                 await loadBaseData();
-                if (report.value.currentId === id) {
-                    report.value.currentId = null;
-                    report.value.logs = [];
-                    report.value.inputQty = 0;
-                }
+                if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; }
                 loading.value = false;
             };
 
-            // --- 功能 2: 工單管理 ---
-            const woForm = ref({ id: null, number: '', modelId: null, targetQty: '' });
+            // --- 功能 2: 工單管理 (新增多選邏輯) ---
+            // woForm 改為 array selectedModelIds
+            const woForm = ref({ id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' });
             const isEditingWo = ref(false);
 
             const openWoModal = (wo = null) => {
                 if (wo) {
                     isEditingWo.value = true;
-                    woForm.value = { id: wo.id, number: wo.wo_number, modelId: wo.model_id, targetQty: wo.target_quantity };
+                    // 編輯模式還是單一處理
+                    woForm.value = { id: wo.id, number: wo.wo_number, modelId: wo.model_id, selectedModelIds: [], targetQty: wo.target_quantity };
                 } else {
                     isEditingWo.value = false;
-                    woForm.value = { id: null, number: '', modelId: null, targetQty: '' };
+                    woForm.value = { id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' };
                 }
                 showWoModal.value = true;
             };
 
             const saveWorkOrder = async () => {
-                const { id, number, modelId, targetQty } = woForm.value;
-                if (!number || !modelId) return alert("資料不完整");
-                const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === modelId && w.id !== id);
-                if (isDuplicate) return alert(`錯誤：工單 ${number} 已經建立過該機種，請勿重複建立！`);
+                const { id, number, modelId, selectedModelIds, targetQty } = woForm.value;
+                if (!number || !targetQty) return alert("請填寫工單號碼與數量");
 
                 loading.value = true;
                 try {
                     if (isEditingWo.value && id) {
-                        const { error } = await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty || 0 }).eq('id', id);
+                        // 編輯模式 (單一更新)
+                        if (!modelId) return alert("請選擇機種");
+                        const { error } = await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty }).eq('id', id);
                         if (error) throw error;
                     } else {
-                        const { error } = await _supabase.from('work_orders').insert({ wo_number: number, model_id: modelId, target_quantity: targetQty || 0, is_closed: false });
-                        if (error) throw error;
+                        // 新增模式 (支援多選)
+                        if (selectedModelIds.length === 0) return alert("請至少勾選一個機種");
+                        
+                        // 迴圈建立多筆資料
+                        for (const mId of selectedModelIds) {
+                            // 檢查重複
+                            const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === mId);
+                            if (isDuplicate) {
+                                console.warn(`工單 ${number} - 機種 ID ${mId} 已存在，跳過建立`);
+                                continue; 
+                            }
+                            
+                            const { error } = await _supabase.from('work_orders').insert({ 
+                                wo_number: number, 
+                                model_id: mId, 
+                                target_quantity: targetQty, 
+                                is_closed: false 
+                            });
+                            if (error) throw error;
+                        }
                     }
                     showWoModal.value = false;
                     loadBaseData();
+                    alert(isEditingWo.value ? "更新成功" : "工單已建立");
                 } catch (e) { alert("操作失敗: " + e.message); } finally { loading.value = false; }
             };
 
             const deleteWorkOrder = async (id) => {
                 if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return;
                 loading.value = true;
-                try {
-                    await _supabase.from('work_orders').delete().eq('id', id);
-                    loadBaseData();
-                } catch (e) { alert("刪除失敗"); } finally { loading.value = false; }
+                try { await _supabase.from('work_orders').delete().eq('id', id); loadBaseData(); } catch (e) { alert("刪除失敗"); } finally { loading.value = false; }
             };
 
             // --- 功能 3: 統計 ---
@@ -530,11 +563,7 @@
             const calculateStats = async () => {
                 loading.value = true;
                 try {
-                    let query = _supabase.from('daily_production').select(`
-                        id, production_date, input_quantity,
-                        work_orders!inner (id, wo_number, model_id, models(name)),
-                        defect_logs (quantity, defect_types(name), defect_locations(code))
-                    `);
+                    let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`);
                     if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start);
                     if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end);
                     const { data: rows } = await query;
@@ -547,10 +576,8 @@
                         totalInput += day.input_quantity;
                         day.defect_logs.forEach(log => {
                             totalDefects += log.quantity;
-                            const tName = log.defect_types?.name || 'Unknown';
-                            typeMap[tName] = (typeMap[tName] || 0) + log.quantity;
-                            const lCode = log.defect_locations?.code || 'Unknown';
-                            locMap[lCode] = (locMap[lCode] || 0) + log.quantity;
+                            const tName = log.defect_types?.name || 'Unknown'; typeMap[tName] = (typeMap[tName] || 0) + log.quantity;
+                            const lCode = log.defect_locations?.code || 'Unknown'; locMap[lCode] = (locMap[lCode] || 0) + log.quantity;
                         });
                     });
                     const byType = Object.entries(typeMap).map(([name, qty]) => ({ name, qty, ratio: totalDefects ? (qty/totalDefects*100).toFixed(1) : 0 })).sort((a,b) => b.qty - a.qty);
@@ -561,23 +588,9 @@
 
             const exportToExcel = () => {
                 if (!statsResult.value) return alert("請先執行統計");
-                const combinedData = [];
-                combinedData.push(["=== 總結報告 ==="]);
-                combinedData.push(["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`]);
-                combinedData.push(["總投入數", statsResult.value.totalInput]);
-                combinedData.push(["總不良數", statsResult.value.totalDefects]);
-                combinedData.push(["良率", `${statsResult.value.yieldRate}%`]);
-                combinedData.push([]); 
-                combinedData.push(["=== 不良現象分析 ==="]);
-                combinedData.push(["不良現象", "數量", "佔比"]);
-                statsResult.value.byType.forEach(d => { combinedData.push([d.name, d.qty, `${d.ratio}%`]); });
-                combinedData.push([]); 
-                combinedData.push(["=== 位置異常分析 ==="]);
-                combinedData.push(["位置", "數量"]);
-                statsResult.value.byLocation.forEach(d => { combinedData.push([d.code, d.qty]); });
+                const combinedData = [["=== 總結報告 ==="], ["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], ["總投入數", statsResult.value.totalInput], ["總不良數", statsResult.value.totalDefects], ["良率", `${statsResult.value.yieldRate}%`], [], ["=== 不良現象分析 ==="], ["不良現象", "數量", "佔比"], ...statsResult.value.byType.map(d => [d.name, d.qty, `${d.ratio}%`]), [], ["=== 位置異常分析 ==="], ["位置", "數量"], ...statsResult.value.byLocation.map(d => [d.code, d.qty])];
                 const wb = XLSX.utils.book_new();
-                const ws = XLSX.utils.aoa_to_sheet(combinedData);
-                XLSX.utils.book_append_sheet(wb, ws, "SMT完整報告");
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(combinedData), "SMT完整報告");
                 XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
             };
 
@@ -642,11 +655,10 @@
             return {
                 currentTab, loading, showWoModal, data,
                 report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory,
-                woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder,
+                woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, onWoNumberChange,
                 statsFilter, statsResult, calculateStats, exportToExcel,
                 settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
-                sortedModels, sortedDefectTypes, sortedLocations,
-                currentReportModelName // 新增的 computed
+                sortedModels, sortedDefectTypes, sortedLocations, uniqueWoNumbers, availableModelsForSelectedWo
             };
         }
     }).mount('#app');

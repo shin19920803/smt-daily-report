@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMT 生產管理系統 (v5.0 FPY Added)</title>
+    <title>SMT 生產管理系統 (v5.1 FPY Export Fix)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -26,7 +26,7 @@
     <aside class="w-64 bg-slate-900 text-white flex flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v5.0 FPY Added</p>
+            <p class="text-xs text-slate-400 mt-1">v5.1 FPY Export Fix</p>
         </div>
         <nav class="flex-1 py-6 space-y-2">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -239,7 +239,7 @@
             const data = ref({ workOrders: [], models: [], defectTypes: [], defectLocations: [] });
             const uniqueWoNumbers = computed(() => [...new Set(data.value.workOrders.map(w => w.wo_number))]);
 
-            // --- FPY Logic (New) ---
+            // --- FPY Logic (Updated Export) ---
             const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '' });
             const fpyHistory = ref([]);
             const fpyFilter = ref({ start: '', end: '' });
@@ -272,21 +272,45 @@
             const loadFpyForEdit = (rec) => { fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate }; };
             const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); };
             
+            // --- UPDATED EXPORT FUNCTION ---
             const exportFpyData = async () => {
                 loading.value = true;
                 try {
                     let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))');
                     if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start);
                     if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end);
-                    const { data: rows } = await query;
-                    
-                    const excelData = [["日期", "工單號碼", "機種", "SPI 直通率(%)", "AOI 直通率(%)"]];
-                    (rows || []).forEach(r => excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate, r.aoi_rate]));
-                    
+
+                    const { data: rows, error } = await query;
+                    if(error) throw error;
+
+                    // 1. Sorting: Work Order (A-Z) -> Date (Old-New)
+                    rows.sort((a, b) => {
+                        const woA = a.work_orders.wo_number;
+                        const woB = b.work_orders.wo_number;
+                        if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB);
+                        return new Date(a.production_date) - new Date(b.production_date);
+                    });
+
+                    // 2. Formatting: Add %
+                    const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]];
+                    rows.forEach(r => {
+                        excelData.push([
+                            r.production_date,
+                            r.work_orders.wo_number,
+                            r.work_orders.models.name,
+                            r.spi_rate ? `${r.spi_rate}%` : '0%', // Add %
+                            r.aoi_rate ? `${r.aoi_rate}%` : '0%'  // Add %
+                        ]);
+                    });
+
                     const wb = XLSX.utils.book_new();
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report");
                     XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
-                } catch(e) { alert("導出失敗"); } finally { loading.value = false; }
+                } catch(e) {
+                    alert("導出失敗: " + e.message);
+                } finally {
+                    loading.value = false;
+                }
             };
 
             // --- Existing Logic (Unchanged) ---
@@ -333,7 +357,7 @@
                 woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, onWoNumberChange,
                 statsFilter, statsResult, calculateStats, exportToExcel,
                 rawExportFilter, exportRawData,
-                fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, loadFpyForEdit, deleteFpy, exportFpyData, // New FPY exports
+                fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, loadFpyForEdit, deleteFpy, exportFpyData,
                 settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
                 sortedModels, sortedDefectTypes, sortedLocations, uniqueWoNumbers, availableModelsForSelectedWo
             };

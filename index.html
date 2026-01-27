@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMT 生產管理系統 (v5.1 FPY Export Fix)</title>
+    <title>SMT 生產管理系統 (v6.0 Calendar Ultimate)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -17,6 +17,14 @@
         th { position: sticky; top: 0; background-color: #f3f4f6; z-index: 10; }
         .selected-row { background-color: #eff6ff; border-left: 4px solid #2563eb; }
         .checkbox-wrapper input:checked + div { background-color: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
+        
+        /* 行事曆樣式 */
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+        .calendar-cell { min-height: 100px; background: white; border: 1px solid #e5e7eb; padding: 4px; font-size: 0.75rem; transition: all 0.2s; cursor: pointer; }
+        .calendar-cell:hover { background-color: #f9fafb; }
+        .calendar-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: bold; padding-bottom: 8px; color: #4b5563; }
+        .prod-tag { margin-bottom: 2px; padding: 2px 4px; border-radius: 4px; background-color: #dbeafe; color: #1e40af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .prod-tag.highlight { background-color: #fca5a5; color: #7f1d1d; border: 1px solid #ef4444; font-weight: bold; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans h-screen flex overflow-hidden">
@@ -26,7 +34,7 @@
     <aside class="w-64 bg-slate-900 text-white flex flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v5.1 FPY Export Fix</p>
+            <p class="text-xs text-slate-400 mt-1">v6.0 Calendar</p>
         </div>
         <nav class="flex-1 py-6 space-y-2">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -55,37 +63,16 @@
 
         <div v-if="currentTab === 'report'" class="max-w-6xl mx-auto space-y-6 animate-fade-in">
             <h2 class="text-2xl font-bold text-gray-700 border-b pb-2"><i class="fas fa-edit mr-2"></i>每日生產日報表</h2>
-
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lg:col-span-2 space-y-6">
                     <div class="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500 relative">
-                        <div v-if="report.currentId" class="absolute top-2 right-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">
-                            <i class="fas fa-pen mr-1"></i>編輯模式
-                        </div>
+                        <div v-if="report.currentId" class="absolute top-2 right-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded"><i class="fas fa-pen mr-1"></i>編輯模式</div>
                         <h3 class="font-bold text-lg mb-4 text-blue-800">步驟 1: 設定今日生產數據</h3>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <div><label class="block text-sm font-bold mb-1 text-gray-500">生產日期</label><input type="date" v-model="report.date" @change="fetchDailyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div>
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label>
-                                <select v-model="report.selectedWoNumber" @change="onWoNumberChange" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-mono text-blue-800 font-bold">
-                                    <option :value="null" disabled>-- 請選擇工單 --</option>
-                                    <option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label>
-                                <select v-model="report.wo_id" @change="fetchDailyRecord" :disabled="!report.selectedWoNumber" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-bold">
-                                    <option :value="null" disabled>-- 請選擇機種 --</option>
-                                    <option v-for="wo in availableModelsForSelectedWo" :value="wo.id">{{ wo.models?.name }}</option>
-                                </select>
-                            </div>
-                            <div class="md:col-span-3 mt-2">
-                                <label class="block text-sm font-bold mb-1 text-gray-500">當日投入總數</label>
-                                <div class="flex">
-                                    <input type="number" v-model="report.inputQty" class="w-full border p-2 rounded-l focus:ring-2 focus:ring-blue-500 text-lg" placeholder="0">
-                                    <button @click="saveDailyInput" class="bg-blue-600 text-white px-6 rounded-r hover:bg-blue-700 whitespace-nowrap font-bold"><i class="fas fa-save mr-1"></i> {{ report.currentId ? '更新投入數' : '建立新紀錄' }}</button>
-                                </div>
-                            </div>
+                            <div><label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label><select v-model="report.selectedWoNumber" @change="onWoNumberChange" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-mono text-blue-800 font-bold"><option :value="null" disabled>-- 請選擇工單 --</option><option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option></select></div>
+                            <div><label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label><select v-model="report.wo_id" @change="fetchDailyRecord" :disabled="!report.selectedWoNumber" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-bold"><option :value="null" disabled>-- 請選擇機種 --</option><option v-for="wo in availableModelsForSelectedWo" :value="wo.id">{{ wo.models?.name }}</option></select></div>
+                            <div class="md:col-span-3 mt-2"><label class="block text-sm font-bold mb-1 text-gray-500">當日投入總數</label><div class="flex"><input type="number" v-model="report.inputQty" class="w-full border p-2 rounded-l focus:ring-2 focus:ring-blue-500 text-lg" placeholder="0"><button @click="saveDailyInput" class="bg-blue-600 text-white px-6 rounded-r hover:bg-blue-700 whitespace-nowrap font-bold"><i class="fas fa-save mr-1"></i> {{ report.currentId ? '更新投入數' : '建立新紀錄' }}</button></div></div>
                         </div>
                     </div>
                     <div v-if="report.currentId" class="bg-white p-6 rounded-lg shadow border-l-4 border-red-500 animate-fade-in">
@@ -124,40 +111,14 @@
                         <div v-if="fpyForm.id" class="absolute top-2 right-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded"><i class="fas fa-pen mr-1"></i>編輯模式</div>
                         <h3 class="font-bold text-lg mb-4 text-purple-800">輸入今日直通率</h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">生產日期</label>
-                                <input type="date" v-model="fpyForm.date" @change="fetchFpyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-purple-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label>
-                                <select v-model="fpyForm.selectedWoNumber" @change="fetchFpyRecord" class="w-full border p-2 rounded bg-white font-mono text-blue-800 font-bold">
-                                    <option :value="null" disabled>-- 請選擇工單 --</option>
-                                    <option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option>
-                                </select>
-                            </div>
-                            <div class="md:col-span-2">
-                                <label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label>
-                                <select v-model="fpyForm.wo_id" @change="fetchFpyRecord" :disabled="!fpyForm.selectedWoNumber" class="w-full border p-2 rounded bg-white font-bold">
-                                    <option :value="null" disabled>-- 請選擇機種 --</option>
-                                    <option v-for="wo in availableModelsForFpy" :value="wo.id">{{ wo.models?.name }}</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">SPI 直通率 (%)</label>
-                                <input type="number" step="0.01" v-model="fpyForm.spi" class="w-full border p-2 rounded text-lg font-bold text-center" placeholder="99.5">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">AOI 直通率 (%)</label>
-                                <input type="number" step="0.01" v-model="fpyForm.aoi" class="w-full border p-2 rounded text-lg font-bold text-center" placeholder="98.5">
-                            </div>
+                            <div><label class="block text-sm font-bold mb-1 text-gray-500">生產日期</label><input type="date" v-model="fpyForm.date" @change="fetchFpyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-purple-500"></div>
+                            <div><label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label><select v-model="fpyForm.selectedWoNumber" @change="fetchFpyRecord" class="w-full border p-2 rounded bg-white font-mono text-blue-800 font-bold"><option :value="null" disabled>-- 請選擇工單 --</option><option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option></select></div>
+                            <div class="md:col-span-2"><label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label><select v-model="fpyForm.wo_id" @change="fetchFpyRecord" :disabled="!fpyForm.selectedWoNumber" class="w-full border p-2 rounded bg-white font-bold"><option :value="null" disabled>-- 請選擇機種 --</option><option v-for="wo in availableModelsForFpy" :value="wo.id">{{ wo.models?.name }}</option></select></div>
+                            <div><label class="block text-sm font-bold mb-1 text-gray-500">SPI 直通率 (%)</label><input type="number" step="0.01" v-model="fpyForm.spi" class="w-full border p-2 rounded text-lg font-bold text-center" placeholder="99.5"></div>
+                            <div><label class="block text-sm font-bold mb-1 text-gray-500">AOI 直通率 (%)</label><input type="number" step="0.01" v-model="fpyForm.aoi" class="w-full border p-2 rounded text-lg font-bold text-center" placeholder="98.5"></div>
                         </div>
-                        <div class="text-right mt-4">
-                            <button @click="saveFpy" class="bg-purple-600 text-white px-8 py-2 rounded shadow hover:bg-purple-700 font-bold">
-                                <i class="fas fa-save mr-1"></i> {{ fpyForm.id ? '更新數據' : '儲存數據' }}
-                            </button>
-                        </div>
+                        <div class="text-right mt-4"><button @click="saveFpy" class="bg-purple-600 text-white px-8 py-2 rounded shadow hover:bg-purple-700 font-bold"><i class="fas fa-save mr-1"></i> {{ fpyForm.id ? '更新數據' : '儲存數據' }}</button></div>
                     </div>
-                    
                     <div class="bg-gray-800 text-white p-6 rounded-lg shadow-lg mt-8">
                         <h3 class="font-bold text-lg mb-4 text-green-400"><i class="fas fa-file-excel mr-2"></i>直通率報表導出</h3>
                         <div class="flex flex-wrap gap-4 items-end">
@@ -167,36 +128,132 @@
                         </div>
                     </div>
                 </div>
-
                 <div class="bg-white rounded-lg shadow overflow-hidden flex flex-col h-[600px]">
                      <div class="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between items-center"><span><i class="fas fa-list mr-2"></i>近期直通率</span><button @click="loadFpyHistory" class="text-blue-600 text-sm hover:underline"><i class="fas fa-sync"></i> 刷新</button></div>
-                     <div class="overflow-y-auto flex-1 p-2 space-y-2">
-                         <div v-for="rec in fpyHistory" :key="rec.id" @click="loadFpyForEdit(rec)" class="p-3 border rounded cursor-pointer hover:shadow transition text-sm group relative" :class="fpyForm.id === rec.id ? 'border-purple-500 bg-purple-50' : 'bg-white'">
-                             <div class="flex justify-between items-start mb-1"><span class="font-bold text-gray-800">{{ rec.production_date }}</span></div>
-                             <div class="text-blue-600 font-bold">{{ rec.work_orders?.wo_number }}</div>
-                             <div class="text-gray-600 text-xs mb-2">{{ rec.work_orders?.models?.name }}</div>
-                             <div class="grid grid-cols-2 gap-2 text-center text-xs">
-                                 <div class="bg-gray-100 p-1 rounded">SPI: <b class="text-green-600">{{ rec.spi_rate }}%</b></div>
-                                 <div class="bg-gray-100 p-1 rounded">AOI: <b class="text-blue-600">{{ rec.aoi_rate }}%</b></div>
-                             </div>
-                             <button @click.stop="deleteFpy(rec.id)" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-white text-red-400 hover:text-red-600 shadow-sm border px-2 rounded"><i class="fas fa-trash"></i></button>
-                         </div>
-                     </div>
+                     <div class="overflow-y-auto flex-1 p-2 space-y-2"><div v-for="rec in fpyHistory" :key="rec.id" @click="loadFpyForEdit(rec)" class="p-3 border rounded cursor-pointer hover:shadow transition text-sm group relative" :class="fpyForm.id === rec.id ? 'border-purple-500 bg-purple-50' : 'bg-white'"><div class="flex justify-between items-start mb-1"><span class="font-bold text-gray-800">{{ rec.production_date }}</span></div><div class="text-blue-600 font-bold">{{ rec.work_orders?.wo_number }}</div><div class="text-gray-600 text-xs mb-2">{{ rec.work_orders?.models?.name }}</div><div class="grid grid-cols-2 gap-2 text-center text-xs"><div class="bg-gray-100 p-1 rounded">SPI: <b class="text-green-600">{{ rec.spi_rate }}%</b></div><div class="bg-gray-100 p-1 rounded">AOI: <b class="text-blue-600">{{ rec.aoi_rate }}%</b></div></div><button @click.stop="deleteFpy(rec.id)" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-white text-red-400 hover:text-red-600 shadow-sm border px-2 rounded"><i class="fas fa-trash"></i></button></div></div>
                 </div>
             </div>
         </div>
 
-        <div v-if="currentTab === 'orders'" class="max-w-6xl mx-auto animate-fade-in">
-            <div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-bold text-gray-700"><i class="fas fa-clipboard-list mr-2"></i>工單管理</h2><button @click="openWoModal()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i> 開立新工單</button></div>
-            <div class="bg-white rounded shadow overflow-hidden">
-                <table class="w-full text-left border-collapse"><thead class="bg-gray-100 text-gray-600 uppercase text-sm"><tr><th class="p-4 border-b">工單號碼</th><th class="p-4 border-b">機種</th><th class="p-4 border-b text-right">預計數量</th><th class="p-4 border-b text-right">已生產</th><th class="p-4 border-b text-right">剩餘數量</th><th class="p-4 border-b text-center">狀態</th><th class="p-4 border-b text-center">操作</th></tr></thead><tbody><tr v-for="wo in data.workOrders" :key="wo.id" class="hover:bg-gray-50 border-b group"><td class="p-4 font-bold text-blue-600">{{ wo.wo_number }}</td><td class="p-4 text-sm">{{ wo.models?.name }}</td><td class="p-4 text-right">{{ wo.target_quantity }}</td><td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td><td class="p-4 text-right font-bold" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 ? 'text-green-600' : 'text-orange-500'">{{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}</td><td class="p-4 text-center"><span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span><span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">生產中</span></td><td class="p-4 text-center space-x-2"><button @click="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button><button @click="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button></td></tr></tbody></table>
+        <div v-if="currentTab === 'orders'" class="max-w-6xl mx-auto space-y-6 animate-fade-in">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-2 gap-4">
+                <h2 class="text-2xl font-bold text-gray-700"><i class="fas fa-clipboard-list mr-2"></i>工單管理</h2>
+                <div class="flex gap-2 w-full md:w-auto">
+                    <div class="relative flex-1 md:w-64">
+                        <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                        <input v-model="orderSearch" placeholder="搜尋工單號或機種..." class="w-full border p-2 pl-10 rounded shadow-sm focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <button @click="openWoModal()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 whitespace-nowrap">
+                        <i class="fas fa-plus mr-1"></i> 新增工單
+                    </button>
+                </div>
             </div>
+
+            <div class="bg-white rounded shadow overflow-x-auto max-h-[400px] overflow-y-auto">
+                <table class="w-full text-left border-collapse relative">
+                    <thead class="bg-gray-100 text-gray-600 uppercase text-sm">
+                        <tr>
+                            <th class="p-4 border-b z-10">工單號碼</th>
+                            <th class="p-4 border-b z-10">機種</th>
+                            <th class="p-4 border-b text-right z-10">預計</th>
+                            <th class="p-4 border-b text-right z-10">已做</th>
+                            <th class="p-4 border-b text-right z-10">剩餘</th>
+                            <th class="p-4 border-b text-center z-10">狀態</th>
+                            <th class="p-4 border-b text-center z-10">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="wo in filteredWorkOrders" :key="wo.id" 
+                            @click="selectWoForCalendar(wo)"
+                            class="hover:bg-gray-50 border-b cursor-pointer transition"
+                            :class="{'bg-yellow-50 border-l-4 border-yellow-500': selectedWoId === wo.id}">
+                            
+                            <td class="p-4 font-bold text-blue-600">{{ wo.wo_number }}</td>
+                            <td class="p-4 text-sm">{{ wo.models?.name }}</td>
+                            <td class="p-4 text-right text-gray-500">{{ wo.target_quantity }}</td>
+                            <td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td>
+                            <td class="p-4 text-right font-bold" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 ? 'text-green-600' : 'text-orange-500'">
+                                {{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}
+                            </td>
+                            <td class="p-4 text-center">
+                                <span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span>
+                                <span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">生產中</span>
+                            </td>
+                            <td class="p-4 text-center space-x-2">
+                                <button @click.stop="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button>
+                                <button @click.stop="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button>
+                            </td>
+                        </tr>
+                        <tr v-if="filteredWorkOrders.length === 0">
+                            <td colspan="7" class="p-8 text-center text-gray-400">找不到相符的工單</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="bg-white rounded shadow p-4 mt-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-700">
+                        <i class="fas fa-calendar-alt mr-2 text-indigo-500"></i>生產行事曆
+                        <span class="text-sm font-normal text-gray-500 ml-2">(點選上方工單可查看排程)</span>
+                    </h3>
+                    <div class="flex items-center gap-4">
+                        <button @click="changeMonth(-1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-left"></i></button>
+                        <span class="font-bold text-lg min-w-[120px] text-center">{{ calendarYear }} 年 {{ calendarMonth + 1 }} 月</span>
+                        <button @click="changeMonth(1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+
+                <div class="calendar-header">
+                    <div class="text-red-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-500">六</div>
+                </div>
+                <div class="calendar-grid">
+                    <div v-for="n in calendarPadding" :key="'pad-'+n" class="bg-gray-50"></div>
+                    
+                    <div v-for="day in calendarDays" :key="day.dateStr" 
+                         @click="openDayDetail(day)"
+                         class="calendar-cell flex flex-col">
+                        
+                        <div class="text-right text-gray-500 font-bold mb-1" :class="{'text-blue-600': isToday(day.dateStr)}">
+                            {{ day.dayNum }}
+                        </div>
+
+                        <div v-for="prod in day.productions" :key="prod.id" 
+                             class="prod-tag text-xs"
+                             :class="{'highlight': selectedWoId === prod.wo_id}"
+                             :title="prod.wo_number + ' : ' + prod.qty">
+                            {{ prod.qty }} <span class="text-[10px] opacity-75">({{ prod.wo_number.slice(-4) }})</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div v-if="showWoModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
                 <div class="bg-white p-6 rounded shadow-lg w-[500px] max-h-[90vh] overflow-y-auto">
                     <h3 class="text-xl font-bold mb-4 border-b pb-2">{{ isEditingWo ? '編輯單一工單' : '開立新工單' }}</h3>
                     <div class="space-y-4"><div><label class="block text-sm font-bold text-gray-500 mb-1">工單號碼</label><input v-model="woForm.number" placeholder="例如 C510..." class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div><div><label class="block text-sm font-bold text-gray-500 mb-1">預計生產數量</label><input v-model="woForm.targetQty" type="number" placeholder="數量" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div><div><label class="block text-sm font-bold text-gray-500 mb-2">{{ isEditingWo ? '對應機種 (編輯模式僅能改單一)' : '選擇生產機種 (可多選)' }}</label><div v-if="!isEditingWo" class="border rounded p-2 max-h-48 overflow-y-auto bg-gray-50 grid grid-cols-2 gap-2"><label v-for="m in sortedModels" :key="m.id" class="checkbox-wrapper cursor-pointer"><input type="checkbox" :value="m.id" v-model="woForm.selectedModelIds" class="hidden"><div class="px-3 py-2 border rounded bg-white hover:bg-gray-100 text-sm font-medium transition text-center">{{ m.name }}<i v-if="woForm.selectedModelIds.includes(m.id)" class="fas fa-check-circle text-blue-500 ml-1"></i></div></label></div><select v-else v-model="woForm.modelId" class="w-full border p-2 rounded bg-gray-100"><option :value="null" disabled>選擇機種</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select></div></div><div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showWoModal = false" class="px-4 py-2 text-gray-600">取消</button><button @click="saveWorkOrder" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold">{{ isEditingWo ? '更新' : '建立' }}</button></div>
                 </div>
             </div>
+
+            <div v-if="dayDetailModal.show" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
+                <div class="bg-white p-6 rounded shadow-lg w-96">
+                    <h3 class="text-xl font-bold mb-4 text-center border-b pb-2">{{ dayDetailModal.date }} 生產明細</h3>
+                    <div class="space-y-3 max-h-64 overflow-y-auto">
+                        <div v-for="p in dayDetailModal.list" :key="p.id" class="p-3 bg-gray-50 rounded border border-gray-200">
+                            <div class="flex justify-between font-bold text-blue-600">
+                                <span>{{ p.wo_number }}</span>
+                                <span>{{ p.qty }} pcs</span>
+                            </div>
+                            <div class="text-sm text-gray-600 mt-1">{{ p.model_name }}</div>
+                        </div>
+                        <div v-if="dayDetailModal.list.length === 0" class="text-center text-gray-400 py-4">本日無生產紀錄</div>
+                    </div>
+                    <div class="mt-4 text-center">
+                        <button @click="dayDetailModal.show = false" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700">關閉</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <div v-if="currentTab === 'stats'" class="max-w-6xl mx-auto animate-fade-in">
@@ -224,7 +281,7 @@
 </div>
 
 <script>
-    const { createApp, ref, computed, onMounted } = Vue;
+    const { createApp, ref, computed, onMounted, watch } = Vue;
     const { createClient } = supabase;
 
     const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co'; 
@@ -239,85 +296,12 @@
             const data = ref({ workOrders: [], models: [], defectTypes: [], defectLocations: [] });
             const uniqueWoNumbers = computed(() => [...new Set(data.value.workOrders.map(w => w.wo_number))]);
 
-            // --- FPY Logic (Updated Export) ---
-            const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '' });
-            const fpyHistory = ref([]);
-            const fpyFilter = ref({ start: '', end: '' });
-
-            const availableModelsForFpy = computed(() => !fpyForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === fpyForm.value.selectedWoNumber));
-
-            const fetchFpyRecord = async () => {
-                if (!fpyForm.value.wo_id || !fpyForm.value.date) return;
-                loading.value = true;
-                fpyForm.value.id = null; fpyForm.value.spi = ''; fpyForm.value.aoi = '';
-                try {
-                    const { data: rec } = await _supabase.from('daily_fpy').select('*').eq('wo_id', fpyForm.value.wo_id).eq('production_date', fpyForm.value.date).maybeSingle();
-                    if (rec) { fpyForm.value.id = rec.id; fpyForm.value.spi = rec.spi_rate; fpyForm.value.aoi = rec.aoi_rate; }
-                } catch(e) { console.error(e); } finally { loading.value = false; }
-            };
-            const saveFpy = async () => {
-                if (!fpyForm.value.wo_id || !fpyForm.value.spi || !fpyForm.value.aoi) return alert("請填寫完整");
-                loading.value = true;
-                try {
-                    const payload = { wo_id: fpyForm.value.wo_id, production_date: fpyForm.value.date, spi_rate: fpyForm.value.spi, aoi_rate: fpyForm.value.aoi };
-                    if (fpyForm.value.id) await _supabase.from('daily_fpy').update(payload).eq('id', fpyForm.value.id);
-                    else await _supabase.from('daily_fpy').insert(payload);
-                    await loadFpyHistory(); alert("儲存成功");
-                } catch(e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; }
-            };
-            const loadFpyHistory = async () => {
-                const { data: list } = await _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').order('production_date', {ascending:false}).limit(50);
-                if (list) fpyHistory.value = list;
-            };
-            const loadFpyForEdit = (rec) => { fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate }; };
-            const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); };
-            
-            // --- UPDATED EXPORT FUNCTION ---
-            const exportFpyData = async () => {
-                loading.value = true;
-                try {
-                    let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))');
-                    if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start);
-                    if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end);
-
-                    const { data: rows, error } = await query;
-                    if(error) throw error;
-
-                    // 1. Sorting: Work Order (A-Z) -> Date (Old-New)
-                    rows.sort((a, b) => {
-                        const woA = a.work_orders.wo_number;
-                        const woB = b.work_orders.wo_number;
-                        if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB);
-                        return new Date(a.production_date) - new Date(b.production_date);
-                    });
-
-                    // 2. Formatting: Add %
-                    const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]];
-                    rows.forEach(r => {
-                        excelData.push([
-                            r.production_date,
-                            r.work_orders.wo_number,
-                            r.work_orders.models.name,
-                            r.spi_rate ? `${r.spi_rate}%` : '0%', // Add %
-                            r.aoi_rate ? `${r.aoi_rate}%` : '0%'  // Add %
-                        ]);
-                    });
-
-                    const wb = XLSX.utils.book_new();
-                    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report");
-                    XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
-                } catch(e) {
-                    alert("導出失敗: " + e.message);
-                } finally {
-                    loading.value = false;
-                }
-            };
-
-            // --- Existing Logic (Unchanged) ---
+            // --- Report Logic ---
             const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [] });
             const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
             const historyList = ref([]);
             const rawExportFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
+
             const availableModelsForSelectedWo = computed(() => !report.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === report.value.selectedWoNumber));
             const onWoNumberChange = () => { report.value.wo_id = null; report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; };
             const loadHistory = async () => { const { data: list } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(id)').order('production_date', { ascending: false }).limit(50); if (list) historyList.value = list.map(item => ({ ...item, defect_count: item.defect_logs.length })); };
@@ -328,11 +312,104 @@
             const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); };
             const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; } loading.value = false; };
             const exportRawData = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, models (name), model_id, id), defect_logs (quantity, defect_types (name), defect_locations (code))`); if (rawExportFilter.value.start) query = query.gte('production_date', rawExportFilter.value.start); if (rawExportFilter.value.end) query = query.lte('production_date', rawExportFilter.value.end); const { data: rows, error } = await query; if (error) throw error; let filtered = rows || []; if (rawExportFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == rawExportFilter.value.modelId); if (rawExportFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == rawExportFilter.value.woId); const excelData = []; excelData.push(["日期", "工單號碼", "機種", "當日投入數", "不良現象", "不良位置", "不良數量"]); filtered.forEach(row => { const date = row.production_date; const wo = row.work_orders.wo_number; const model = row.work_orders.models.name; const input = row.input_quantity; if (row.defect_logs && row.defect_logs.length > 0) { row.defect_logs.forEach(log => { excelData.push([ date, wo, model, input, log.defect_types?.name || '', log.defect_locations?.code || '', log.quantity ]); }); } else { excelData.push([date, wo, model, input, "無不良", "", 0]); } }); const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(excelData); XLSX.utils.book_append_sheet(wb, ws, "Raw Data"); XLSX.writeFile(wb, `SMT_Raw_Data_${new Date().toISOString().slice(0,10)}.xlsx`); } catch (e) { alert("導出失敗: " + e.message); } finally { loading.value = false; } };
+
+            // --- FPY Logic ---
+            const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '' });
+            const fpyHistory = ref([]);
+            const fpyFilter = ref({ start: '', end: '' });
+            const availableModelsForFpy = computed(() => !fpyForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === fpyForm.value.selectedWoNumber));
+            const fetchFpyRecord = async () => { if (!fpyForm.value.wo_id || !fpyForm.value.date) return; loading.value = true; fpyForm.value.id = null; fpyForm.value.spi = ''; fpyForm.value.aoi = ''; try { const { data: rec } = await _supabase.from('daily_fpy').select('*').eq('wo_id', fpyForm.value.wo_id).eq('production_date', fpyForm.value.date).maybeSingle(); if (rec) { fpyForm.value.id = rec.id; fpyForm.value.spi = rec.spi_rate; fpyForm.value.aoi = rec.aoi_rate; } } catch(e) { console.error(e); } finally { loading.value = false; } };
+            const saveFpy = async () => { if (!fpyForm.value.wo_id || !fpyForm.value.spi || !fpyForm.value.aoi) return alert("請填寫完整"); loading.value = true; try { const payload = { wo_id: fpyForm.value.wo_id, production_date: fpyForm.value.date, spi_rate: fpyForm.value.spi, aoi_rate: fpyForm.value.aoi }; if (fpyForm.value.id) await _supabase.from('daily_fpy').update(payload).eq('id', fpyForm.value.id); else await _supabase.from('daily_fpy').insert(payload); await loadFpyHistory(); alert("儲存成功"); } catch(e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; } };
+            const loadFpyHistory = async () => { const { data: list } = await _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').order('production_date', {ascending:false}).limit(50); if (list) fpyHistory.value = list; };
+            const loadFpyForEdit = (rec) => { fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate }; };
+            const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); };
+            const exportFpyData = async () => { loading.value = true; try { let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))'); if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start); if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end); const { data: rows } = await query; rows.sort((a, b) => { const woA = a.work_orders.wo_number; const woB = b.work_orders.wo_number; if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB); return new Date(a.production_date) - new Date(b.production_date); }); const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]]; rows.forEach(r => { excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']); }); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report"); XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`); } catch(e) { alert("導出失敗"); } finally { loading.value = false; } };
+
+            // --- Order & Calendar Logic (New) ---
             const woForm = ref({ id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' });
             const isEditingWo = ref(false);
+            const orderSearch = ref('');
+            const selectedWoId = ref(null);
+            
+            // Calendar State
+            const today = new Date();
+            const calendarYear = ref(today.getFullYear());
+            const calendarMonth = ref(today.getMonth()); // 0-11
+            const dayDetailModal = ref({ show: false, date: '', list: [] });
+
+            // Search & Sort Logic
+            const filteredWorkOrders = computed(() => {
+                let list = data.value.workOrders;
+                // Search
+                if (orderSearch.value) {
+                    const q = orderSearch.value.toLowerCase();
+                    list = list.filter(w => w.wo_number.toLowerCase().includes(q) || w.models.name.toLowerCase().includes(q));
+                }
+                // Sort: Not Closed First -> Created Date Desc
+                return list.sort((a, b) => {
+                    if (a.is_closed === b.is_closed) return new Date(b.created_at) - new Date(a.created_at);
+                    return a.is_closed ? 1 : -1;
+                });
+            });
+
+            // Calendar Logic
+            const calendarDays = computed(() => {
+                const y = calendarYear.value;
+                const m = calendarMonth.value;
+                const daysInMonth = new Date(y, m + 1, 0).getDate();
+                const days = [];
+                for (let i = 1; i <= daysInMonth; i++) {
+                    const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+                    // Find all production for this day across ALL work orders
+                    const dailyProds = [];
+                    data.value.workOrders.forEach(wo => {
+                        const prod = wo.daily_production.find(dp => dp.production_date === dStr);
+                        if (prod && prod.input_quantity > 0) {
+                            dailyProds.push({
+                                id: prod.id,
+                                wo_id: wo.id,
+                                wo_number: wo.wo_number,
+                                model_name: wo.models.name,
+                                qty: prod.input_quantity
+                            });
+                        }
+                    });
+                    days.push({ dayNum: i, dateStr: dStr, productions: dailyProds });
+                }
+                return days;
+            });
+            
+            // Empty cells before the 1st of month
+            const calendarPadding = computed(() => {
+                const firstDay = new Date(calendarYear.value, calendarMonth.value, 1).getDay(); // 0(Sun) - 6(Sat)
+                return firstDay;
+            });
+
+            const changeMonth = (delta) => {
+                let newM = calendarMonth.value + delta;
+                if (newM > 11) { calendarYear.value++; newM = 0; }
+                else if (newM < 0) { calendarYear.value--; newM = 11; }
+                calendarMonth.value = newM;
+            };
+
+            const isToday = (dStr) => dStr === new Date().toISOString().split('T')[0];
+
+            const selectWoForCalendar = (wo) => {
+                selectedWoId.value = selectedWoId.value === wo.id ? null : wo.id;
+            };
+
+            const openDayDetail = (day) => {
+                dayDetailModal.value = {
+                    show: true,
+                    date: day.dateStr,
+                    list: day.productions
+                };
+            };
+
             const openWoModal = (wo = null) => { if (wo) { isEditingWo.value = true; woForm.value = { id: wo.id, number: wo.wo_number, modelId: wo.model_id, selectedModelIds: [], targetQty: wo.target_quantity }; } else { isEditingWo.value = false; woForm.value = { id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' }; } showWoModal.value = true; };
             const saveWorkOrder = async () => { const { id, number, modelId, selectedModelIds, targetQty } = woForm.value; if (!number || !targetQty) return alert("請填寫工單號碼與數量"); loading.value = true; try { if (isEditingWo.value && id) { if (!modelId) return alert("請選擇機種"); await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty }).eq('id', id); } else { if (selectedModelIds.length === 0) return alert("請至少勾選一個機種"); for (const mId of selectedModelIds) { const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === mId); if (!isDuplicate) await _supabase.from('work_orders').insert({ wo_number: number, model_id: mId, target_quantity: targetQty, is_closed: false }); } } showWoModal.value = false; loadBaseData(); alert(isEditingWo.value ? "更新成功" : "工單已建立"); } catch (e) { alert("操作失敗"); } finally { loading.value = false; } };
             const deleteWorkOrder = async (id) => { if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return; loading.value = true; await _supabase.from('work_orders').delete().eq('id', id); loadBaseData(); loading.value = false; };
+
             const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
             const statsResult = ref(null);
             const calculateStats = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`); if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start); if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end); const { data: rows } = await query; let filtered = rows || []; if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId); if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == statsFilter.value.woId); let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {}; filtered.forEach(day => { totalInput += day.input_quantity; day.defect_logs.forEach(log => { totalDefects += log.quantity; const tName = log.defect_types?.name || 'Unknown'; typeMap[tName] = (typeMap[tName] || 0) + log.quantity; const lCode = log.defect_locations?.code || 'Unknown'; locMap[lCode] = (locMap[lCode] || 0) + log.quantity; }); }); const byType = Object.entries(typeMap).map(([name, qty]) => ({ name, qty, ratio: totalDefects ? (qty/totalDefects*100).toFixed(1) : 0 })).sort((a,b) => b.qty - a.qty); const byLocation = Object.entries(locMap).map(([code, qty]) => ({ code, qty })).sort((a,b) => b.qty - a.qty); statsResult.value = { totalInput, totalDefects, yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100, byType, byLocation }; } catch (e) { alert("統計失敗"); } finally { loading.value = false; } };
@@ -344,7 +421,25 @@
             const deleteSettingItem = async (key, id) => { if(!confirm("確定刪除？")) return; await _supabase.from(key).delete().eq('id', id); loadBaseData(); };
             const startEdit = (id, val) => { editingId.value = id; editingValue.value = val; };
             const saveEdit = async (key, id, field) => { if (!editingValue.value.trim()) return; await _supabase.from(key).update({ [field]: editingValue.value }).eq('id', id); editingId.value = null; loadBaseData(); };
-            const loadBaseData = async () => { const [wo, mo, dt, dl] = await Promise.all([ _supabase.from('work_orders').select('*, models(name), daily_production(input_quantity)').order('created_at', {ascending: false}), _supabase.from('models').select('*'), _supabase.from('defect_types').select('*'), _supabase.from('defect_locations').select('*') ]); data.value.workOrders = (wo.data || []).map(w => ({ ...w, current_input: w.daily_production.reduce((sum, d) => sum + d.input_quantity, 0) })); data.value.models = mo.data || []; data.value.defectTypes = dt.data || []; data.value.defectLocations = dl.data || []; };
+
+            // IMPORTANT: Modified Query to include production_date for Calendar mapping
+            const loadBaseData = async () => { 
+                const [wo, mo, dt, dl] = await Promise.all([ 
+                    _supabase.from('work_orders')
+                        .select('*, models(name), daily_production(production_date, input_quantity)') // Fetched production_date
+                        .order('created_at', {ascending: false}), 
+                    _supabase.from('models').select('*'), 
+                    _supabase.from('defect_types').select('*'), 
+                    _supabase.from('defect_locations').select('*') 
+                ]); 
+                data.value.workOrders = (wo.data || []).map(w => ({ 
+                    ...w, 
+                    current_input: w.daily_production.reduce((sum, d) => sum + d.input_quantity, 0) 
+                })); 
+                data.value.models = mo.data || []; 
+                data.value.defectTypes = dt.data || []; 
+                data.value.defectLocations = dl.data || []; 
+            };
             const sortedModels = computed(() => [...data.value.models].sort((a,b) => a.name.localeCompare(b.name)));
             const sortedDefectTypes = computed(() => [...data.value.defectTypes].sort((a,b) => a.name.localeCompare(b.name)));
             const sortedLocations = computed(() => [...data.value.defectLocations].sort((a,b) => a.code.localeCompare(b.code)));
@@ -359,7 +454,10 @@
                 rawExportFilter, exportRawData,
                 fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, loadFpyForEdit, deleteFpy, exportFpyData,
                 settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
-                sortedModels, sortedDefectTypes, sortedLocations, uniqueWoNumbers, availableModelsForSelectedWo
+                sortedModels, sortedDefectTypes, sortedLocations, uniqueWoNumbers, availableModelsForSelectedWo,
+                // New for Calendar
+                orderSearch, filteredWorkOrders, selectedWoId, selectWoForCalendar, 
+                calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal
             };
         }
     }).mount('#app');

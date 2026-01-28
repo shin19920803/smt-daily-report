@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統 (v8.0 Mobile)</title>
+    <title>SMT 生產管理系統 (v8.1 Mobile OOC Detail)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -44,7 +44,7 @@
     <aside class="hidden md:flex w-64 bg-slate-900 text-white flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v8.0 Mobile Integrated</p>
+            <p class="text-xs text-slate-400 mt-1">v8.1 Mobile OOC Detail</p>
         </div>
         <nav class="flex-1 py-6 space-y-2 overflow-y-auto">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -175,7 +175,7 @@
                 <div class="calendar-header"><div class="text-red-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-500">六</div></div>
                 <div class="calendar-grid">
                     <div v-for="n in calendarPadding" :key="'pad-'+n" class="bg-gray-50"></div>
-                    <div v-for="day in oocCalendarDays" :key="day.dateStr" class="calendar-cell">
+                    <div v-for="day in oocCalendarDays" :key="day.dateStr" @click="openOocDayDetail(day)" class="calendar-cell">
                         <div class="text-right text-gray-500 font-bold mb-1" :class="{'text-blue-600': isToday(day.dateStr)}">{{ day.dayNum }}</div>
                         <template v-for="item in day.items" :key="item.id">
                             <div v-if="!selectedOocId || (oocHistory.find(f=>f.id===selectedOocId)?.wo_id === item.wo_id)"
@@ -232,6 +232,29 @@
                     </div>
                 </div>
             </div>
+
+            <div v-if="oocDayModal.show" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
+                <div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-96">
+                    <h3 class="text-xl font-bold mb-4 text-center border-b pb-2">{{ oocDayModal.date }} OOC 異常明細</h3>
+                    <div class="space-y-3 max-h-64 overflow-y-auto">
+                        <div v-for="item in oocDayModal.list" :key="item.id" class="p-3 bg-red-50 rounded border border-red-200">
+                            <div class="flex justify-between font-bold text-red-700">
+                                <span>{{ item.wo_number }}</span>
+                                <span class="text-xs bg-white px-2 py-0.5 rounded border text-gray-600">{{ item.machine }}</span>
+                            </div>
+                            <div class="text-sm text-gray-600 mb-1">{{ item.model_name }}</div>
+                            <div class="font-bold text-red-600 mt-1 flex items-center">
+                                <i class="fas fa-exclamation-circle mr-2"></i> {{ item.cause }}
+                            </div>
+                        </div>
+                        <div v-if="oocDayModal.list.length === 0" class="text-center text-gray-400 py-4">無異常紀錄</div>
+                    </div>
+                    <div class="mt-4 text-center">
+                        <button @click="oocDayModal.show = false" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700">關閉</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <div v-if="currentTab === 'orders'" class="max-w-6xl mx-auto space-y-4 md:space-y-6 animate-fade-in">
@@ -369,12 +392,22 @@
             const showOocModal = ref(false);
             const selectedOocId = ref(null);
             
+            // New State for OOC Day Detail
+            const oocDayModal = ref({ show: false, date: '', list: [] });
+
             const availableModelsForOoc = computed(() => !oocForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === oocForm.value.selectedWoNumber));
             const oocCalendarDays = computed(() => {
                 const y = calendarYear.value, m = calendarMonth.value, daysInMonth = new Date(y, m + 1, 0).getDate(), days = [];
                 for (let i = 1; i <= daysInMonth; i++) {
                     const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-                    const items = oocHistory.value.filter(rec => rec.production_date === dStr).map(rec => ({ id: rec.id, wo_id: rec.wo_id, wo_number: rec.work_orders.wo_number, cause: rec.ooc_causes?.name, machine: rec.machines?.name }));
+                    const items = oocHistory.value.filter(rec => rec.production_date === dStr).map(rec => ({ 
+                        id: rec.id, 
+                        wo_id: rec.wo_id, 
+                        wo_number: rec.work_orders.wo_number,
+                        model_name: rec.work_orders?.models?.name, // Added Model Name for Detail View
+                        cause: rec.ooc_causes?.name, 
+                        machine: rec.machines?.name 
+                    }));
                     days.push({ dayNum: i, dateStr: dStr, items });
                 } return days;
             });
@@ -396,6 +429,11 @@
             };
             const loadOocHistory = async () => { const { data: list } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').order('production_date', {ascending:false}).limit(200); if(list) oocHistory.value = list; };
             const deleteOoc = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('ooc_records').delete().eq('id', id); loadOocHistory(); };
+            
+            // New Function: Open OOC Day Detail
+            const openOocDayDetail = (day) => { 
+                oocDayModal.value = { show: true, date: day.dateStr, list: day.items }; 
+            };
 
             // --- Order & Calendar Logic ---
             const woForm = ref({ id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' });
@@ -524,7 +562,8 @@
                 statsFilter, statsResult, calculateStats, exportToExcel,
                 rawExportFilter, exportRawData,
                 fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail,
-                oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, // OOC
+                oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 
+                oocDayModal, openOocDayDetail, // New Exports
                 activeWoNumbers, uniqueWoNumbers, availableModelsForSelectedWo,
                 settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
                 sortedModels, sortedDefectTypes, sortedLocations,

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統 (v8.3 FPY Fix)</title>
+    <title>SMT 生產管理系統 (v8.4 FPY Relaxed)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -44,7 +44,7 @@
     <aside class="hidden md:flex w-64 bg-slate-900 text-white flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v8.3 FPY Fix</p>
+            <p class="text-xs text-slate-400 mt-1">v8.4 FPY Relaxed</p>
         </div>
         <nav class="flex-1 py-6 space-y-2 overflow-y-auto">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -370,7 +370,7 @@
             const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; } loading.value = false; };
             const exportRawData = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, models (name), model_id, id), defect_logs (quantity, defect_types (name), defect_locations (code))`); if (rawExportFilter.value.start) query = query.gte('production_date', rawExportFilter.value.start); if (rawExportFilter.value.end) query = query.lte('production_date', rawExportFilter.value.end); const { data: rows, error } = await query; if (error) throw error; let filtered = rows || []; if (rawExportFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == rawExportFilter.value.modelId); if (rawExportFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == rawExportFilter.value.woId); const excelData = []; excelData.push(["日期", "工單號碼", "機種", "當日投入數", "不良現象", "不良位置", "不良數量"]); filtered.forEach(row => { const date = row.production_date; const wo = row.work_orders.wo_number; const model = row.work_orders.models.name; const input = row.input_quantity; if (row.defect_logs && row.defect_logs.length > 0) { row.defect_logs.forEach(log => { excelData.push([ date, wo, model, input, log.defect_types?.name || '', log.defect_locations?.code || '', log.quantity ]); }); } else { excelData.push([date, wo, model, input, "無不良", "", 0]); } }); const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(excelData); XLSX.utils.book_append_sheet(wb, ws, "Raw Data"); XLSX.writeFile(wb, `SMT_Raw_Data_${new Date().toISOString().slice(0,10)}.xlsx`); } catch (e) { alert("導出失敗: " + e.message); } finally { loading.value = false; } };
 
-            // --- FPY Logic (Fix: isEditingFpy) ---
+            // --- FPY Logic (Fix: isEditingFpy + Relaxed Validation) ---
             const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '' });
             const fpyHistory = ref([]);
             const fpyFilter = ref({ start: '', end: '' });
@@ -422,11 +422,24 @@
                     } 
                 } catch(e) { console.error(e); } finally { loading.value = false; } 
             };
+            
+            // --- Relaxed Validation Save ---
             const saveFpy = async () => { 
-                if (!fpyForm.value.wo_id || !fpyForm.value.spi || !fpyForm.value.aoi) return alert("請填寫完整"); 
+                // 只檢查是否選擇了機種
+                if (!fpyForm.value.wo_id) return alert("請選擇機種"); 
+                
                 loading.value = true; 
                 try { 
-                    const payload = { wo_id: fpyForm.value.wo_id, production_date: fpyForm.value.date, spi_rate: fpyForm.value.spi, aoi_rate: fpyForm.value.aoi }; 
+                    // 如果是空字串，轉換為 null，這樣資料庫會存為 NULL (空白)
+                    const spiVal = fpyForm.value.spi === '' ? null : fpyForm.value.spi;
+                    const aoiVal = fpyForm.value.aoi === '' ? null : fpyForm.value.aoi;
+
+                    const payload = { 
+                        wo_id: fpyForm.value.wo_id, 
+                        production_date: fpyForm.value.date, 
+                        spi_rate: spiVal, 
+                        aoi_rate: aoiVal 
+                    }; 
                     if (fpyForm.value.id) await _supabase.from('daily_fpy').update(payload).eq('id', fpyForm.value.id); 
                     else await _supabase.from('daily_fpy').insert(payload); 
                     await loadFpyHistory(); 
@@ -434,6 +447,7 @@
                     alert("儲存成功"); 
                 } catch(e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; } 
             };
+
             const loadFpyHistory = async () => { const { data: list } = await _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').order('production_date', {ascending:false}).limit(200); if (list) fpyHistory.value = list; };
             const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); };
             const exportFpyData = async () => { loading.value = true; try { let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))'); if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start); if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end); const { data: rows } = await query; rows.sort((a, b) => { const woA = a.work_orders.wo_number; const woB = b.work_orders.wo_number; if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB); return new Date(a.production_date) - new Date(b.production_date); }); const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]]; rows.forEach(r => { excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']); }); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report"); XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`); } catch(e) { alert("導出失敗"); } finally { loading.value = false; } };

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統 (v8.5 FPY Filter)</title>
+    <title>SMT 生產管理系統 (v8.6 WO Merged)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -44,7 +44,7 @@
     <aside class="hidden md:flex w-64 bg-slate-900 text-white flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v8.5 FPY Filter</p>
+            <p class="text-xs text-slate-400 mt-1">v8.6 WO Merged</p>
         </div>
         <nav class="flex-1 py-6 space-y-2 overflow-y-auto">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -277,7 +277,32 @@
                 <div class="flex gap-2 w-full md:w-auto"><div class="relative flex-1 md:w-64"><i class="fas fa-search absolute left-3 top-3 text-gray-400"></i><input v-model="orderSearch" placeholder="搜尋工單號或機種..." class="w-full border p-2 pl-10 rounded shadow-sm focus:ring-2 focus:ring-indigo-500"></div><button @click="openWoModal()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-plus mr-1"></i> 新增工單</button></div>
             </div>
             <div class="bg-white rounded shadow overflow-x-auto max-h-[400px] overflow-y-auto">
-                <table class="w-full text-left border-collapse relative min-w-[800px]"><thead class="bg-gray-100 text-gray-600 uppercase text-sm"><tr><th class="p-4 border-b z-10">工單號碼</th><th class="p-4 border-b z-10">機種</th><th class="p-4 border-b text-right z-10">預計</th><th class="p-4 border-b text-right z-10">已做</th><th class="p-4 border-b text-right z-10">剩餘</th><th class="p-4 border-b text-center z-10">狀態</th><th class="p-4 border-b text-center z-10">操作</th></tr></thead><tbody><tr v-for="wo in filteredWorkOrders" :key="wo.id" @click="selectWoForCalendar(wo)" class="hover:bg-gray-50 border-b cursor-pointer transition" :class="{'bg-yellow-50 border-l-4 border-yellow-500': selectedWoId === wo.id}"><td class="p-4 font-bold text-blue-600">{{ wo.wo_number }}</td><td class="p-4 text-sm">{{ wo.models?.name }}</td><td class="p-4 text-right text-gray-500">{{ wo.target_quantity }}</td><td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td><td class="p-4 text-right font-bold" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 ? 'text-green-600' : 'text-orange-500'">{{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}</td><td class="p-4 text-center"><span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span><span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">生產中</span></td><td class="p-4 text-center space-x-2"><button @click.stop="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button><button @click.stop="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button></td></tr><tr v-if="filteredWorkOrders.length === 0"><td colspan="7" class="p-8 text-center text-gray-400">找不到相符的工單</td></tr></tbody></table>
+                <table class="w-full text-left border-collapse relative min-w-[800px]">
+                    <thead class="bg-gray-100 text-gray-600 uppercase text-sm">
+                        <tr>
+                            <th class="p-4 border-b z-10">工單號碼</th>
+                            <th class="p-4 border-b z-10">機種</th>
+                            <th class="p-4 border-b text-right z-10">預計</th>
+                            <th class="p-4 border-b text-right z-10">已做</th>
+                            <th class="p-4 border-b text-right z-10">剩餘</th>
+                            <th class="p-4 border-b text-center z-10">狀態</th>
+                            <th class="p-4 border-b text-center z-10">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="wo in filteredWorkOrders" :key="wo.id" @click="selectWoForCalendar(wo)" class="hover:bg-gray-50 border-b cursor-pointer transition" :class="{'bg-yellow-50 border-l-4 border-yellow-500': selectedWoId === wo.id}">
+                            <td v-if="wo._isFirstOfGroup" :rowspan="wo._rowspan" class="p-4 font-bold text-blue-600 border-r border-gray-200 align-middle">{{ wo.wo_number }}</td>
+                            
+                            <td class="p-4 text-sm">{{ wo.models?.name }}</td>
+                            <td class="p-4 text-right text-gray-500">{{ wo.target_quantity }}</td>
+                            <td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td>
+                            <td class="p-4 text-right font-bold" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 ? 'text-green-600' : 'text-orange-500'">{{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}</td>
+                            <td class="p-4 text-center"><span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span><span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">生產中</span></td>
+                            <td class="p-4 text-center space-x-2"><button @click.stop="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button><button @click.stop="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button></td>
+                        </tr>
+                        <tr v-if="filteredWorkOrders.length === 0"><td colspan="7" class="p-8 text-center text-gray-400">找不到相符的工單</td></tr>
+                    </tbody>
+                </table>
             </div>
             <div class="bg-white rounded shadow p-2 md:p-4 mt-6"><div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-700"><i class="fas fa-calendar-alt mr-2 text-indigo-500"></i>生產行事曆 <span class="hidden md:inline text-sm font-normal text-gray-500 ml-2" v-if="selectedWoId">(已篩選: {{ data.workOrders.find(w=>w.id===selectedWoId)?.wo_number }})</span></h3><div class="flex items-center gap-4"><button @click="changeMonth(-1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-left"></i></button><span class="font-bold text-lg min-w-[100px] text-center">{{ calendarYear }} 年 {{ calendarMonth + 1 }} 月</span><button @click="changeMonth(1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-right"></i></button></div></div><div class="calendar-header"><div class="text-red-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-500">六</div></div><div class="calendar-grid"><div v-for="n in calendarPadding" :key="'pad-'+n" class="bg-gray-50"></div><div v-for="day in calendarDays" :key="day.dateStr" @click="openDayDetail(day)" class="calendar-cell"><div class="text-right text-gray-500 font-bold mb-1" :class="{'text-blue-600': isToday(day.dateStr)}">{{ day.dayNum }}</div><template v-for="prod in day.productions" :key="prod.id"><div v-if="!selectedWoId || selectedWoId === prod.wo_id" class="prod-tag text-xs" :class="{'highlight': selectedWoId === prod.wo_id}" :title="prod.wo_number + ' : ' + prod.qty">{{ prod.qty }} <span class="text-[10px] opacity-75">({{ prod.wo_number.slice(-4) }})</span></div></template></div></div></div>
             <div v-if="showWoModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50"><div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-[500px] max-h-[90vh] overflow-y-auto"><h3 class="text-xl font-bold mb-4 border-b pb-2">{{ isEditingWo ? '編輯單一工單' : '開立新工單' }}</h3><div class="space-y-4"><div><label class="block text-sm font-bold text-gray-500 mb-1">工單號碼</label><input v-model="woForm.number" placeholder="例如 C510..." class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div><div><label class="block text-sm font-bold text-gray-500 mb-1">預計生產數量</label><input v-model="woForm.targetQty" type="number" placeholder="數量" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div><div><label class="block text-sm font-bold text-gray-500 mb-2">{{ isEditingWo ? '對應機種 (編輯模式僅能改單一)' : '選擇生產機種 (可多選)' }}</label><div v-if="!isEditingWo" class="border rounded p-2 max-h-48 overflow-y-auto bg-gray-50 grid grid-cols-2 gap-2"><label v-for="m in sortedModels" :key="m.id" class="checkbox-wrapper cursor-pointer"><input type="checkbox" :value="m.id" v-model="woForm.selectedModelIds" class="hidden"><div class="px-3 py-2 border rounded bg-white hover:bg-gray-100 text-sm font-medium transition text-center">{{ m.name }}<i v-if="woForm.selectedModelIds.includes(m.id)" class="fas fa-check-circle text-blue-500 ml-1"></i></div></label></div><select v-else v-model="woForm.modelId" class="w-full border p-2 rounded bg-gray-100"><option :value="null" disabled>選擇機種</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select></div></div><div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showWoModal = false" class="px-4 py-2 text-gray-600">取消</button><button @click="saveWorkOrder" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold">{{ isEditingWo ? '更新' : '建立' }}</button></div></div></div>
@@ -374,7 +399,7 @@
             const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; } loading.value = false; };
             const exportRawData = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, models (name), model_id, id), defect_logs (quantity, defect_types (name), defect_locations (code))`); if (rawExportFilter.value.start) query = query.gte('production_date', rawExportFilter.value.start); if (rawExportFilter.value.end) query = query.lte('production_date', rawExportFilter.value.end); const { data: rows, error } = await query; if (error) throw error; let filtered = rows || []; if (rawExportFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == rawExportFilter.value.modelId); if (rawExportFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == rawExportFilter.value.woId); const excelData = []; excelData.push(["日期", "工單號碼", "機種", "當日投入數", "不良現象", "不良位置", "不良數量"]); filtered.forEach(row => { const date = row.production_date; const wo = row.work_orders.wo_number; const model = row.work_orders.models.name; const input = row.input_quantity; if (row.defect_logs && row.defect_logs.length > 0) { row.defect_logs.forEach(log => { excelData.push([ date, wo, model, input, log.defect_types?.name || '', log.defect_locations?.code || '', log.quantity ]); }); } else { excelData.push([date, wo, model, input, "無不良", "", 0]); } }); const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(excelData); XLSX.utils.book_append_sheet(wb, ws, "Raw Data"); XLSX.writeFile(wb, `SMT_Raw_Data_${new Date().toISOString().slice(0,10)}.xlsx`); } catch (e) { alert("導出失敗: " + e.message); } finally { loading.value = false; } };
 
-            // --- FPY Logic (Fix: isEditingFpy + Relaxed Validation + Show All WO Checkbox) ---
+            // --- FPY Logic ---
             const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false });
             const fpyHistory = ref([]);
             const fpyFilter = ref({ start: '', end: '' });
@@ -387,12 +412,9 @@
 
             const availableModelsForFpy = computed(() => !fpyForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === fpyForm.value.selectedWoNumber));
             
-            // New Computed: List of WOs for dropdown (Active vs All)
             const fpyWoList = computed(() => {
-                if (fpyForm.value.showAllWo) {
-                    return uniqueWoNumbers.value; // Returns all unique WOs (including closed/finished)
-                }
-                return activeWoNumbers.value; // Returns only active WOs (default)
+                if (fpyForm.value.showAllWo) return uniqueWoNumbers.value; 
+                return activeWoNumbers.value; 
             });
 
             const fpyCalendarDays = computed(() => {
@@ -406,7 +428,7 @@
             const openFpyModal = (rec = null) => { 
                 if (rec) { 
                     isEditingFpy.value = true; 
-                    fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate, showAllWo: true }; // Auto-show all when editing to ensure current WO is visible
+                    fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate, showAllWo: true }; 
                 } else { 
                     isEditingFpy.value = false; 
                     fpyForm.value = { id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false }; 
@@ -459,7 +481,7 @@
             const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); };
             const exportFpyData = async () => { loading.value = true; try { let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))'); if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start); if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end); const { data: rows } = await query; rows.sort((a, b) => { const woA = a.work_orders.wo_number; const woB = b.work_orders.wo_number; if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB); return new Date(a.production_date) - new Date(b.production_date); }); const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]]; rows.forEach(r => { excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']); }); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report"); XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`); } catch(e) { alert("導出失敗"); } finally { loading.value = false; } };
 
-            // --- OOC Logic (New with Time) ---
+            // --- OOC Logic ---
             const oocForm = ref({ id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null });
             const oocHistory = ref([]);
             const showOocModal = ref(false);
@@ -543,16 +565,49 @@
             const calendarMonth = ref(today.getMonth());
             const dayDetailModal = ref({ show: false, date: '', list: [] });
 
+            // --- Changed: Added Grouping Logic for rowspan ---
             const filteredWorkOrders = computed(() => {
                 let list = data.value.workOrders;
-                if (orderSearch.value) { const q = orderSearch.value.toLowerCase(); list = list.filter(w => w.wo_number.toLowerCase().includes(q) || w.models.name.toLowerCase().includes(q)); }
-                return list.sort((a, b) => {
-                    const remA = a.target_quantity - (a.current_input || 0), remB = b.target_quantity - (b.current_input || 0);
-                    const activeA = (remA > 0 && !a.is_closed), activeB = (remB > 0 && !b.is_closed);
-                    if (activeA && !activeB) return -1; if (!activeA && activeB) return 1;
+                if (orderSearch.value) { 
+                    const q = orderSearch.value.toLowerCase(); 
+                    list = list.filter(w => w.wo_number.toLowerCase().includes(q) || w.models.name.toLowerCase().includes(q)); 
+                }
+                
+                // Group by wo_number
+                const groups = {};
+                list.forEach(w => {
+                    if (!groups[w.wo_number]) groups[w.wo_number] = [];
+                    groups[w.wo_number].push(w);
+                });
+
+                // Sort groups by the first item's status
+                const sortedGroups = Object.values(groups).sort((groupA, groupB) => {
+                    const a = groupA[0];
+                    const b = groupB[0];
+                    const remA = a.target_quantity - (a.current_input || 0);
+                    const remB = b.target_quantity - (b.current_input || 0);
+                    const activeA = (remA > 0 && !a.is_closed);
+                    const activeB = (remB > 0 && !b.is_closed);
+                    if (activeA && !activeB) return -1; 
+                    if (!activeA && activeB) return 1;
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
+
+                // Flatten and map for rowspan
+                const flattened = [];
+                sortedGroups.forEach(group => {
+                    group.forEach((wo, index) => {
+                        flattened.push({
+                            ...wo,
+                            _isFirstOfGroup: index === 0,
+                            _rowspan: group.length
+                        });
+                    });
+                });
+
+                return flattened;
             });
+
             const calendarDays = computed(() => {
                 const y = calendarYear.value, m = calendarMonth.value, daysInMonth = new Date(y, m + 1, 0).getDate(), days = [];
                 for (let i = 1; i <= daysInMonth; i++) {
@@ -571,7 +626,7 @@
             const saveWorkOrder = async () => { const { id, number, modelId, selectedModelIds, targetQty } = woForm.value; if (!number || !targetQty) return alert("請填寫工單號碼與數量"); loading.value = true; try { if (isEditingWo.value && id) { if (!modelId) return alert("請選擇機種"); await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty }).eq('id', id); } else { if (selectedModelIds.length === 0) return alert("請至少勾選一個機種"); for (const mId of selectedModelIds) { const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === mId); if (!isDuplicate) await _supabase.from('work_orders').insert({ wo_number: number, model_id: mId, target_quantity: targetQty, is_closed: false }); } } showWoModal.value = false; loadBaseData(); alert(isEditingWo.value ? "更新成功" : "工單已建立"); } catch (e) { alert("操作失敗"); } finally { loading.value = false; } };
             const deleteWorkOrder = async (id) => { if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return; loading.value = true; await _supabase.from('work_orders').delete().eq('id', id); loadBaseData(); loading.value = false; };
 
-            // --- Stats & Export (Merged FPY Sheet) ---
+            // --- Stats & Export ---
             const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
             const statsResult = ref(null);
             const calculateStats = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`); if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start); if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end); const { data: rows } = await query; let filtered = rows || []; if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId); if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == statsFilter.value.woId); let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {}; filtered.forEach(day => { totalInput += day.input_quantity; day.defect_logs.forEach(log => { totalDefects += log.quantity; const tName = log.defect_types?.name || 'Unknown'; typeMap[tName] = (typeMap[tName] || 0) + log.quantity; const lCode = log.defect_locations?.code || 'Unknown'; locMap[lCode] = (locMap[lCode] || 0) + log.quantity; }); }); const byType = Object.entries(typeMap).map(([name, qty]) => ({ name, qty, ratio: totalDefects ? (qty/totalDefects*100).toFixed(1) : 0 })).sort((a,b) => b.qty - a.qty); const byLocation = Object.entries(locMap).map(([code, qty]) => ({ code, qty })).sort((a,b) => b.qty - a.qty); statsResult.value = { totalInput, totalDefects, yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100, byType, byLocation }; } catch (e) { alert("統計失敗"); } finally { loading.value = false; } };
@@ -580,23 +635,19 @@
                 if (!statsResult.value) return alert("請先執行統計");
                 loading.value = true;
                 try {
-                    // 1. Existing Yield Report Sheets
                     const combinedData = [["=== 總結報告 ==="], ["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], ["總投入數", statsResult.value.totalInput], ["總不良數", statsResult.value.totalDefects], ["良率", `${statsResult.value.yieldRate}%`], [], ["=== 不良現象分析 ==="], ["不良現象", "數量", "佔比"], ...statsResult.value.byType.map(d => [d.name, d.qty, `${d.ratio}%`]), [], ["=== 位置異常分析 ==="], ["位置", "數量"], ...statsResult.value.byLocation.map(d => [d.code, d.qty])];
                     const wb = XLSX.utils.book_new();
                     const wsYield = XLSX.utils.aoa_to_sheet(combinedData);
                     XLSX.utils.book_append_sheet(wb, wsYield, "良率報告");
 
-                    // 2. Fetch FPY Data for the same period
                     let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))');
                     if (statsFilter.value.start) fpyQuery = fpyQuery.gte('production_date', statsFilter.value.start);
                     if (statsFilter.value.end) fpyQuery = fpyQuery.lte('production_date', statsFilter.value.end);
                     const { data: fpyRows } = await fpyQuery;
                     
-                    // Filter locally if needed
                     let filteredFpy = fpyRows || [];
-                    if (statsFilter.value.modelId !== 'all') filteredFpy = filteredFpy.filter(r => r.work_orders.model_id == statsFilter.value.modelId); // Note: Simplified mapping
+                    if (statsFilter.value.modelId !== 'all') filteredFpy = filteredFpy.filter(r => r.work_orders.model_id == statsFilter.value.modelId); 
                     
-                    // Sort FPY
                     filteredFpy.sort((a, b) => {
                         const woA = a.work_orders.wo_number;
                         const woB = b.work_orders.wo_number;
@@ -659,7 +710,7 @@
                 woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, onWoNumberChange,
                 statsFilter, statsResult, calculateStats, exportToExcel,
                 rawExportFilter, exportRawData,
-                fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, // Exported list for template
+                fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
                 oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 
                 oocDayModal, openOocDayDetail, 
                 activeWoNumbers, uniqueWoNumbers, availableModelsForSelectedWo,

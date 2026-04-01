@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統 (v8.7 WO Sectioned)</title>
+    <title>SMT 生產管理系統 (v8.8 Input Validation)</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -44,7 +44,7 @@
     <aside class="hidden md:flex w-64 bg-slate-900 text-white flex-col shadow-xl flex-shrink-0">
         <div class="p-6 text-center border-b border-slate-700">
             <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v8.7 WO Sectioned</p>
+            <p class="text-xs text-slate-400 mt-1">v8.8 Input Validation</p>
         </div>
         <nav class="flex-1 py-6 space-y-2 overflow-y-auto">
             <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
@@ -415,7 +415,52 @@
             const loadHistory = async () => { const { data: list } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(id)').order('production_date', { ascending: false }).limit(50); if (list) historyList.value = list.map(item => ({ ...item, defect_count: item.defect_logs.length })); };
             const loadRecordForEdit = async (rec) => { report.value.date = rec.production_date; report.value.selectedWoNumber = rec.work_orders.wo_number; report.value.wo_id = rec.wo_id; await fetchDailyRecord(); };
             const fetchDailyRecord = async () => { if (!report.value.wo_id || !report.value.date) return; loading.value = true; report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; try { const { data: prod } = await _supabase.from('daily_production').select('id, input_quantity').eq('wo_id', report.value.wo_id).eq('production_date', report.value.date).maybeSingle(); if (prod) { report.value.currentId = prod.id; report.value.inputQty = prod.input_quantity; const { data: logs } = await _supabase.from('defect_logs').select('*, defect_types(name), defect_locations(code)').eq('production_id', prod.id).order('created_at', { ascending: false }); report.value.logs = logs || []; } } catch (e) { console.error(e); } finally { loading.value = false; } };
-            const saveDailyInput = async () => { if (!report.value.wo_id) return alert("請先選擇工單與機種"); loading.value = true; try { if (report.value.currentId) await _supabase.from('daily_production').update({ input_quantity: report.value.inputQty }).eq('id', report.value.currentId); else { const { data: newProd, error } = await _supabase.from('daily_production').insert({ wo_id: report.value.wo_id, production_date: report.value.date, input_quantity: report.value.inputQty }).select().single(); if (error) throw error; report.value.currentId = newProd.id; } await loadHistory(); await loadBaseData(); alert("投入數已儲存"); } catch (e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; } };
+            
+            // --- Changed: Save Input with Validation ---
+            const saveDailyInput = async () => { 
+                if (!report.value.wo_id) return alert("請先選擇工單與機種"); 
+                
+                const currentInput = Number(report.value.inputQty) || 0;
+                const targetWo = data.value.workOrders.find(w => w.id === report.value.wo_id);
+                
+                loading.value = true; 
+                
+                // 防呆邏輯：檢查投入總數是否超過預計數量
+                if (targetWo) {
+                    try {
+                        const { data: existingProds } = await _supabase
+                            .from('daily_production')
+                            .select('id, input_quantity')
+                            .eq('wo_id', report.value.wo_id);
+                            
+                        let totalOtherInputs = 0;
+                        if (existingProds) {
+                            existingProds.forEach(p => {
+                                // 如果是編輯模式，排除當前這筆紀錄的舊值
+                                if (p.id !== report.value.currentId) {
+                                    totalOtherInputs += (Number(p.input_quantity) || 0);
+                                }
+                            });
+                        }
+                        
+                        const maxAllowed = Number(targetWo.target_quantity) || 0;
+                        
+                        if ((totalOtherInputs + currentInput) > maxAllowed) {
+                            loading.value = false;
+                            return alert(`⚠️ 防呆提示：投入總數超過工單預計數量！\n\n該工單預計數量: ${maxAllowed}\n其他日期已投入: ${totalOtherInputs}\n本次最多僅能輸入: ${maxAllowed - totalOtherInputs}`);
+                        }
+                    } catch(e) {
+                        console.error("防呆檢查發生錯誤", e);
+                    }
+                }
+
+                try { 
+                    if (report.value.currentId) await _supabase.from('daily_production').update({ input_quantity: currentInput }).eq('id', report.value.currentId); 
+                    else { const { data: newProd, error } = await _supabase.from('daily_production').insert({ wo_id: report.value.wo_id, production_date: report.value.date, input_quantity: currentInput }).select().single(); if (error) throw error; report.value.currentId = newProd.id; } 
+                    await loadHistory(); await loadBaseData(); alert("投入數已儲存"); 
+                } catch (e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; } 
+            };
+
             const addDefect = async () => { if (!report.value.currentId) return alert("請先儲存投入數"); if (!defectForm.value.typeId || !defectForm.value.locationId) return alert("請選擇不良與位置"); loading.value = true; try { await _supabase.from('defect_logs').insert({ production_id: report.value.currentId, defect_type_id: defectForm.value.typeId, location_id: defectForm.value.locationId, quantity: defectForm.value.qty }); await fetchDailyRecord(); await loadHistory(); defectForm.value.qty = 1; } catch (e) { alert("新增失敗"); } finally { loading.value = false; } };
             const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); };
             const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; } loading.value = false; };
@@ -587,7 +632,6 @@
             const calendarMonth = ref(today.getMonth());
             const dayDetailModal = ref({ show: false, date: '', list: [] });
 
-            // --- Changed: Splitting Active and Completed Groups ---
             const processedWorkOrders = computed(() => {
                 let list = data.value.workOrders;
                 if (orderSearch.value) { 
@@ -595,7 +639,6 @@
                     list = list.filter(w => w.wo_number.toLowerCase().includes(q) || w.models.name.toLowerCase().includes(q)); 
                 }
                 
-                // Group by wo_number
                 const groups = {};
                 list.forEach(w => {
                     if (!groups[w.wo_number]) groups[w.wo_number] = [];
@@ -605,7 +648,6 @@
                 const activeGroups = [];
                 const completedGroups = [];
 
-                // Separate groups based on completion status of all items within the group
                 Object.values(groups).forEach(group => {
                     const isCompleted = group.every(wo => {
                         const rem = wo.target_quantity - (wo.current_input || 0);
@@ -619,12 +661,10 @@
                     }
                 });
 
-                // Sort both groups by date (newest first)
                 const sortByDateDesc = (groupA, groupB) => new Date(groupB[0].created_at) - new Date(groupA[0].created_at);
                 activeGroups.sort(sortByDateDesc);
                 completedGroups.sort(sortByDateDesc);
 
-                // Flatten function
                 const flattenGroup = (groupsArray) => {
                     const flattened = [];
                     groupsArray.forEach(group => {
@@ -753,7 +793,7 @@
                 activeWoNumbers, uniqueWoNumbers, availableModelsForSelectedWo,
                 settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
                 sortedModels, sortedDefectTypes, sortedLocations,
-                orderSearch, processedWorkOrders, selectedWoId, selectWoForCalendar, // Changed here
+                orderSearch, processedWorkOrders, selectedWoId, selectWoForCalendar, 
                 calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal
             };
         }

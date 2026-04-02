@@ -344,9 +344,19 @@
         
         let inlineEditingId = null;
         let inlineDowntimeEvents = [];
-        let inlineEditReasonId = null;
 
-        // ★ 動態取得目前活躍的項目設定
+        // 幫歷史資料清除隱形刪除標記的函數
+        function stripDel(name) {
+            if (!name) return '';
+            if (name.startsWith('@@DEL@@')) {
+                const match = name.match(/^@@DEL@@\d+_(.+)$/);
+                if (match) return match[1];
+                return name.substring(7); // 兼容舊版
+            }
+            return name;
+        }
+
+        // ★ 動態取得目前最新、活躍的分類對照表
         async function getActiveReasonMapping() {
             const { data } = await db.from('downtime_reasons').select('name, is_planned');
             const mapping = {};
@@ -360,20 +370,10 @@
             return mapping;
         }
 
-        function stripDel(name) {
-            if (!name) return '';
-            if (name.startsWith('@@DEL@@')) {
-                const match = name.match(/^@@DEL@@\d+_(.+)$/);
-                if (match) return match[1];
-                return name.substring(7);
-            }
-            return name;
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             populateTimeSelects();
+            await fetchReasons(); // 確保先載入最新設定
             fetchLines().then(() => fetchMachines());
-            fetchReasons();
             fetchOperators(); 
             
             const today = new Date();
@@ -584,10 +584,10 @@
 
             if (currentStatLineVal && allLines.find(l => l.name === currentStatLineVal)) statLineSelect.value = currentStatLineVal;
 
-            await onSettingLineChange(); onStatLineChange(); 
+            onSettingLineChange(); onStatLineChange(); 
         }
 
-        async function onSettingLineChange() {
+        function onSettingLineChange() {
             const settingSelect = document.getElementById('settingLineSelect'); const displaySpan = document.getElementById('currentSettingLineDisplay');
             if (!settingSelect.value) { 
                 displaySpan.innerText = '未選擇'; displaySpan.style.color = '#e53e3e'; 
@@ -661,9 +661,9 @@
             } 
         }
 
-        async function onLineSelectionChange() { 
+        function onLineSelectionChange() { 
             updateRecordMachineDropdown(); 
-            await loadRecordsByDate(); 
+            loadRecordsByDate(); 
 
             const selectedLineName = document.getElementById('recordLine').value;
             const operatorSelect = document.getElementById('recordOperator');
@@ -691,7 +691,9 @@
             targetMachines.forEach(m => { statMachineSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`; });
         }
 
-        // ================= ★ 基礎設定原因管理 (內聯編輯與屬性互轉) ★ =================
+        // ================= ★ 基礎設定原因管理 ★ =================
+        let inlineEditReasonId = null;
+
         async function fetchReasons() {
             const { data } = await db.from('downtime_reasons').select('id, name, is_planned');
             const plannedList = document.getElementById('plannedReasonList'); 
@@ -721,7 +723,7 @@
                         </div>
                         <div style="text-align: right; margin-top: 5px;">
                             <button class="delete-btn" style="background-color: #a0aec0; padding: 6px 12px;" onclick="cancelEditReason()">取消</button>
-                            <button class="edit-btn" style="background-color: #38a169; padding: 6px 15px;" onclick="saveReasonEdit('${r.id}', '${r.name.replace(/'/g, "\\'")}', ${r.is_planned})">儲存</button>
+                            <button class="edit-btn" style="background-color: #38a169; padding: 6px 15px;" onclick="saveReasonEdit('${r.id}', '${r.name.replace(/'/g, "\\'")}', ${r.is_planned})">儲存變更</button>
                         </div>
                     </li>`;
                     if (r.is_planned) plannedList.innerHTML += liHTML; else unplannedList.innerHTML += liHTML;
@@ -742,7 +744,6 @@
                 await db.from('downtime_reasons').insert([{ name: name, is_planned: isPlanned }]); 
                 document.getElementById(inputId).value = ''; 
                 await fetchReasons(); 
-                if (document.getElementById('recordDate').value) await loadRecordsByDate();
             } 
         }
 
@@ -792,14 +793,12 @@
             
             inlineEditReasonId = null;
             await fetchReasons();
-            if (document.getElementById('recordDate').value) await loadRecordsByDate();
         }
 
         async function deleteReason(id, oldName) { 
             if (confirm('確定刪除這個項目嗎？(原本已報工的歷史紀錄將保留)')) { 
                 await db.from('downtime_reasons').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
                 await fetchReasons(); 
-                if (document.getElementById('recordDate').value) await loadRecordsByDate();
             } 
         }
 
@@ -871,6 +870,7 @@
         }
 
         function removeDowntimeFromList(index) { currentDowntimeEvents.splice(index, 1); renderDowntimeTable(); }
+        
         async function renderDowntimeTable() {
             const activeMapping = await getActiveReasonMapping();
             const tbody = document.getElementById('downtimeTableBody'); tbody.innerHTML = ''; let total = 0;
@@ -1097,7 +1097,7 @@
                             totalDowntime += e.duration_minutes; 
                             
                             const cleanReasonName = stripDel(e.downtime_reasons.name);
-                            // ★ 動態同步基礎設定分類
+                            // ★ 預覽表明細：動態比對分類
                             let dynamicIsPlanned = e.downtime_reasons.is_planned;
                             if (activeMapping[cleanReasonName] !== undefined) {
                                 dynamicIsPlanned = activeMapping[cleanReasonName];
@@ -1166,8 +1166,6 @@
             document.getElementById('editDtRemark').value = item.remark || '';
             
             inlineDowntimeEvents.splice(idx, 1);
-            
-            // Re-render
             getActiveReasonMapping().then(mapping => {
                 document.getElementById('inlineDowntimeListContainer').innerHTML = generateInlineDowntimeListHTML(mapping);
             });
@@ -1210,7 +1208,6 @@
             inlineDowntimeEvents.push({ reasonId, reasonName, duration: totalDuration, isPlanned: isPlanned, remark: remark });
 
             select.value = ''; document.getElementById('editDtHour').value = '0'; document.getElementById('editDtMinute').value = '0'; document.getElementById('editDtRemark').value = '';
-            
             getActiveReasonMapping().then(mapping => {
                 document.getElementById('inlineDowntimeListContainer').innerHTML = generateInlineDowntimeListHTML(mapping);
             });
@@ -1339,7 +1336,7 @@
                         const rName = stripDel(event.downtime_reasons.name);
                         const rMark = event.remark ? event.remark : '';
                         
-                        // ★ 強制檢查最新狀態
+                        // ★ 導出報表時動態套用最新分類
                         let dynamicIsPlanned = event.downtime_reasons.is_planned;
                         if (activeMapping[rName] !== undefined) {
                             dynamicIsPlanned = activeMapping[rName];
@@ -1352,7 +1349,7 @@
                             recordReasonMap[rName] = { duration: duration, isPlanned: dynamicIsPlanned, remarks: [] };
                         } else {
                             recordReasonMap[rName].duration += duration;
-                            recordReasonMap[rName].isPlanned = dynamicIsPlanned;
+                            recordReasonMap[rName].isPlanned = dynamicIsPlanned; // 更新狀態
                         }
                         if (rMark) recordReasonMap[rName].remarks.push(rMark);
                     });
@@ -1503,15 +1500,15 @@
             });
             monthlyExportData.sort((a,b) => a.月份.localeCompare(b.月份) || a.機台.localeCompare(b.機台));
 
-            await renderSummaryAndChart();
+            await renderSummaryAndChart(activeMapping);
         }
 
-        async function renderSummaryAndChart() {
+        async function renderSummaryAndChart(activeMapping) {
+            if (!activeMapping) activeMapping = await getActiveReasonMapping();
+            
             if (!currentQueriedRecords || currentQueriedRecords.length === 0) return;
             const selectedMachineId = document.getElementById('summaryMachineFilter').value;
             if (!selectedMachineId) return; 
-
-            const activeMapping = await getActiveReasonMapping();
 
             let filteredRecords = currentQueriedRecords;
             if (selectedMachineId !== 'ALL') {
@@ -1622,6 +1619,11 @@
             document.getElementById('page-title').innerText = title; 
             document.querySelectorAll('.nav-links a').forEach(l => l.classList.remove('active')); 
             document.getElementById('nav-' + pageId).classList.add('active'); 
+            
+            // ★ 切換到每日報工時，強制重新載入，確保套用最新狀態
+            if (pageId === 'daily-record') {
+                loadRecordsByDate();
+            }
         }
     </script>
 </body>

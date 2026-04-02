@@ -3,801 +3,1584 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統 (v8.8 Input Validation)</title>
+    <title>中科廠 稼動率統計</title>
     
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <style>
-        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        th { position: sticky; top: 0; background-color: #f3f4f6; z-index: 10; white-space: nowrap; }
-        td { white-space: nowrap; }
-        .selected-row { background-color: #eff6ff; border-left: 4px solid #8b5cf6; }
-        .checkbox-wrapper input:checked + div { background-color: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
+        body { font-family: "Microsoft JhengHei", Arial, sans-serif; margin: 0; display: flex; height: 100vh; background-color: #f4f7f6; color: #333; overflow: hidden; }
+        #sidebar { width: 250px; background-color: #1a202c; color: white; transition: all 0.3s; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; background-color: #2d3748; text-align: center; border-bottom: 1px solid #4a5568; }
+        .sidebar-header h3 { margin: 0; font-size: 1.2rem; color: #fff; }
+        .nav-links { list-style: none; padding: 0; margin: 0; }
+        .nav-links li a { display: block; padding: 15px 25px; color: #a0aec0; text-decoration: none; font-size: 16px; transition: 0.2s; }
+        .nav-links li a:hover { background-color: #2d3748; color: white; }
+        .nav-links li a.active { background-color: #3182ce; color: white; border-left: 5px solid #63b3ed; }
+        .nav-links li a i { margin-right: 10px; width: 20px; text-align: center; }
+
+        #main-content { flex: 1; display: flex; flex-direction: column; width: 100%; }
+        header { background: #fff; padding: 15px 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; align-items: center; }
+        #page-title { margin: 0; font-size: 1.2rem; color: #2c3e50; font-weight: bold; }
+        .content-wrapper { padding: 20px; overflow-y: auto; flex: 1; }
+
+        .section { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); flex: 1; }
+        .input-group { display: flex; gap: 10px; margin-bottom: 15px; }
+
+        .time-picker { display: flex; align-items: center; gap: 5px; }
+        .time-picker select { flex: 1; padding: 10px; border: 1px solid #cbd5e0; border-radius: 4px; box-sizing: border-box; }
+        .time-picker span { font-weight: bold; color: #4a5568; }
+
+        input[type="text"], input[type="date"], input[type="number"], select { padding: 10px; border: 1px solid #cbd5e0; border-radius: 4px; box-sizing: border-box; width: 100%; }
+        button { padding: 10px 15px; background-color: #3182ce; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+        button:hover { background-color: #2b6cb0; }
+
+        ul { list-style: none; padding: 0; }
+        li { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #edf2f7; background-color: #fff; margin-bottom: 5px; border-radius: 4px; flex-wrap: wrap; gap: 5px; }
+        .btn-group { display: flex; gap: 5px; }
+        .edit-btn { background-color: #48bb78; padding: 5px 10px; font-size: 12px; }
+        .edit-btn:hover { background-color: #38a169; }
+        .delete-btn { background-color: #e53e3e; padding: 5px 10px; font-size: 12px; }
+        .delete-btn:hover { background-color: #c53030; }
+
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px; align-items: end; }
+        @media (max-width: 1200px) { .form-grid { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 900px) { .container { grid-template-columns: 1fr !important; } }
+
+        .form-grid label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; color: #4a5568; }
         
-        /* 行事曆樣式 */
-        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background-color: #e5e7eb; border: 1px solid #e5e7eb; }
-        .calendar-cell { min-height: 60px; background: white; padding: 2px; font-size: 0.7rem; transition: all 0.2s; cursor: pointer; display: flex; flex-direction: column; }
-        @media (min-width: 768px) {
-            .calendar-cell { min-height: 80px; padding: 4px; font-size: 0.75rem; }
-            .calendar-grid { gap: 2px; }
+        .checkbox-container { display: flex; align-items: center; gap: 10px; padding-top: 5px; }
+        .checkbox-container input { width: auto; transform: scale(1.3); cursor: pointer; }
+        .checkbox-container label { margin-bottom: 0; cursor: pointer; font-size: 14px; color: #2d3748; }
+
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .data-table th, .data-table td { border: 1px solid #e2e8f0; padding: 10px; text-align: center; vertical-align: middle; }
+        .data-table th { background-color: #f7fafc; font-weight: bold; }
+        .total-summary { text-align: right; margin-top: 15px; font-size: 1.1rem; font-weight: bold; color: #e53e3e; }
+        .save-btn { background-color: #3182ce; font-size: 16px; padding: 12px 30px; border-radius: 8px; }
+        .save-btn:hover { background-color: #2b6cb0; }
+
+        .stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .card { padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: white; }
+        .oee-card { background: linear-gradient(135deg, #4299e1, #3182ce); }
+        .downtime-card { background: linear-gradient(135deg, #f56565, #e53e3e); }
+        .card h3 { margin: 0 0 10px 0; font-size: 1.1rem; opacity: 0.9; }
+        .card div { font-size: 2.5rem; font-weight: bold; }
+        .chart-container { margin-top: 30px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); height: 350px; display: flex; justify-content: center; }
+        
+        optgroup { font-weight: bold; color: #2c3e50; }
+
+        @media (max-width: 768px) {
+            .form-grid { grid-template-columns: 1fr !important; gap: 10px; }
+            .stat-cards { grid-template-columns: 1fr !important; }
+            .input-group { flex-direction: column; align-items: stretch; }
+            .input-group > * { width: 100%; margin-bottom: 5px; }
+            .time-picker { flex-direction: row; }
+            .data-table { display: block; overflow-x: auto; white-space: nowrap; width: 100%; }
+            .content-wrapper { padding: 10px; }
+            .section { padding: 15px; }
+            .chart-container { height: 280px; padding: 10px; }
         }
-        .calendar-cell:hover { background-color: #f9fafb; }
-        .calendar-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: bold; padding-bottom: 8px; color: #4b5563; font-size: 0.8rem; }
-        .prod-tag { margin-bottom: 1px; padding: 1px 2px; border-radius: 2px; background-color: #dbeafe; color: #1e40af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.65rem; }
-        .prod-tag.highlight { background-color: #2563eb; color: white; border: 1px solid #1d4ed8; font-weight: bold; }
-        .fpy-tag { margin-bottom: 1px; padding: 1px 2px; border-radius: 2px; background-color: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; font-size: 0.6rem; }
-        .ooc-tag { margin-bottom: 1px; padding: 1px 2px; border-radius: 2px; background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; font-size: 0.6rem; }
-        
-        /* 手機版優化 */
-        input, select { font-size: 16px !important; } /* 防止 iOS 縮放 */
     </style>
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans h-screen flex overflow-hidden">
+<body>
 
-<div id="app" class="flex w-full h-full flex-col md:flex-row">
-
-    <aside class="hidden md:flex w-64 bg-slate-900 text-white flex-col shadow-xl flex-shrink-0">
-        <div class="p-6 text-center border-b border-slate-700">
-            <h1 class="text-2xl font-bold tracking-wider">SMT 管理系統</h1>
-            <p class="text-xs text-slate-400 mt-1">v8.8 Input Validation</p>
+    <nav id="sidebar">
+        <div class="sidebar-header">
+            <h3><i class="fas fa-microchip"></i> 中科廠 稼動率統計</h3>
         </div>
-        <nav class="flex-1 py-6 space-y-2 overflow-y-auto">
-            <a @click="currentTab = 'report'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'report'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
-                <i class="fas fa-edit w-6"></i> <span>每日報工</span>
-            </a>
-            <a @click="currentTab = 'fpy'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'fpy'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
-                <i class="fas fa-check-double w-6"></i> <span>直通率管理</span>
-            </a>
-            <a @click="currentTab = 'ooc'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'ooc'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
-                <i class="fas fa-exclamation-triangle w-6"></i> <span>OOC 紀錄</span>
-            </a>
-            <a @click="currentTab = 'orders'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'orders'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
-                <i class="fas fa-clipboard-list w-6"></i> <span>工單管理</span>
-            </a>
-            <a @click="currentTab = 'stats'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'stats'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
-                <i class="fas fa-chart-bar w-6"></i> <span>統計與導出</span>
-            </a>
-            <a @click="currentTab = 'settings'" :class="{'bg-blue-600 border-l-4 border-yellow-400': currentTab === 'settings'}" class="flex items-center px-6 py-3 cursor-pointer hover:bg-slate-700 transition">
-                <i class="fas fa-cog w-6"></i> <span>基礎設定</span>
-            </a>
-        </nav>
-    </aside>
-
-    <main class="flex-1 overflow-y-auto p-4 md:p-8 relative pb-24 md:pb-8">
-        
-        <div v-if="loading" class="absolute inset-0 bg-white/80 flex justify-center items-center z-50">
-            <div class="text-xl text-blue-600 font-bold"><i class="fas fa-circle-notch fa-spin mr-2"></i>資料同步中...</div>
-        </div>
-
-        <div v-if="currentTab === 'report'" class="max-w-6xl mx-auto space-y-4 md:space-y-6 animate-fade-in">
-            <h2 class="text-xl md:text-2xl font-bold text-gray-700 border-b pb-2"><i class="fas fa-edit mr-2"></i>每日生產日報表</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 space-y-6">
-                    <div class="bg-white p-4 md:p-6 rounded-lg shadow border-l-4 border-blue-500 relative">
-                        <div v-if="report.currentId" class="absolute top-2 right-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded"><i class="fas fa-pen mr-1"></i>編輯模式</div>
-                        <h3 class="font-bold text-lg mb-4 text-blue-800">步驟 1: 設定今日生產數據</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div><label class="block text-sm font-bold mb-1 text-gray-500">生產日期</label><input type="date" v-model="report.date" @change="fetchDailyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div>
-                            <div><label class="block text-sm font-bold mb-1 text-gray-500">工單號碼 (僅顯示未完成)</label><select v-model="report.selectedWoNumber" @change="onWoNumberChange" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-mono text-blue-800 font-bold"><option :value="null" disabled>-- 請選擇工單 --</option><option v-for="num in activeWoNumbers" :value="num">{{ num }}</option></select></div>
-                            <div><label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label><select v-model="report.wo_id" @change="fetchDailyRecord" :disabled="!report.selectedWoNumber" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 bg-white font-bold"><option :value="null" disabled>-- 請選擇機種 --</option><option v-for="wo in availableModelsForSelectedWo" :value="wo.id">{{ wo.models?.name }}</option></select></div>
-                            <div class="md:col-span-3 mt-2"><label class="block text-sm font-bold mb-1 text-gray-500">當日投入總數</label><div class="flex"><input type="number" v-model="report.inputQty" class="w-full border p-2 rounded-l focus:ring-2 focus:ring-blue-500 text-lg" placeholder="0"><button @click="saveDailyInput" class="bg-blue-600 text-white px-4 md:px-6 rounded-r hover:bg-blue-700 whitespace-nowrap font-bold"><i class="fas fa-save mr-1"></i> {{ report.currentId ? '更新' : '建立' }}</button></div></div>
-                        </div>
-                    </div>
-                    <div v-if="report.currentId" class="bg-white p-4 md:p-6 rounded-lg shadow border-l-4 border-red-500 animate-fade-in">
-                        <h3 class="font-bold text-lg mb-4 text-red-800">步驟 2: 不良品紀錄</h3>
-                        <div class="flex flex-col md:flex-row gap-2 mb-6 items-stretch md:items-end bg-red-50 p-4 rounded border border-red-100">
-                            <div class="flex-1 w-full"><label class="text-xs font-bold text-gray-500">不良現象</label><select v-model="defectForm.typeId" class="w-full border p-2 rounded bg-white"><option :value="null">-- 選擇現象 --</option><option v-for="t in sortedDefectTypes" :value="t.id">{{ t.name }}</option></select></div>
-                            <div class="flex-1 w-full"><label class="text-xs font-bold text-gray-500">位置代碼</label><select v-model="defectForm.locationId" class="w-full border p-2 rounded bg-white"><option :value="null">-- 選擇位置 --</option><option v-for="l in sortedLocations" :value="l.id">{{ l.code }}</option></select></div>
-                            <div class="w-full md:w-32"><label class="text-xs font-bold text-gray-500">數量</label><input type="number" v-model="defectForm.qty" class="w-full border p-2 rounded" min="1" value="1"></div>
-                            <button @click="addDefect" class="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 font-bold w-full md:w-auto"><i class="fas fa-plus"></i> 新增</button>
-                        </div>
-                        <div class="overflow-x-auto"><table class="w-full text-left text-sm border"><thead class="bg-gray-100"><tr><th class="p-2 border">不良現象</th><th class="p-2 border">位置</th><th class="p-2 border text-right">數量</th><th class="p-2 border text-center">操作</th></tr></thead><tbody><tr v-for="log in report.logs" :key="log.id" class="hover:bg-gray-50"><td class="p-2 border">{{ log.defect_types?.name }}</td><td class="p-2 border">{{ log.defect_locations?.code }}</td><td class="p-2 border text-right font-bold text-red-600">{{ log.quantity }}</td><td class="p-2 border text-center"><button @click="deleteDefect(log.id)" class="text-red-400 hover:text-red-700"><i class="fas fa-trash-alt"></i></button></td></tr><tr v-if="report.logs.length === 0"><td colspan="4" class="p-4 text-center text-green-600 bg-green-50 font-bold"><i class="fas fa-check-circle mr-1"></i> 目前無不良紀錄 (良率 100%)</td></tr></tbody></table></div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-lg shadow overflow-hidden flex flex-col h-[400px] md:h-[600px]">
-                    <div class="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between items-center"><span><i class="fas fa-history mr-2"></i>近期生產紀錄</span><button @click="loadHistory" class="text-blue-600 text-sm hover:underline"><i class="fas fa-sync"></i> 刷新</button></div>
-                    <div class="overflow-y-auto flex-1 p-2 space-y-2"><div v-for="rec in historyList" :key="rec.id" @click="loadRecordForEdit(rec)" class="p-3 border rounded cursor-pointer hover:shadow transition text-sm group relative" :class="report.currentId === rec.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'bg-white border-gray-200'"><div class="flex justify-between items-start mb-1"><span class="font-bold text-gray-800">{{ rec.production_date }}</span><span class="text-xs text-gray-500">ID: {{ rec.id }}</span></div><div class="text-blue-600 font-bold mb-1">{{ rec.work_orders?.wo_number }}</div><div class="text-gray-600 text-xs mb-2">{{ rec.work_orders?.models?.name }}</div><div class="flex justify-between items-center border-t pt-2"><span class="text-gray-600">投入: <b>{{ rec.input_quantity }}</b></span><span v-if="rec.defect_count > 0" class="text-red-600 font-bold bg-red-100 px-2 py-0.5 rounded text-xs">不良: {{ rec.defect_count }}</span><span v-else class="text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded text-xs">無不良</span></div><button @click.stop="deleteDailyRecord(rec.id)" class="absolute top-2 right-2 opacity-100 md:opacity-0 group-hover:opacity-100 bg-white text-red-400 hover:text-red-600 shadow-sm border px-2 rounded"><i class="fas fa-trash"></i></button></div><div v-if="historyList.length === 0" class="text-center text-gray-400 py-10">尚無紀錄</div></div>
-                </div>
-            </div>
-            <div class="bg-gray-800 text-white p-4 md:p-6 rounded-lg shadow-lg mt-8">
-                <h3 class="font-bold text-lg mb-4 text-yellow-400"><i class="fas fa-file-csv mr-2"></i>歷史原始資料導出 (Raw Data)</h3>
-                <div class="flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end">
-                    <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="rawExportFilter.start" class="w-full bg-gray-700 border-gray-600 border p-2 rounded text-sm text-white focus:ring-2 focus:ring-yellow-400"></div>
-                    <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="rawExportFilter.end" class="w-full bg-gray-700 border-gray-600 border p-2 rounded text-sm text-white focus:ring-2 focus:ring-yellow-400"></div>
-                    <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">機種</label><select v-model="rawExportFilter.modelId" class="w-full bg-gray-700 border-gray-600 border p-2 rounded text-sm text-white"><option value="all">全部</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select></div>
-                    <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="rawExportFilter.woId" class="w-full bg-gray-700 border-gray-600 border p-2 rounded text-sm text-white"><option value="all">全部</option><option v-for="w in data.workOrders" :value="w.id">{{ w.wo_number }}</option></select></div>
-                    <div><button @click="exportRawData" class="w-full bg-yellow-500 text-gray-900 px-6 py-2 rounded font-bold hover:bg-yellow-400 transition"><i class="fas fa-download mr-1"></i> 下載 Excel</button></div>
-                </div>
-            </div>
-        </div>
-
-        <div v-if="currentTab === 'fpy'" class="max-w-6xl mx-auto space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl md:text-2xl font-bold text-gray-700"><i class="fas fa-check-double mr-2"></i>直通率管理 (FPY)</h2>
-                <button @click="openFpyModal()" class="bg-purple-600 text-white px-3 py-2 text-sm md:text-base rounded shadow hover:bg-purple-700"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
-            </div>
-            <div class="bg-white rounded shadow overflow-x-auto max-h-[300px] overflow-y-auto mb-6">
-                <table class="w-full text-left border-collapse relative min-w-[600px]"><thead class="bg-gray-100 text-gray-600 uppercase text-sm"><tr><th class="p-4 border-b z-10">日期</th><th class="p-4 border-b z-10">工單號碼</th><th class="p-4 border-b z-10">機種</th><th class="p-4 border-b text-center z-10">SPI (%)</th><th class="p-4 border-b text-center z-10">AOI (%)</th><th class="p-4 border-b text-center z-10">操作</th></tr></thead><tbody><tr v-for="rec in fpyHistory" :key="rec.id" @click="selectedFpyId = (selectedFpyId === rec.id ? null : rec.id)" class="hover:bg-gray-50 border-b cursor-pointer transition" :class="{'selected-row bg-purple-50': selectedFpyId === rec.id}"><td class="p-4 font-bold text-gray-700">{{ rec.production_date }}</td><td class="p-4 font-bold text-blue-600">{{ rec.work_orders?.wo_number }}</td><td class="p-4 text-sm">{{ rec.work_orders?.models?.name }}</td><td class="p-4 text-center font-mono text-green-600 font-bold">{{ rec.spi_rate }}%</td><td class="p-4 text-center font-mono text-blue-600 font-bold">{{ rec.aoi_rate }}%</td><td class="p-4 text-center space-x-2"><button @click.stop="openFpyModal(rec)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button><button @click.stop="deleteFpy(rec.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button></td></tr></tbody></table>
-            </div>
-            <div class="bg-white rounded shadow p-2 md:p-4"><div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-700"><i class="fas fa-calendar-alt mr-2 text-purple-500"></i>直通率日曆 <span v-if="selectedFpyId" class="hidden md:inline text-sm font-normal text-purple-600 ml-2">(已篩選)</span></h3><div class="flex items-center gap-4"><button @click="changeMonth(-1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-left"></i></button><span class="font-bold text-lg min-w-[100px] text-center">{{ calendarYear }} 年 {{ calendarMonth + 1 }} 月</span><button @click="changeMonth(1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-right"></i></button></div></div><div class="calendar-header"><div class="text-red-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-500">六</div></div><div class="calendar-grid"><div v-for="n in calendarPadding" :key="'pad-'+n" class="bg-gray-50"></div><div v-for="day in fpyCalendarDays" :key="day.dateStr" @click="openFpyDayDetail(day)" class="calendar-cell"><div class="text-right text-gray-500 font-bold mb-1" :class="{'text-blue-600': isToday(day.dateStr)}">{{ day.dayNum }}</div><template v-for="item in day.items" :key="item.id"><div v-if="!selectedFpyId || (fpyHistory.find(f=>f.id===selectedFpyId)?.wo_id === item.wo_id)" class="fpy-tag text-xs truncate" :class="{'highlight': selectedFpyId === item.id}" :title="`${item.wo_number}`"><span class="font-bold">{{ item.wo_number.slice(-4) }}</span>: {{ item.spi }}/{{ item.aoi }}</div></template></div></div></div>
-            <div v-if="showFpyModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50"><div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-[500px]"><h3 class="text-xl font-bold mb-4 border-b pb-2 text-purple-700">{{ fpyForm.id ? '編輯直通率' : '輸入直通率' }}</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label class="block text-sm font-bold mb-1 text-gray-500">生產日期</label><input type="date" v-model="fpyForm.date" @change="fetchFpyRecord" class="w-full border p-2 rounded focus:ring-2 focus:ring-purple-500"></div><div>
-                <div class="flex justify-between items-center mb-1">
-                    <label class="block text-sm font-bold text-gray-500">工單號碼</label>
-                    <label class="text-xs flex items-center text-blue-600 cursor-pointer hover:text-blue-800">
-                        <input type="checkbox" v-model="fpyForm.showAllWo" class="mr-1"> 包含已完成
-                    </label>
-                </div>
-                <select v-model="fpyForm.selectedWoNumber" @change="fetchFpyRecord" class="w-full border p-2 rounded bg-white font-mono text-blue-800 font-bold"><option :value="null" disabled>-- 請選擇工單 --</option><option v-for="num in fpyWoList" :value="num">{{ num }}</option></select></div><div class="md:col-span-2"><label class="block text-sm font-bold mb-1 text-gray-500">選擇機種</label><select v-model="fpyForm.wo_id" @change="fetchFpyRecord" :disabled="!fpyForm.selectedWoNumber" class="w-full border p-2 rounded bg-white font-bold"><option :value="null" disabled>-- 請選擇機種 --</option><option v-for="wo in availableModelsForFpy" :value="wo.id">{{ wo.models?.name }}</option></select></div><div><label class="block text-sm font-bold mb-1 text-gray-500">SPI 直通率 (%)</label><input type="number" step="0.01" v-model="fpyForm.spi" class="w-full border p-2 rounded text-lg font-bold text-center" placeholder="99.5"></div><div><label class="block text-sm font-bold mb-1 text-gray-500">AOI 直通率 (%)</label><input type="number" step="0.01" v-model="fpyForm.aoi" class="w-full border p-2 rounded text-lg font-bold text-center" placeholder="98.5"></div></div><div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showFpyModal = false" class="px-4 py-2 text-gray-600">取消</button><button @click="saveFpy" class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 font-bold">儲存</button></div></div></div>
-            <div v-if="fpyDayModal.show" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50"><div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-96"><h3 class="text-xl font-bold mb-4 text-center border-b pb-2">{{ fpyDayModal.date }} 直通率明細</h3><div class="space-y-3 max-h-64 overflow-y-auto"><div v-for="item in fpyDayModal.list" :key="item.id" class="p-3 bg-purple-50 rounded border border-purple-200"><div class="flex justify-between font-bold text-purple-700"><span>{{ item.wo_number }}</span></div><div class="text-sm text-gray-600 mb-1">{{ item.model_name }}</div><div class="flex justify-between text-sm font-mono"><span class="text-green-600">SPI: {{ item.spi }}%</span><span class="text-blue-600">AOI: {{ item.aoi }}%</span></div></div><div v-if="fpyDayModal.list.length === 0" class="text-center text-gray-400 py-4">無數據</div></div><div class="mt-4 text-center"><button @click="fpyDayModal.show = false" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700">關閉</button></div></div></div>
-        </div>
-
-        <div v-if="currentTab === 'ooc'" class="max-w-6xl mx-auto space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl md:text-2xl font-bold text-gray-700"><i class="fas fa-exclamation-triangle mr-2 text-red-500"></i>OOC 紀錄 (品質異常)</h2>
-                <button @click="openOocModal()" class="bg-red-600 text-white px-3 py-2 text-sm md:text-base rounded shadow hover:bg-red-700"><i class="fas fa-plus mr-1"></i> 新增異常</button>
-            </div>
-
-            <div class="bg-white rounded shadow overflow-x-auto max-h-[300px] overflow-y-auto mb-6">
-                <table class="w-full text-left border-collapse relative min-w-[700px]">
-                    <thead class="bg-gray-100 text-gray-600 uppercase text-sm">
-                        <tr>
-                            <th class="p-4 border-b z-10">日期/時間</th>
-                            <th class="p-4 border-b z-10">工單號碼</th>
-                            <th class="p-4 border-b z-10">機種</th>
-                            <th class="p-4 border-b z-10">機台</th>
-                            <th class="p-4 border-b z-10">異常原因</th>
-                            <th class="p-4 border-b text-center z-10">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="rec in oocHistory" :key="rec.id" 
-                            @click="selectedOocId = (selectedOocId === rec.id ? null : rec.id)"
-                            class="hover:bg-gray-50 border-b cursor-pointer transition"
-                            :class="{'selected-row bg-red-50': selectedOocId === rec.id}">
-                            <td class="p-4 font-bold text-gray-700">
-                                {{ rec.production_date }}
-                                <span v-if="rec.occurrence_time" class="block text-xs text-gray-500 font-normal">{{ rec.occurrence_time.slice(0,5) }}</span>
-                            </td>
-                            <td class="p-4 font-bold text-blue-600">{{ rec.work_orders?.wo_number }}</td>
-                            <td class="p-4 text-sm">{{ rec.work_orders?.models?.name }}</td>
-                            <td class="p-4 text-sm font-bold">{{ rec.machines?.name }}</td>
-                            <td class="p-4 text-sm text-red-600 font-bold">{{ rec.ooc_causes?.name }}</td>
-                            <td class="p-4 text-center space-x-2">
-                                <button @click.stop="openOocModal(rec)" class="text-blue-400 hover:text-blue-600"><i class="fas fa-pen"></i></button>
-                                <button @click.stop="deleteOoc(rec.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button></td></tr><tr v-if="oocHistory.length === 0"><td colspan="6" class="p-8 text-center text-gray-400">目前無 OOC 紀錄</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="bg-white rounded shadow p-2 md:p-4">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold text-gray-700"><i class="fas fa-calendar-alt mr-2 text-red-500"></i>OOC 日曆</h3>
-                    <div class="flex items-center gap-4"><button @click="changeMonth(-1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-left"></i></button><span class="font-bold text-lg min-w-[100px] text-center">{{ calendarYear }} 年 {{ calendarMonth + 1 }} 月</span><button @click="changeMonth(1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-right"></i></button></div>
-                </div>
-                <div class="calendar-header"><div class="text-red-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-500">六</div></div>
-                <div class="calendar-grid">
-                    <div v-for="n in calendarPadding" :key="'pad-'+n" class="bg-gray-50"></div>
-                    <div v-for="day in oocCalendarDays" :key="day.dateStr" @click="openOocDayDetail(day)" class="calendar-cell">
-                        <div class="text-right text-gray-500 font-bold mb-1" :class="{'text-blue-600': isToday(day.dateStr)}">{{ day.dayNum }}</div>
-                        <template v-for="item in day.items" :key="item.id">
-                            <div v-if="!selectedOocId || (oocHistory.find(f=>f.id===selectedOocId)?.wo_id === item.wo_id)"
-                                 class="ooc-tag text-xs truncate" :class="{'highlight': selectedOocId === item.id}"
-                                 :title="`${item.cause} (${item.machine})`">
-                                {{ item.cause }}
-                            </div>
-                        </template>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="showOocModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
-                <div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-[500px]">
-                    <h3 class="text-xl font-bold mb-4 border-b pb-2 text-red-700">{{ oocForm.id ? '編輯 OOC' : '新增 OOC' }}</h3>
-                    <div class="space-y-4">
-                        <div class="grid grid-cols-2 gap-4">
-                            <div><label class="block text-sm font-bold mb-1 text-gray-500">發生日期</label><input type="date" v-model="oocForm.date" class="w-full border p-2 rounded"></div>
-                            <div><label class="block text-sm font-bold mb-1 text-gray-500">發生時間</label><input type="time" v-model="oocForm.time" class="w-full border p-2 rounded"></div>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-bold mb-1 text-gray-500">工單號碼</label>
-                            <select v-model="oocForm.selectedWoNumber" class="w-full border p-2 rounded bg-white font-mono text-blue-800 font-bold">
-                                <option :value="null" disabled>-- 請選擇工單 --</option>
-                                <option v-for="num in activeWoNumbers" :value="num">{{ num }}</option>
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-bold mb-1 text-gray-500">機種</label>
-                            <select v-model="oocForm.wo_id" :disabled="!oocForm.selectedWoNumber" class="w-full border p-2 rounded bg-white font-bold">
-                                <option :value="null" disabled>-- 請選擇機種 --</option>
-                                <option v-for="wo in availableModelsForOoc" :value="wo.id">{{ wo.models?.name }}</option>
-                            </select>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">機台</label>
-                                <select v-model="oocForm.machine_id" class="w-full border p-2 rounded bg-white">
-                                    <option :value="null">-- 選擇機台 --</option>
-                                    <option v-for="m in data.machines" :value="m.id">{{ m.name }}</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold mb-1 text-gray-500">異常原因</label>
-                                <select v-model="oocForm.cause_id" class="w-full border p-2 rounded bg-white">
-                                    <option :value="null">-- 選擇原因 --</option>
-                                    <option v-for="c in data.oocCauses" :value="c.id">{{ c.name }}</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mt-6 flex justify-end gap-2 border-t pt-4">
-                        <button @click="showOocModal = false" class="px-4 py-2 text-gray-600">取消</button>
-                        <button @click="saveOoc" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-bold">儲存</button>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="oocDayModal.show" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
-                <div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-96">
-                    <h3 class="text-xl font-bold mb-4 text-center border-b pb-2">{{ oocDayModal.date }} OOC 異常明細</h3>
-                    <div class="space-y-3 max-h-64 overflow-y-auto">
-                        <div v-for="item in oocDayModal.list" :key="item.id" class="p-3 bg-red-50 rounded border border-red-200 relative">
-                            <div v-if="item.time" class="absolute top-2 right-2 text-xs font-mono bg-red-100 text-red-800 px-1 rounded">{{ item.time.slice(0,5) }}</div>
-                            
-                            <div class="flex justify-between font-bold text-red-700 pr-10">
-                                <span>{{ item.wo_number }}</span>
-                            </div>
-                            <div class="text-sm text-gray-600 mb-1 flex items-center gap-2">
-                                {{ item.model_name }}
-                                <span class="text-xs bg-white px-2 py-0.5 rounded border text-gray-500">{{ item.machine }}</span>
-                            </div>
-                            <div class="font-bold text-red-600 mt-1 flex items-center">
-                                <i class="fas fa-exclamation-circle mr-2"></i> {{ item.cause }}
-                            </div>
-                        </div>
-                        <div v-if="oocDayModal.list.length === 0" class="text-center text-gray-400 py-4">無異常紀錄</div>
-                    </div>
-                    <div class="mt-4 text-center">
-                        <button @click="oocDayModal.show = false" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700">關閉</button>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-
-        <div v-if="currentTab === 'orders'" class="max-w-6xl mx-auto space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex flex-col md:flex-row justify-between items-center mb-2 gap-4">
-                <h2 class="text-xl md:text-2xl font-bold text-gray-700 self-start md:self-center"><i class="fas fa-clipboard-list mr-2"></i>工單管理</h2>
-                <div class="flex gap-2 w-full md:w-auto"><div class="relative flex-1 md:w-64"><i class="fas fa-search absolute left-3 top-3 text-gray-400"></i><input v-model="orderSearch" placeholder="搜尋工單號或機種..." class="w-full border p-2 pl-10 rounded shadow-sm focus:ring-2 focus:ring-indigo-500"></div><button @click="openWoModal()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 whitespace-nowrap"><i class="fas fa-plus mr-1"></i> 新增工單</button></div>
-            </div>
-            <div class="bg-white rounded shadow overflow-x-auto max-h-[400px] overflow-y-auto">
-                <table class="w-full text-left border-collapse relative min-w-[800px]">
-                    <thead class="bg-gray-100 text-gray-600 uppercase text-sm">
-                        <tr>
-                            <th class="p-4 border-b z-10">工單號碼</th>
-                            <th class="p-4 border-b z-10">機種</th>
-                            <th class="p-4 border-b text-right z-10">預計</th>
-                            <th class="p-4 border-b text-right z-10">已做</th>
-                            <th class="p-4 border-b text-right z-10">剩餘</th>
-                            <th class="p-4 border-b text-center z-10">狀態</th>
-                            <th class="p-4 border-b text-center z-10">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-if="processedWorkOrders.active.length > 0">
-                            <td colspan="7" class="bg-indigo-50 text-indigo-800 font-bold p-3 text-center text-sm border-b">
-                                <i class="fas fa-spinner fa-pulse mr-1"></i> 進行中工單
-                            </td>
-                        </tr>
-                        <tr v-for="wo in processedWorkOrders.active" :key="wo.id" @click="selectWoForCalendar(wo)" class="hover:bg-gray-50 border-b cursor-pointer transition" :class="{'bg-yellow-50 border-l-4 border-yellow-500': selectedWoId === wo.id}">
-                            <td v-if="wo._isFirstOfGroup" :rowspan="wo._rowspan" class="p-4 font-bold text-blue-600 border-r border-gray-200 align-middle">{{ wo.wo_number }}</td>
-                            <td class="p-4 text-sm">{{ wo.models?.name }}</td>
-                            <td class="p-4 text-right text-gray-500">{{ wo.target_quantity }}</td>
-                            <td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td>
-                            <td class="p-4 text-right font-bold" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 ? 'text-green-600' : 'text-orange-500'">{{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}</td>
-                            <td class="p-4 text-center"><span v-if="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span><span v-else class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold animate-pulse">生產中</span></td>
-                            <td class="p-4 text-center space-x-2"><button @click.stop="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button><button @click.stop="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button></td>
-                        </tr>
-
-                        <tr v-if="processedWorkOrders.completed.length > 0">
-                            <td colspan="7" class="bg-gray-200 text-gray-600 font-bold p-3 text-center text-sm border-b border-t-4 border-t-white shadow-sm sticky left-0 z-0">
-                                <i class="fas fa-check-circle mr-1"></i> 已完成工單
-                            </td>
-                        </tr>
-                        <tr v-for="wo in processedWorkOrders.completed" :key="'comp-'+wo.id" @click="selectWoForCalendar(wo)" class="hover:bg-gray-50 border-b cursor-pointer transition opacity-75" :class="{'bg-yellow-50 border-l-4 border-yellow-500 opacity-100': selectedWoId === wo.id}">
-                            <td v-if="wo._isFirstOfGroup" :rowspan="wo._rowspan" class="p-4 font-bold text-gray-500 border-r border-gray-200 align-middle">{{ wo.wo_number }}</td>
-                            <td class="p-4 text-sm">{{ wo.models?.name }}</td>
-                            <td class="p-4 text-right text-gray-500">{{ wo.target_quantity }}</td>
-                            <td class="p-4 text-right font-mono">{{ wo.current_input || 0 }}</td>
-                            <td class="p-4 text-right font-bold text-green-600">{{ Math.max(0, wo.target_quantity - (wo.current_input || 0)) }}</td>
-                            <td class="p-4 text-center"><span class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold"><i class="fas fa-check mr-1"></i>已完成</span></td>
-                            <td class="p-4 text-center space-x-2"><button @click.stop="openWoModal(wo)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button><button @click.stop="deleteWorkOrder(wo.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button></td>
-                        </tr>
-
-                        <tr v-if="processedWorkOrders.active.length === 0 && processedWorkOrders.completed.length === 0">
-                            <td colspan="7" class="p-8 text-center text-gray-400">找不到相符的工單</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="bg-white rounded shadow p-2 md:p-4 mt-6"><div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-700"><i class="fas fa-calendar-alt mr-2 text-indigo-500"></i>生產行事曆 <span class="hidden md:inline text-sm font-normal text-gray-500 ml-2" v-if="selectedWoId">(已篩選: {{ data.workOrders.find(w=>w.id===selectedWoId)?.wo_number }})</span></h3><div class="flex items-center gap-4"><button @click="changeMonth(-1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-left"></i></button><span class="font-bold text-lg min-w-[100px] text-center">{{ calendarYear }} 年 {{ calendarMonth + 1 }} 月</span><button @click="changeMonth(1)" class="text-gray-500 hover:text-black"><i class="fas fa-chevron-right"></i></button></div></div><div class="calendar-header"><div class="text-red-500">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-500">六</div></div><div class="calendar-grid"><div v-for="n in calendarPadding" :key="'pad-'+n" class="bg-gray-50"></div><div v-for="day in calendarDays" :key="day.dateStr" @click="openDayDetail(day)" class="calendar-cell"><div class="text-right text-gray-500 font-bold mb-1" :class="{'text-blue-600': isToday(day.dateStr)}">{{ day.dayNum }}</div><template v-for="prod in day.productions" :key="prod.id"><div v-if="!selectedWoId || selectedWoId === prod.wo_id" class="prod-tag text-xs" :class="{'highlight': selectedWoId === prod.wo_id}" :title="prod.wo_number + ' : ' + prod.qty">{{ prod.qty }} <span class="text-[10px] opacity-75">({{ prod.wo_number.slice(-4) }})</span></div></template></div></div></div>
-            <div v-if="showWoModal" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50"><div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-[500px] max-h-[90vh] overflow-y-auto"><h3 class="text-xl font-bold mb-4 border-b pb-2">{{ isEditingWo ? '編輯單一工單' : '開立新工單' }}</h3><div class="space-y-4"><div><label class="block text-sm font-bold text-gray-500 mb-1">工單號碼</label><input v-model="woForm.number" placeholder="例如 C510..." class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div><div><label class="block text-sm font-bold text-gray-500 mb-1">預計生產數量</label><input v-model="woForm.targetQty" type="number" placeholder="數量" class="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500"></div><div><label class="block text-sm font-bold text-gray-500 mb-2">{{ isEditingWo ? '對應機種 (編輯模式僅能改單一)' : '選擇生產機種 (可多選)' }}</label><div v-if="!isEditingWo" class="border rounded p-2 max-h-48 overflow-y-auto bg-gray-50 grid grid-cols-2 gap-2"><label v-for="m in sortedModels" :key="m.id" class="checkbox-wrapper cursor-pointer"><input type="checkbox" :value="m.id" v-model="woForm.selectedModelIds" class="hidden"><div class="px-3 py-2 border rounded bg-white hover:bg-gray-100 text-sm font-medium transition text-center">{{ m.name }}<i v-if="woForm.selectedModelIds.includes(m.id)" class="fas fa-check-circle text-blue-500 ml-1"></i></div></label></div><select v-else v-model="woForm.modelId" class="w-full border p-2 rounded bg-gray-100"><option :value="null" disabled>選擇機種</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select></div></div><div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showWoModal = false" class="px-4 py-2 text-gray-600">取消</button><button @click="saveWorkOrder" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold">{{ isEditingWo ? '更新' : '建立' }}</button></div></div></div>
-            <div v-if="dayDetailModal.show" class="fixed inset-0 bg-black/50 flex justify-center items-center z-50"><div class="bg-white p-6 rounded shadow-lg w-[95%] md:w-96"><h3 class="text-xl font-bold mb-4 text-center border-b pb-2">{{ dayDetailModal.date }} 生產明細</h3><div class="space-y-3 max-h-64 overflow-y-auto"><div v-for="p in dayDetailModal.list" :key="p.id" class="p-3 bg-gray-50 rounded border border-gray-200"><div class="flex justify-between font-bold text-blue-600"><span>{{ p.wo_number }}</span><span>{{ p.qty }} pcs</span></div><div class="text-sm text-gray-600 mt-1">{{ p.model_name }}</div></div><div v-if="dayDetailModal.list.length === 0" class="text-center text-gray-400 py-4">本日無生產紀錄</div></div><div class="mt-4 text-center"><button @click="dayDetailModal.show = false" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700">關閉</button></div></div></div>
-        </div>
-
-        <div v-if="currentTab === 'stats'" class="max-w-6xl mx-auto animate-fade-in">
-            <h2 class="text-xl md:text-2xl font-bold mb-6 text-gray-700"><i class="fas fa-chart-bar mr-2"></i>統計與導出</h2>
-            <div class="bg-white p-4 rounded shadow mb-6 flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end">
-                <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-500 mb-1">開始日期</label><input type="date" v-model="statsFilter.start" class="w-full border p-2 rounded text-sm"></div>
-                <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-500 mb-1">結束日期</label><input type="date" v-model="statsFilter.end" class="w-full border p-2 rounded text-sm"></div>
-                <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-500 mb-1">機種</label><select v-model="statsFilter.modelId" class="w-full border p-2 rounded text-sm"><option value="all">全部</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select></div>
-                <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-500 mb-1">工單</label><select v-model="statsFilter.woId" class="w-full border p-2 rounded text-sm"><option value="all">全部</option><option v-for="w in data.workOrders" :value="w.id">{{ w.wo_number }}</option></select></div>
-                <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateStats" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">執行統計</button><button @click="exportToExcel" class="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"><i class="fas fa-file-excel mr-1"></i> 導出完整報表</button></div>
-            </div>
-            <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="bg-white p-4 rounded shadow"><h3 class="font-bold border-b pb-2 mb-4">總合統計</h3><div class="grid grid-cols-2 gap-4"><div class="p-3 bg-gray-50 rounded"><div class="text-xs text-gray-500">總投入數</div><div class="text-xl font-bold">{{ statsResult.totalInput }}</div></div><div class="p-3 bg-red-50 rounded"><div class="text-xs text-red-500">總不良數</div><div class="text-xl font-bold text-red-600">{{ statsResult.totalDefects }}</div></div><div class="col-span-2 p-3 bg-green-50 rounded text-center"><div class="text-xs text-green-600">良率 (Yield Rate)</div><div class="text-3xl font-bold text-green-700">{{ statsResult.yieldRate }}%</div></div></div></div>
-                <div class="bg-white p-4 rounded shadow"><h3 class="font-bold border-b pb-2 mb-4">不良現象統計</h3><ul class="space-y-2 max-h-60 overflow-y-auto"><li v-for="item in statsResult.byType" class="flex justify-between text-sm p-2 hover:bg-gray-50 border-b border-dashed"><span>{{ item.name }}</span><span class="font-bold">{{ item.qty }} ({{ item.ratio }}%)</span></li></ul></div>
-                <div class="bg-white p-4 rounded shadow col-span-1 md:col-span-2"><h3 class="font-bold border-b pb-2 mb-4">位置異常統計</h3><div class="flex flex-wrap gap-2"><span v-for="loc in statsResult.byLocation" class="px-3 py-1 bg-gray-100 rounded text-sm border">{{ loc.code }}: <span class="font-bold text-red-600">{{ loc.qty }}</span></span></div></div>
-            </div>
-        </div>
-
-        <div v-if="currentTab === 'settings'" class="max-w-6xl mx-auto animate-fade-in">
-            <h2 class="text-xl md:text-2xl font-bold mb-6 text-gray-700"><i class="fas fa-cog mr-2"></i>系統基礎設定</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div v-for="(cfg, key) in settingConfig" :key="key" class="bg-white p-4 rounded shadow h-80 md:h-96 flex flex-col"><h3 class="font-bold border-b pb-2 mb-2" :class="cfg.colorClass">{{ cfg.title }}</h3><div class="flex gap-2 mb-4"><input v-model="cfg.input" :placeholder="cfg.placeholder" class="border p-2 rounded flex-1 text-sm"><button @click="addSettingItem(key)" class="text-white px-3 rounded hover:opacity-80 transition" :class="cfg.btnColor">+</button></div><ul class="flex-1 overflow-y-auto space-y-1"><li v-for="item in sortedList(key)" :key="item.id" class="flex justify-between items-center p-2 bg-gray-50 rounded text-sm group border border-transparent hover:border-gray-200"><span v-if="editingId !== item.id">{{ item[cfg.field] }}</span><input v-else v-model="editingValue" class="border p-1 rounded w-32 text-xs" @keyup.enter="saveEdit(key, item.id, cfg.field)"><div class="flex gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity"><button v-if="editingId !== item.id" @click="startEdit(item.id, item[cfg.field])" class="text-blue-400 hover:text-blue-600"><i class="fas fa-pen"></i></button><button v-else @click="saveEdit(key, item.id, cfg.field)" class="text-green-500 hover:text-green-700"><i class="fas fa-check"></i></button><button @click="deleteSettingItem(key, item.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-times"></i></button></div></li></ul></div>
-            </div>
-        </div>
-
-    </main>
-
-    <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 text-white flex justify-around p-2 z-50 text-[10px] border-t border-slate-700 shadow-lg">
-        <a @click="currentTab = 'report'" :class="currentTab === 'report' ? 'text-yellow-400' : 'text-slate-400'" class="flex flex-col items-center justify-center p-2 flex-1">
-            <i class="fas fa-edit text-lg mb-1"></i> <span>報工</span>
-        </a>
-        <a @click="currentTab = 'fpy'" :class="currentTab === 'fpy' ? 'text-yellow-400' : 'text-slate-400'" class="flex flex-col items-center justify-center p-2 flex-1">
-            <i class="fas fa-check-double text-lg mb-1"></i> <span>直通率</span>
-        </a>
-        <a @click="currentTab = 'ooc'" :class="currentTab === 'ooc' ? 'text-yellow-400' : 'text-slate-400'" class="flex flex-col items-center justify-center p-2 flex-1">
-            <i class="fas fa-exclamation-triangle text-lg mb-1"></i> <span>OOC</span>
-        </a>
-        <a @click="currentTab = 'orders'" :class="currentTab === 'orders' ? 'text-yellow-400' : 'text-slate-400'" class="flex flex-col items-center justify-center p-2 flex-1">
-            <i class="fas fa-clipboard-list text-lg mb-1"></i> <span>工單</span>
-        </a>
-        <a @click="currentTab = 'stats'" :class="currentTab === 'stats' ? 'text-yellow-400' : 'text-slate-400'" class="flex flex-col items-center justify-center p-2 flex-1">
-            <i class="fas fa-chart-bar text-lg mb-1"></i> <span>統計</span>
-        </a>
-        <a @click="currentTab = 'settings'" :class="currentTab === 'settings' ? 'text-yellow-400' : 'text-slate-400'" class="flex flex-col items-center justify-center p-2 flex-1">
-            <i class="fas fa-cog text-lg mb-1"></i> <span>設定</span>
-        </a>
+        <ul class="nav-links">
+            <li><a href="#" onclick="switchPage('daily-record', '每日報工')" id="nav-daily-record" class="active"><i class="fas fa-edit"></i> 每日報工</a></li>
+            <li><a href="#" onclick="switchPage('statistics', '統計與導出')" id="nav-statistics"><i class="fas fa-chart-pie"></i> 統計與導出</a></li>
+            <li><a href="#" onclick="switchPage('basic-settings', '基礎設定')" id="nav-basic-settings"><i class="fas fa-cog"></i> 基礎設定</a></li>
+        </ul>
     </nav>
 
-</div>
+    <div id="main-content">
+        <header>
+            <h2 id="page-title">每日報工</h2>
+        </header>
 
-<script>
-    const { createApp, ref, computed, onMounted, watch } = Vue;
-    const { createClient } = supabase;
-
-    const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co'; 
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
-    const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    createApp({
-        setup() {
-            const currentTab = ref('report');
-            const loading = ref(false);
-            const showWoModal = ref(false);
-            const data = ref({ workOrders: [], models: [], defectTypes: [], defectLocations: [], machines: [], oocCauses: [] });
+        <div class="content-wrapper">
             
-            // --- Shared Computed ---
-            const activeWoNumbers = computed(() => {
-                const active = data.value.workOrders.filter(w => {
-                    const remaining = w.target_quantity - (w.current_input || 0);
-                    return !w.is_closed && remaining > 0;
-                }).map(w => w.wo_number);
-                return [...new Set(active)];
-            });
-            const uniqueWoNumbers = computed(() => [...new Set(data.value.workOrders.map(w => w.wo_number))]);
-
-            // --- Report Logic ---
-            const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [] });
-            const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
-            const historyList = ref([]);
-            const rawExportFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
-
-            const availableModelsForSelectedWo = computed(() => !report.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === report.value.selectedWoNumber));
-            const onWoNumberChange = () => { report.value.wo_id = null; report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; };
-            const loadHistory = async () => { const { data: list } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(id)').order('production_date', { ascending: false }).limit(50); if (list) historyList.value = list.map(item => ({ ...item, defect_count: item.defect_logs.length })); };
-            const loadRecordForEdit = async (rec) => { report.value.date = rec.production_date; report.value.selectedWoNumber = rec.work_orders.wo_number; report.value.wo_id = rec.wo_id; await fetchDailyRecord(); };
-            const fetchDailyRecord = async () => { if (!report.value.wo_id || !report.value.date) return; loading.value = true; report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; try { const { data: prod } = await _supabase.from('daily_production').select('id, input_quantity').eq('wo_id', report.value.wo_id).eq('production_date', report.value.date).maybeSingle(); if (prod) { report.value.currentId = prod.id; report.value.inputQty = prod.input_quantity; const { data: logs } = await _supabase.from('defect_logs').select('*, defect_types(name), defect_locations(code)').eq('production_id', prod.id).order('created_at', { ascending: false }); report.value.logs = logs || []; } } catch (e) { console.error(e); } finally { loading.value = false; } };
-            
-            // --- Changed: Save Input with Validation ---
-            const saveDailyInput = async () => { 
-                if (!report.value.wo_id) return alert("請先選擇工單與機種"); 
-                
-                const currentInput = Number(report.value.inputQty) || 0;
-                const targetWo = data.value.workOrders.find(w => w.id === report.value.wo_id);
-                
-                loading.value = true; 
-                
-                // 防呆邏輯：檢查投入總數是否超過預計數量
-                if (targetWo) {
-                    try {
-                        const { data: existingProds } = await _supabase
-                            .from('daily_production')
-                            .select('id, input_quantity')
-                            .eq('wo_id', report.value.wo_id);
-                            
-                        let totalOtherInputs = 0;
-                        if (existingProds) {
-                            existingProds.forEach(p => {
-                                // 如果是編輯模式，排除當前這筆紀錄的舊值
-                                if (p.id !== report.value.currentId) {
-                                    totalOtherInputs += (Number(p.input_quantity) || 0);
-                                }
-                            });
-                        }
+            <div id="daily-record" class="page-section" style="display: block;">
+                <div class="section" style="border-top: 4px solid #4a5568;">
+                    <h2>1. 生產基本資料</h2>
+                    <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #e2e8f0;">
+                        <label style="font-weight: bold; font-size: 14px; color: #4a5568; display: block; margin-bottom: 5px;">日期</label>
+                        <input type="date" id="recordDate" onchange="loadRecordsByDate()" style="max-width: 250px;">
+                    </div>
+                    <div class="form-grid">
+                        <div><label>線別</label><select id="recordLine" onchange="onLineSelectionChange()"><option value="">請先至基礎設定新增</option></select></div>
+                        <div>
+                            <label>開線時間 (24H)</label>
+                            <div class="time-picker"><select id="startHour"></select><span>:</span><select id="startMinute"></select></div>
+                        </div>
+                        <div>
+                            <label>結束時間 (24H)</label>
+                            <div class="time-picker"><select id="endHour"></select><span>:</span><select id="endMinute"></select></div>
+                        </div>
                         
-                        const maxAllowed = Number(targetWo.target_quantity) || 0;
-                        
-                        if ((totalOtherInputs + currentInput) > maxAllowed) {
-                            loading.value = false;
-                            return alert(`⚠️ 防呆提示：投入總數超過工單預計數量！\n\n該工單預計數量: ${maxAllowed}\n其他日期已投入: ${totalOtherInputs}\n本次最多僅能輸入: ${maxAllowed - totalOtherInputs}`);
-                        }
-                    } catch(e) {
-                        console.error("防呆檢查發生錯誤", e);
-                    }
-                }
+                        <div style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; border-top: 1px dashed #cbd5e0; padding-top: 15px; margin-top: 5px;">
+                            <div class="checkbox-container">
+                                <input type="checkbox" id="isRollingBreak">
+                                <label for="isRollingBreak">是否輪休 (預設不打勾：代表 12:00-13:00 停機，扣除休息時間)</label>
+                            </div>
+                            <button onclick="updateLineTime()" style="background-color: #319795; padding: 8px 15px;"><i class="fas fa-sync-alt"></i> 同步更新下方已輸入紀錄的時間與輪休</button>
+                        </div>
 
-                try { 
-                    if (report.value.currentId) await _supabase.from('daily_production').update({ input_quantity: currentInput }).eq('id', report.value.currentId); 
-                    else { const { data: newProd, error } = await _supabase.from('daily_production').insert({ wo_id: report.value.wo_id, production_date: report.value.date, input_quantity: currentInput }).select().single(); if (error) throw error; report.value.currentId = newProd.id; } 
-                    await loadHistory(); await loadBaseData(); alert("投入數已儲存"); 
-                } catch (e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; } 
-            };
+                    </div>
+                </div>
 
-            const addDefect = async () => { if (!report.value.currentId) return alert("請先儲存投入數"); if (!defectForm.value.typeId || !defectForm.value.locationId) return alert("請選擇不良與位置"); loading.value = true; try { await _supabase.from('defect_logs').insert({ production_id: report.value.currentId, defect_type_id: defectForm.value.typeId, location_id: defectForm.value.locationId, quantity: defectForm.value.qty }); await fetchDailyRecord(); await loadHistory(); defectForm.value.qty = 1; } catch (e) { alert("新增失敗"); } finally { loading.value = false; } };
-            const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); };
-            const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; } loading.value = false; };
-            const exportRawData = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, models (name), model_id, id), defect_logs (quantity, defect_types (name), defect_locations (code))`); if (rawExportFilter.value.start) query = query.gte('production_date', rawExportFilter.value.start); if (rawExportFilter.value.end) query = query.lte('production_date', rawExportFilter.value.end); const { data: rows, error } = await query; if (error) throw error; let filtered = rows || []; if (rawExportFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == rawExportFilter.value.modelId); if (rawExportFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == rawExportFilter.value.woId); const excelData = []; excelData.push(["日期", "工單號碼", "機種", "當日投入數", "不良現象", "不良位置", "不良數量"]); filtered.forEach(row => { const date = row.production_date; const wo = row.work_orders.wo_number; const model = row.work_orders.models.name; const input = row.input_quantity; if (row.defect_logs && row.defect_logs.length > 0) { row.defect_logs.forEach(log => { excelData.push([ date, wo, model, input, log.defect_types?.name || '', log.defect_locations?.code || '', log.quantity ]); }); } else { excelData.push([date, wo, model, input, "無不良", "", 0]); } }); const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(excelData); XLSX.utils.book_append_sheet(wb, ws, "Raw Data"); XLSX.writeFile(wb, `SMT_Raw_Data_${new Date().toISOString().slice(0,10)}.xlsx`); } catch (e) { alert("導出失敗: " + e.message); } finally { loading.value = false; } };
+                <div class="section" style="margin-top: 20px; border-top: 4px solid #3182ce;">
+                    <h2>2. 新增機台與停機紀錄</h2>
+                    <div class="form-grid">
+                        <div><label>機台名稱</label><select id="recordMachine"><option value="">請先選擇上方線別</option></select></div>
+                        <div><label>登記人</label><select id="recordOperator"><option value="">請先選擇線別</option></select></div>
+                    </div>
 
-            // --- FPY Logic ---
-            const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false });
-            const fpyHistory = ref([]);
-            const fpyFilter = ref({ start: '', end: '' });
-            const showFpyModal = ref(false);
-            const showFpyExportModal = ref(false);
-            const selectedFpyId = ref(null);
-            const fpyDayModal = ref({ show: false, date: '', list: [] });
-            
-            const isEditingFpy = ref(false);
+                    <div style="background-color: #f7fafc; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                        <h3 style="margin-top: 0; font-size: 1rem;">機台停機輸入</h3>
+                        <div class="input-group" style="flex-wrap: wrap;">
+                            <select id="downtimeReasonSelect" style="flex: 2; min-width: 120px;"><option value="">請選擇停機項目</option></select>
+                            <select id="downtimeHour" style="flex: 1;"></select>
+                            <select id="downtimeMinute" style="flex: 1;"></select>
+                            <input type="text" id="downtimeRemark" placeholder="備註原因(選填)" style="flex: 2; min-width: 120px;">
+                            <button onclick="addDowntimeToList()" style="background-color: #3182ce;">加入單機</button>
+                            <button onclick="addDowntimeToWholeLine()" style="background-color: #ed8936;"><i class="fas fa-bolt"></i> 全線加入</button>
+                        </div>
+                        <table class="data-table">
+                            <thead><tr><th>停機項目</th><th>分類</th><th>時間 (分鐘)</th><th>備註</th><th>操作</th></tr></thead>
+                            <tbody id="downtimeTableBody"></tbody>
+                        </table>
+                        <div class="total-summary">此機台總停機： <span id="totalDowntimeDisplay">0</span> 分鐘</div>
+                    </div>
 
-            const availableModelsForFpy = computed(() => !fpyForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === fpyForm.value.selectedWoNumber));
-            
-            const fpyWoList = computed(() => {
-                if (fpyForm.value.showAllWo) return uniqueWoNumbers.value; 
-                return activeWoNumbers.value; 
-            });
+                    <div style="text-align: right; margin-top: 15px;">
+                        <button class="save-btn" onclick="submitMachineRecord()"><i class="fas fa-plus-circle"></i> 儲存此機台紀錄</button>
+                    </div>
+                </div>
 
-            const fpyCalendarDays = computed(() => {
-                const y = calendarYear.value, m = calendarMonth.value, daysInMonth = new Date(y, m + 1, 0).getDate(), days = [];
-                for (let i = 1; i <= daysInMonth; i++) {
-                    const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-                    const dailyItems = fpyHistory.value.filter(rec => rec.production_date === dStr).map(rec => ({ id: rec.id, wo_id: rec.wo_id, wo_number: rec.work_orders.wo_number, model_name: rec.work_orders.models.name, spi: rec.spi_rate, aoi: rec.aoi_rate }));
-                    days.push({ dayNum: i, dateStr: dStr, items: dailyItems });
-                } return days;
-            });
-            const openFpyModal = (rec = null) => { 
-                if (rec) { 
-                    isEditingFpy.value = true; 
-                    fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate, showAllWo: true }; 
-                } else { 
-                    isEditingFpy.value = false; 
-                    fpyForm.value = { id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false }; 
-                } 
-                showFpyModal.value = true; 
-            };
-            const openFpyDayDetail = (day) => { fpyDayModal.value = { show: true, date: day.dateStr, list: day.items }; };
-            
-            const fetchFpyRecord = async () => { 
-                if (isEditingFpy.value) return;
+                <div class="section" style="margin-top: 20px; border-top: 4px solid #38a169;">
+                    <h2>3. 今日已輸入紀錄</h2>
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>線別</th><th>機台</th><th>登記人</th><th>開線~結束</th><th>停機明細</th><th>總停機</th><th>操作</th></tr>
+                        </thead>
+                        <tbody id="dailyHistoryTable"><tr><td colspan="7" style="text-align:center;">請選擇日期以載入紀錄...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
 
-                if (!fpyForm.value.wo_id || !fpyForm.value.date) return; 
-                loading.value = true; 
-                fpyForm.value.id = null; 
-                fpyForm.value.spi = ''; 
-                fpyForm.value.aoi = ''; 
-                try { 
-                    const { data: rec } = await _supabase.from('daily_fpy').select('*').eq('wo_id', fpyForm.value.wo_id).eq('production_date', fpyForm.value.date).maybeSingle(); 
-                    if (rec) { 
-                        fpyForm.value.id = rec.id; 
-                        fpyForm.value.spi = rec.spi_rate; 
-                        fpyForm.value.aoi = rec.aoi_rate; 
-                    } 
-                } catch(e) { console.error(e); } finally { loading.value = false; } 
-            };
-            
-            const saveFpy = async () => { 
-                if (!fpyForm.value.wo_id) return alert("請選擇機種"); 
-                
-                loading.value = true; 
-                try { 
-                    const spiVal = fpyForm.value.spi === '' ? null : fpyForm.value.spi;
-                    const aoiVal = fpyForm.value.aoi === '' ? null : fpyForm.value.aoi;
+            <div id="statistics" class="page-section" style="display: none;">
+                <div class="section">
+                    <h2>條件篩選</h2>
+                    <div class="form-grid">
+                        <div><label>開始日期</label><input type="date" id="statStartDate"></div>
+                        <div><label>結束日期</label><input type="date" id="statEndDate"></div>
+                        <div>
+                            <label>線別 (不選代表全部)</label>
+                            <select id="statLine" onchange="onStatLineChange()"><option value="">全部線別</option></select>
+                        </div>
+                        <div>
+                            <label>機台 (不選代表該線全部)</label>
+                            <select id="statMachine"><option value="">全部機台</option></select>
+                        </div>
+                        <div style="display:flex; align-items:end; grid-column: 1 / -1;">
+                            <button onclick="queryStatistics()" style="width:100%; font-size: 16px; padding: 12px;"><i class="fas fa-search"></i> 查詢統計數據</button>
+                        </div>
+                    </div>
+                </div>
 
-                    const payload = { 
-                        wo_id: fpyForm.value.wo_id, 
-                        production_date: fpyForm.value.date, 
-                        spi_rate: spiVal, 
-                        aoi_rate: aoiVal 
-                    }; 
-                    if (fpyForm.value.id) await _supabase.from('daily_fpy').update(payload).eq('id', fpyForm.value.id); 
-                    else await _supabase.from('daily_fpy').insert(payload); 
-                    await loadFpyHistory(); 
-                    showFpyModal.value = false; 
-                    alert("儲存成功"); 
-                } catch(e) { alert("儲存失敗: " + e.message); } finally { loading.value = false; } 
-            };
-
-            const loadFpyHistory = async () => { const { data: list } = await _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').order('production_date', {ascending:false}).limit(200); if (list) fpyHistory.value = list; };
-            const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); };
-            const exportFpyData = async () => { loading.value = true; try { let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))'); if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start); if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end); const { data: rows } = await query; rows.sort((a, b) => { const woA = a.work_orders.wo_number; const woB = b.work_orders.wo_number; if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB); return new Date(a.production_date) - new Date(b.production_date); }); const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]]; rows.forEach(r => { excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']); }); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report"); XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`); } catch(e) { alert("導出失敗"); } finally { loading.value = false; } };
-
-            // --- OOC Logic ---
-            const oocForm = ref({ id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null });
-            const oocHistory = ref([]);
-            const showOocModal = ref(false);
-            const selectedOocId = ref(null);
-            
-            const oocDayModal = ref({ show: false, date: '', list: [] });
-
-            const availableModelsForOoc = computed(() => !oocForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === oocForm.value.selectedWoNumber));
-            const oocCalendarDays = computed(() => {
-                const y = calendarYear.value, m = calendarMonth.value, daysInMonth = new Date(y, m + 1, 0).getDate(), days = [];
-                for (let i = 1; i <= daysInMonth; i++) {
-                    const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-                    const items = oocHistory.value.filter(rec => rec.production_date === dStr).map(rec => ({ 
-                        id: rec.id, 
-                        wo_id: rec.wo_id, 
-                        wo_number: rec.work_orders.wo_number,
-                        model_name: rec.work_orders?.models?.name, 
-                        cause: rec.ooc_causes?.name, 
-                        machine: rec.machines?.name,
-                        time: rec.occurrence_time 
-                    }));
-                    days.push({ dayNum: i, dateStr: dStr, items });
-                } return days;
-            });
-
-            const openOocModal = (rec = null) => {
-                if (rec) { 
-                    oocForm.value = { 
-                        id: rec.id, 
-                        date: rec.production_date, 
-                        time: rec.occurrence_time || '', 
-                        selectedWoNumber: rec.work_orders.wo_number, 
-                        wo_id: rec.wo_id, 
-                        machine_id: rec.machine_id, 
-                        cause_id: rec.cause_id 
-                    }; 
-                }
-                else { 
-                    oocForm.value = { 
-                        id: null, 
-                        date: new Date().toISOString().split('T')[0], 
-                        time: new Date().toTimeString().slice(0,5), 
-                        selectedWoNumber: null, 
-                        wo_id: null, 
-                        machine_id: null, 
-                        cause_id: null 
-                    }; 
-                }
-                showOocModal.value = true;
-            };
-            const saveOoc = async () => {
-                if (!oocForm.value.wo_id || !oocForm.value.machine_id || !oocForm.value.cause_id) return alert("請填寫完整");
-                loading.value = true;
-                try {
-                    const payload = { 
-                        production_date: oocForm.value.date, 
-                        occurrence_time: oocForm.value.time, 
-                        wo_id: oocForm.value.wo_id, 
-                        machine_id: oocForm.value.machine_id, 
-                        cause_id: oocForm.value.cause_id 
-                    };
-                    if (oocForm.value.id) await _supabase.from('ooc_records').update(payload).eq('id', oocForm.value.id);
-                    else await _supabase.from('ooc_records').insert(payload);
-                    await loadOocHistory(); showOocModal.value = false; alert("儲存成功");
-                } catch(e) { alert("失敗: " + e.message + "\n(請確認 Supabase 中是否有 'occurrence_time' 欄位)"); } finally { loading.value = false; }
-            };
-            const loadOocHistory = async () => { const { data: list } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').order('production_date', {ascending:false}).limit(200); if(list) oocHistory.value = list; };
-            const deleteOoc = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('ooc_records').delete().eq('id', id); loadOocHistory(); };
-            
-            const openOocDayDetail = (day) => { 
-                oocDayModal.value = { show: true, date: day.dateStr, list: day.items }; 
-            };
-
-            // --- Order & Calendar Logic ---
-            const woForm = ref({ id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' });
-            const isEditingWo = ref(false);
-            const orderSearch = ref('');
-            const selectedWoId = ref(null);
-            const today = new Date();
-            const calendarYear = ref(today.getFullYear());
-            const calendarMonth = ref(today.getMonth());
-            const dayDetailModal = ref({ show: false, date: '', list: [] });
-
-            const processedWorkOrders = computed(() => {
-                let list = data.value.workOrders;
-                if (orderSearch.value) { 
-                    const q = orderSearch.value.toLowerCase(); 
-                    list = list.filter(w => w.wo_number.toLowerCase().includes(q) || w.models.name.toLowerCase().includes(q)); 
-                }
-                
-                const groups = {};
-                list.forEach(w => {
-                    if (!groups[w.wo_number]) groups[w.wo_number] = [];
-                    groups[w.wo_number].push(w);
-                });
-
-                const activeGroups = [];
-                const completedGroups = [];
-
-                Object.values(groups).forEach(group => {
-                    const isCompleted = group.every(wo => {
-                        const rem = wo.target_quantity - (wo.current_input || 0);
-                        return rem <= 0 || wo.is_closed;
-                    });
+                <div class="section" style="margin-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <h2 style="margin: 0;">統計結果</h2>
+                            <select id="summaryMachineFilter" onchange="renderSummaryAndChart()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid #cbd5e0; min-width: 150px; font-size: 16px; font-weight: bold; color: #3182ce; background-color: #ebf8ff;">
+                                <option value="">請先查詢資料</option>
+                            </select>
+                        </div>
+                        <button class="edit-btn" style="background-color: #38a169; font-size: 14px; padding: 8px 15px;" onclick="exportToExcel()"><i class="fas fa-file-excel"></i> 匯出 EXCEL 報表</button>
+                    </div>
                     
-                    if (isCompleted) {
-                        completedGroups.push(group);
-                    } else {
-                        activeGroups.push(group);
-                    }
-                });
+                    <div class="stat-cards">
+                        <div class="card oee-card"><h3>平均設備稼動率 (OEE)</h3><div id="statOEE">0.0%</div></div>
+                        <div class="card downtime-card"><h3>非計畫停機總和 (稼動損失)</h3><div id="statTotalDowntime">0 分鐘</div></div>
+                    </div>
 
-                const sortByDateDesc = (groupA, groupB) => new Date(groupB[0].created_at) - new Date(groupA[0].created_at);
-                activeGroups.sort(sortByDateDesc);
-                completedGroups.sort(sortByDateDesc);
+                    <h3 style="margin-top: 30px; border-bottom: 2px solid #cbd5e0; padding-bottom: 10px; color: #2c3e50;"><i class="fas fa-clipboard-list"></i> 區間停機總和統整</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>總實際可用時間 <br><span style="font-size:12px; font-weight:normal;">(已扣除休息與計畫性停機)</span></th>
+                                <th>各項停機時間總和</th>
+                                <th>非計畫停機總和 <br><span style="font-size:12px; font-weight:normal;">(實際損失)</span></th>
+                                <th>總平均稼動率 (OEE)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statSummaryBody">
+                            <tr><td colspan="4" style="text-align:center;">請先查詢統計資料...</td></tr>
+                        </tbody>
+                    </table>
 
-                const flattenGroup = (groupsArray) => {
-                    const flattened = [];
-                    groupsArray.forEach(group => {
-                        group.forEach((wo, index) => {
-                            flattened.push({
-                                ...wo,
-                                _isFirstOfGroup: index === 0,
-                                _rowspan: group.length
-                            });
-                        });
-                    });
-                    return flattened;
-                };
+                    <div class="chart-container"><canvas id="downtimeChart"></canvas></div>
 
-                return {
-                    active: flattenGroup(activeGroups),
-                    completed: flattenGroup(completedGroups)
-                };
-            });
+                    <h3 style="margin-top: 40px; border-bottom: 2px solid #cbd5e0; padding-bottom: 10px; color: #2c3e50;"><i class="fas fa-list"></i> 每日機台明細 (依查詢條件顯示)</h3>
+                    <div style="overflow-x: auto;">
+                        <table class="data-table" style="min-width: 800px;">
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>線別</th>
+                                    <th>機台</th>
+                                    <th>登記人</th>
+                                    <th>開線時間</th>
+                                    <th>結束時間</th>
+                                    <th>有輪休</th>
+                                    <th>實際可用時間(分)</th>
+                                    <th>類別</th>
+                                    <th>分組</th>
+                                    <th>停機項目</th>
+                                    <th>該項停機(分)</th>
+                                    <th>實際生產時間</th>
+                                    <th>稼動率(%)</th>
+                                    <th>備註</th>
+                                </tr>
+                            </thead>
+                            <tbody id="statDetailBody">
+                                <tr><td colspan="15" style="text-align:center;">請先查詢統計資料...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
 
-            const calendarDays = computed(() => {
-                const y = calendarYear.value, m = calendarMonth.value, daysInMonth = new Date(y, m + 1, 0).getDate(), days = [];
-                for (let i = 1; i <= daysInMonth; i++) {
-                    const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-                    const dailyProds = [];
-                    data.value.workOrders.forEach(wo => { const prod = wo.daily_production.find(dp => dp.production_date === dStr); if (prod && prod.input_quantity > 0) dailyProds.push({ id: prod.id, wo_id: wo.id, wo_number: wo.wo_number, model_name: wo.models.name, qty: prod.input_quantity }); });
-                    days.push({ dayNum: i, dateStr: dStr, productions: dailyProds });
-                } return days;
-            });
-            const calendarPadding = computed(() => new Date(calendarYear.value, calendarMonth.value, 1).getDay());
-            const changeMonth = (delta) => { let newM = calendarMonth.value + delta; if (newM > 11) { calendarYear.value++; newM = 0; } else if (newM < 0) { calendarYear.value--; newM = 11; } calendarMonth.value = newM; };
-            const isToday = (dStr) => dStr === new Date().toISOString().split('T')[0];
-            const selectWoForCalendar = (wo) => { selectedWoId.value = selectedWoId.value === wo.id ? null : wo.id; };
-            const openDayDetail = (day) => { dayDetailModal.value = { show: true, date: day.dateStr, list: day.productions }; };
-            const openWoModal = (wo = null) => { if (wo) { isEditingWo.value = true; woForm.value = { id: wo.id, number: wo.wo_number, modelId: wo.model_id, selectedModelIds: [], targetQty: wo.target_quantity }; } else { isEditingWo.value = false; woForm.value = { id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' }; } showWoModal.value = true; };
-            const saveWorkOrder = async () => { const { id, number, modelId, selectedModelIds, targetQty } = woForm.value; if (!number || !targetQty) return alert("請填寫工單號碼與數量"); loading.value = true; try { if (isEditingWo.value && id) { if (!modelId) return alert("請選擇機種"); await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty }).eq('id', id); } else { if (selectedModelIds.length === 0) return alert("請至少勾選一個機種"); for (const mId of selectedModelIds) { const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === mId); if (!isDuplicate) await _supabase.from('work_orders').insert({ wo_number: number, model_id: mId, target_quantity: targetQty, is_closed: false }); } } showWoModal.value = false; loadBaseData(); alert(isEditingWo.value ? "更新成功" : "工單已建立"); } catch (e) { alert("操作失敗"); } finally { loading.value = false; } };
-            const deleteWorkOrder = async (id) => { if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return; loading.value = true; await _supabase.from('work_orders').delete().eq('id', id); loadBaseData(); loading.value = false; };
-
-            // --- Stats & Export ---
-            const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
-            const statsResult = ref(null);
-            const calculateStats = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`); if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start); if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end); const { data: rows } = await query; let filtered = rows || []; if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId); if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == statsFilter.value.woId); let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {}; filtered.forEach(day => { totalInput += day.input_quantity; day.defect_logs.forEach(log => { totalDefects += log.quantity; const tName = log.defect_types?.name || 'Unknown'; typeMap[tName] = (typeMap[tName] || 0) + log.quantity; const lCode = log.defect_locations?.code || 'Unknown'; locMap[lCode] = (locMap[lCode] || 0) + log.quantity; }); }); const byType = Object.entries(typeMap).map(([name, qty]) => ({ name, qty, ratio: totalDefects ? (qty/totalDefects*100).toFixed(1) : 0 })).sort((a,b) => b.qty - a.qty); const byLocation = Object.entries(locMap).map(([code, qty]) => ({ code, qty })).sort((a,b) => b.qty - a.qty); statsResult.value = { totalInput, totalDefects, yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100, byType, byLocation }; } catch (e) { alert("統計失敗"); } finally { loading.value = false; } };
-            
-            const exportToExcel = async () => {
-                if (!statsResult.value) return alert("請先執行統計");
-                loading.value = true;
-                try {
-                    const combinedData = [["=== 總結報告 ==="], ["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], ["總投入數", statsResult.value.totalInput], ["總不良數", statsResult.value.totalDefects], ["良率", `${statsResult.value.yieldRate}%`], [], ["=== 不良現象分析 ==="], ["不良現象", "數量", "佔比"], ...statsResult.value.byType.map(d => [d.name, d.qty, `${d.ratio}%`]), [], ["=== 位置異常分析 ==="], ["位置", "數量"], ...statsResult.value.byLocation.map(d => [d.code, d.qty])];
-                    const wb = XLSX.utils.book_new();
-                    const wsYield = XLSX.utils.aoa_to_sheet(combinedData);
-                    XLSX.utils.book_append_sheet(wb, wsYield, "良率報告");
-
-                    let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))');
-                    if (statsFilter.value.start) fpyQuery = fpyQuery.gte('production_date', statsFilter.value.start);
-                    if (statsFilter.value.end) fpyQuery = fpyQuery.lte('production_date', statsFilter.value.end);
-                    const { data: fpyRows } = await fpyQuery;
+            <div id="basic-settings" class="page-section" style="display: none;">
+                <div class="container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 25px;">
                     
-                    let filteredFpy = fpyRows || [];
-                    if (statsFilter.value.modelId !== 'all') filteredFpy = filteredFpy.filter(r => r.work_orders.model_id == statsFilter.value.modelId); 
-                    
-                    filteredFpy.sort((a, b) => {
-                        const woA = a.work_orders.wo_number;
-                        const woB = b.work_orders.wo_number;
-                        if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB);
-                        return new Date(a.production_date) - new Date(b.production_date);
-                    });
+                    <div class="section">
+                        <h2><i class="fas fa-network-wired"></i> 線別與機台管理</h2>
+                        <div style="background-color: #f7fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
+                            <label style="font-weight: bold; margin-bottom: 10px; display: block; color: #2c3e50;">1. 選擇或新增線別</label>
+                            <div class="input-group" style="flex-wrap: wrap;">
+                                <select id="settingLineSelect" style="flex: 2; min-width: 150px;" onchange="onSettingLineChange()">
+                                    <option value="">請選擇線別...</option>
+                                </select>
+                                <button class="edit-btn" style="background-color: #ecc94b; color: #744210;" onclick="editSelectedLine()">修改</button>
+                                <button class="delete-btn" onclick="deleteSelectedLine()">刪除</button>
+                            </div>
+                            <div class="input-group" style="margin-top: 10px; margin-bottom: 0; flex-wrap: wrap;">
+                                <input type="text" id="newLineName" placeholder="輸入新線別名稱" style="min-width: 150px;">
+                                <button onclick="addNewLine()" style="background-color: #38a169;">新增</button>
+                            </div>
+                        </div>
 
-                    const fpyExcelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]];
-                    filteredFpy.forEach(r => {
-                        fpyExcelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']);
-                    });
-                    
-                    const wsFpy = XLSX.utils.aoa_to_sheet(fpyExcelData);
-                    XLSX.utils.book_append_sheet(wb, wsFpy, "直通率報告");
+                        <div style="background-color: #f7fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <label style="font-weight: bold; margin-bottom: 10px; display: block; color: #2c3e50;">
+                                2. 管理 [<span id="currentSettingLineDisplay" style="color:#e53e3e; font-weight:bold;">未選擇</span>]
+                            </label>
+                            <div class="input-group" style="flex-wrap: wrap;">
+                                <input type="text" id="newMachineName" placeholder="輸入機台名稱" style="min-width: 150px;">
+                                <button onclick="addNewMachineToLine()">新增</button>
+                            </div>
+                            <ul id="settingMachineList" style="margin-bottom: 0;"></ul>
+                        </div>
+                    </div>
 
-                    XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
-                } catch(e) { alert("導出失敗: " + e.message); } finally { loading.value = false; }
-            };
+                    <div class="section" style="border-top: 4px solid #ecc94b;">
+                        <h2><i class="fas fa-clipboard-check"></i> 計畫性停機</h2>
+                        <p style="font-size: 12px; color: #718096; margin-top: 0;">(如:保養、換線。直接扣除當天可用時間，不當作損失)</p>
+                        <div class="input-group" style="flex-wrap: wrap;">
+                            <input type="text" id="plannedReasonName" placeholder="例: 設備保養" style="min-width: 150px;">
+                            <button onclick="addReason(true)">新增項目</button>
+                        </div>
+                        <ul id="plannedReasonList"></ul>
+                    </div>
 
-            const settingConfig = ref({ 
-                models: { title: '機種清單', colorClass: 'text-indigo-600', btnColor: 'bg-indigo-600', input: '', placeholder: '新機種名稱', field: 'name' }, 
-                defect_types: { title: '不良項目', colorClass: 'text-red-600', btnColor: 'bg-red-600', input: '', placeholder: '不良現象', field: 'name' }, 
-                defect_locations: { title: '位置代碼', colorClass: 'text-green-600', btnColor: 'bg-green-600', input: '', placeholder: '位置代碼', field: 'code' },
-                machines: { title: '機台清單', colorClass: 'text-purple-600', btnColor: 'bg-purple-600', input: '', placeholder: '機台名稱', field: 'name' },
-                ooc_causes: { title: 'OOC 原因', colorClass: 'text-pink-600', btnColor: 'bg-pink-600', input: '', placeholder: '異常原因', field: 'name' }
-            });
-            const editingId = ref(null); const editingValue = ref('');
-            const sortedList = (key) => { 
-                let list = [];
-                if(['models','defect_types','defect_locations'].includes(key)) list = data.value[key.replace(/_([a-z])/g, (g) => g[1].toUpperCase())] || data.value[key]; // camelCase hack
-                else list = data.value[key.replace('ooc_causes', 'oocCauses')] || [];
-                
-                const field = settingConfig.value[key].field; 
-                return [...list].sort((a, b) => a[field].localeCompare(b[field], 'zh-Hant')); 
-            };
-            const addSettingItem = async (key) => { const cfg = settingConfig.value[key]; const val = cfg.input.trim(); if (!val) return; await _supabase.from(key).insert({ [cfg.field]: val }); cfg.input = ''; loadBaseData(); };
-            const deleteSettingItem = async (key, id) => { if(!confirm("確定刪除？")) return; await _supabase.from(key).delete().eq('id', id); loadBaseData(); };
-            const startEdit = (id, val) => { editingId.value = id; editingValue.value = val; };
-            const saveEdit = async (key, id, field) => { if (!editingValue.value.trim()) return; await _supabase.from(key).update({ [field]: editingValue.value }).eq('id', id); editingId.value = null; loadBaseData(); };
+                    <div class="section" style="border-top: 4px solid #e53e3e;">
+                        <h2><i class="fas fa-exclamation-triangle"></i> 非計畫性停機</h2>
+                        <p style="font-size: 12px; color: #718096; margin-top: 0;">(如:故障、缺料。直接視為生產損失，扣除稼動率)</p>
+                        <div class="input-group" style="flex-wrap: wrap;">
+                            <input type="text" id="unplannedReasonName" placeholder="例: 異常排除" style="min-width: 150px;">
+                            <button onclick="addReason(false)">新增項目</button>
+                        </div>
+                        <ul id="unplannedReasonList"></ul>
+                    </div>
 
-            const loadBaseData = async () => { 
-                const [wo, mo, dt, dl, mac, oc] = await Promise.all([ 
-                    _supabase.from('work_orders').select('*, models(name), daily_production(production_date, input_quantity)').order('created_at', {ascending: false}), 
-                    _supabase.from('models').select('*'), _supabase.from('defect_types').select('*'), _supabase.from('defect_locations').select('*'),
-                    _supabase.from('machines').select('*'), _supabase.from('ooc_causes').select('*')
-                ]); 
-                data.value.workOrders = (wo.data || []).map(w => ({ ...w, current_input: w.daily_production.reduce((sum, d) => sum + d.input_quantity, 0) })); 
-                data.value.models = mo.data || []; data.value.defectTypes = dt.data || []; data.value.defectLocations = dl.data || [];
-                data.value.machines = mac.data || []; data.value.oocCauses = oc.data || [];
-            };
-            const sortedModels = computed(() => [...data.value.models].sort((a,b) => a.name.localeCompare(b.name)));
-            const sortedDefectTypes = computed(() => [...data.value.defectTypes].sort((a,b) => a.name.localeCompare(b.name)));
-            const sortedLocations = computed(() => [...data.value.defectLocations].sort((a,b) => a.code.localeCompare(b.code)));
+                    <div class="section" style="border-top: 4px solid #3182ce;">
+                        <h2><i class="fas fa-users"></i> 作業人員</h2>
+                        <p style="font-size: 12px; color: #718096; margin-top: 0;">(負責報工的登記人員)</p>
+                        <div class="input-group" style="flex-wrap: wrap;">
+                            <input type="text" id="operatorNameInput" placeholder="例: 王小明" style="min-width: 150px;">
+                            <button onclick="addOperator()">新增人員</button>
+                        </div>
+                        <ul id="operatorList"></ul>
+                    </div>
 
-            onMounted(() => { loadBaseData(); loadHistory(); loadFpyHistory(); loadOocHistory(); const today = new Date(); statsFilter.value.end = today.toISOString().split('T')[0]; rawExportFilter.value.end = today.toISOString().split('T')[0]; fpyFilter.value.end = today.toISOString().split('T')[0]; today.setDate(today.getDate() - 7); statsFilter.value.start = today.toISOString().split('T')[0]; rawExportFilter.value.start = today.toISOString().split('T')[0]; fpyFilter.value.start = today.toISOString().split('T')[0]; });
+                </div>
+            </div>
 
-            return {
-                currentTab, loading, showWoModal, data,
-                report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory,
-                woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, onWoNumberChange,
-                statsFilter, statsResult, calculateStats, exportToExcel,
-                rawExportFilter, exportRawData,
-                fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
-                oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 
-                oocDayModal, openOocDayDetail, 
-                activeWoNumbers, uniqueWoNumbers, availableModelsForSelectedWo,
-                settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
-                sortedModels, sortedDefectTypes, sortedLocations,
-                orderSearch, processedWorkOrders, selectedWoId, selectWoForCalendar, 
-                calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal
-            };
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://swalpwpdzlomxcijacnu.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3YWxwd3BkemxvbXhjaWphY251Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MDUyMzksImV4cCI6MjA4OTE4MTIzOX0.nhF05Ttgr9WonNOzrXBtleOwjkWdg6W7rE71DDg-8Y4';
+        const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let currentDowntimeEvents = [];
+        let loadedDailyRecords = [];
+        let downtimeChartInstance = null;
+        let currentExportData = [];
+        let simpleExportData = [];
+        let weeklyExportData = [];
+        let monthlyExportData = [];
+        
+        let allMachines = []; 
+        let allLines = [];
+        let currentQueriedRecords = []; 
+        
+        let inlineEditingId = null;
+        let inlineDowntimeEvents = [];
+
+        // ★ 新增：全域陣列，用來儲存最新且活躍的項目，供動態比對使用
+        let allReasons = [];
+
+        function stripDel(name) {
+            if (!name) return '';
+            if (name.startsWith('@@DEL@@')) {
+                const match = name.match(/^@@DEL@@\d+_(.+)$/);
+                if (match) return match[1];
+                return name.substring(7);
+            }
+            return name;
         }
-    }).mount('#app');
-</script>
+
+        let inlineEditReasonId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            populateTimeSelects();
+            fetchLines().then(() => fetchMachines());
+            fetchReasons();
+            fetchOperators(); 
+            
+            const today = new Date();
+            document.getElementById('recordDate').valueAsDate = today;
+            document.getElementById('statStartDate').valueAsDate = today;
+            document.getElementById('statEndDate').valueAsDate = today;
+            
+            document.getElementById('startHour').value = '08';
+            document.getElementById('startMinute').value = '30';
+            document.getElementById('endHour').value = '17';
+            document.getElementById('endMinute').value = '30';
+            
+            loadRecordsByDate();
+        });
+
+        function getGroupByReason(rName) {
+            const cleanName = stripDel(rName);
+            const mapping = {
+                '開會': '廠區管理與休息',
+                '人員休息': '廠區管理與休息',
+                '設備保養': '例行計畫保養',
+                '首件': '生產與換線準備',
+                '開機暖機': '生產與換線準備',
+                '開機加熱': '生產與換線準備',
+                '開線前調機': '生產與換線準備',
+                '換線/調機': '生產與換線準備',
+                '印刷前置': '生產與換線準備',
+                '鋼板上料': '生產與換線準備',
+                '刮刀上料': '生產與換線準備',
+                '製程清機': '生產與換線準備',
+                '收線清潔': '生產與換線準備',
+                '抽檢': '生產與換線準備',
+                '換料': '生產與換線準備',
+                '待料/待機': '物料銜接與閒置',
+                '更換 DAF': '物料銜接與閒置',
+                '更換DAF膠': '物料銜接與閒置', 
+                '設備故障': '設備與廠務異常',
+                '設備維護': '設備與廠務異常',
+                '異常/調機': '設備與廠務異常',
+                'DAF 撕膜脫落': '設備與廠務異常',
+                'DAF撕膜脫落': '設備與廠務異常', 
+                'MES 異常': '設備與廠務異常',
+                'MES異常': '設備與廠務異常', 
+                '停電/停氣': '設備與廠務異常',
+                '品質異常停機': '品質與工程介入',
+                '異常品重工': '品質與工程介入',
+                '借機': '品質與工程介入'
+            };
+            return mapping[cleanName] || '未分類';
+        }
+
+        function getWeekString(dStr) {
+            const [y, m, d] = dStr.split('-').map(Number);
+            const date = new Date(y, m - 1, d);
+            const dayNum = date.getDay() || 7;
+            date.setDate(date.getDate() + 4 - dayNum);
+            const yearStart = new Date(date.getFullYear(), 0, 1);
+            const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+            return `${date.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+        }
+
+        async function fetchOperators() {
+            const { data } = await db.from('operators').select('*').order('created_at', { ascending: true });
+            const list = document.getElementById('operatorList');
+            const select = document.getElementById('recordOperator');
+            
+            list.innerHTML = ''; 
+            select.innerHTML = '<option value="">請選擇人員</option>';
+            
+            if(data) {
+                const activeOps = data.filter(op => !op.name.startsWith('@@DEL@@'));
+                activeOps.sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
+                activeOps.forEach(op => {
+                    list.innerHTML += `<li>${op.name} <div class="btn-group"><button class="edit-btn" onclick="editOperator('${op.id}', '${op.name.replace(/'/g, "\\'")}')">編輯</button><button class="delete-btn" onclick="deleteOperator('${op.id}', '${op.name.replace(/'/g, "\\'")}')">刪除</button></div></li>`;
+                    select.innerHTML += `<option value="${op.name}">${op.name}</option>`;
+                });
+                const savedLine = localStorage.getItem('smtSavedLine');
+                if (savedLine) {
+                    const savedOp = localStorage.getItem('smtSavedOperator_' + savedLine);
+                    if (savedOp) select.value = savedOp;
+                }
+            }
+        }
+        
+        async function addOperator() { 
+            const name = document.getElementById('operatorNameInput').value.trim(); 
+            if (!name) return alert('請輸入人員名稱'); 
+            const { error } = await db.from('operators').insert([{ name }]); 
+            if (error) return alert('新增失敗 (可能名稱重複)');
+            document.getElementById('operatorNameInput').value=''; 
+            fetchOperators(); 
+        }
+        
+        async function editOperator(id, oldName) { 
+            const newName = prompt('新人員名稱：', oldName); 
+            if (newName && newName.trim() !== oldName) { 
+                await db.from('operators').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                await db.from('operators').insert([{ name: newName.trim() }]); 
+                fetchOperators(); 
+            } 
+        }
+        
+        async function deleteOperator(id, oldName) { 
+            if (confirm('確定刪除此人員嗎？(原本已報工的歷史紀錄將保留)')) { 
+                await db.from('operators').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                fetchOperators(); 
+            } 
+        }
+
+        function generateOperatorSelectHTML(selectedName) {
+            const selectEle = document.getElementById('recordOperator');
+            let html = `<select id="editOperatorName" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:auto;">`;
+            Array.from(selectEle.options).forEach(opt => {
+                html += `<option value="${opt.value}" ${opt.value === selectedName ? 'selected' : ''}>${opt.text}</option>`;
+            });
+            html += `</select>`;
+            return html;
+        }
+
+        function populateTimeSelects() {
+            const hours24 = Array.from({length: 24}, (_, i) => String(i).padStart(2, '0'));
+            const minutes60 = Array.from({length: 60}, (_, i) => String(i).padStart(2, '0'));
+            
+            const hourOptions = hours24.map(h => `<option value="${h}">${h}</option>`).join('');
+            const minuteOptions = minutes60.map(m => `<option value="${m}">${m}</option>`).join('');
+
+            document.getElementById('startHour').innerHTML = hourOptions; document.getElementById('startMinute').innerHTML = minuteOptions;
+            document.getElementById('endHour').innerHTML = hourOptions; document.getElementById('endMinute').innerHTML = minuteOptions;
+
+            let dtHours = `<option value="0">0 小時</option>`;
+            for(let i=1; i<=24; i++) dtHours += `<option value="${i}">${i} 小時</option>`;
+            document.getElementById('downtimeHour').innerHTML = dtHours;
+
+            let dtMinutes = `<option value="0">0 分鐘</option>`;
+            for(let i=5; i<=60; i+=5) dtMinutes += `<option value="${i}">${i} 分鐘</option>`;
+            document.getElementById('downtimeMinute').innerHTML = dtMinutes;
+        }
+
+        function getSelectedTime(hourId, minuteId) {
+            const h = document.getElementById(hourId).value; const m = document.getElementById(minuteId).value;
+            if (h && m) return `${h}:${m}`; return null;
+        }
+
+        function generateTimePickerHTML(idPrefix, timeStr) {
+            const hours24 = Array.from({length: 24}, (_, i) => String(i).padStart(2, '0'));
+            const minutes60 = Array.from({length: 60}, (_, i) => String(i).padStart(2, '0'));
+            
+            let [h, m] = timeStr ? timeStr.split(':') : ['', ''];
+
+            let hHTML = '';
+            hours24.forEach(hour => { hHTML += `<option value="${hour}" ${hour===h ? 'selected' : ''}>${hour}</option>`; });
+            
+            let mHTML = '';
+            minutes60.forEach(min => { mHTML += `<option value="${min}" ${min===m ? 'selected' : ''}>${min}</option>`; });
+
+            return `<select id="${idPrefix}Hour" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:auto;">${hHTML}</select> <span style="font-weight:bold; margin:0 5px;">:</span> <select id="${idPrefix}Minute" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:auto;">${mHTML}</select>`;
+        }
+
+        function calculateActualAvailMin(startStr, endStr, isRollingBreak) {
+            if (!startStr || !endStr) return 0;
+            const [sH, sM] = startStr.split(':').map(Number);
+            const [eH, eM] = endStr.split(':').map(Number);
+            const startMin = sH * 60 + sM;
+            const endMin = eH * 60 + eM;
+
+            let availMin = endMin - startMin;
+            if (availMin < 0) return 0;
+
+            if (!isRollingBreak) {
+                if (startMin < 780 && endMin > 720) {
+                    const overlap = Math.min(endMin, 780) - Math.max(startMin, 720);
+                    availMin -= overlap;
+                }
+            }
+
+            if (startMin < 1080 && endMin > 1050) {
+                const overlap = Math.min(endMin, 1080) - Math.max(startMin, 1050);
+                availMin -= overlap;
+            }
+
+            return availMin;
+        }
+
+        async function fetchLines() {
+            const { data } = await db.from('lines').select('*');
+            allLines = (data || []).filter(l => !l.name.startsWith('@@DEL@@'));
+            allLines.sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
+            
+            const recordSelect = document.getElementById('recordLine'); const settingLineSelect = document.getElementById('settingLineSelect'); const statLineSelect = document.getElementById('statLine'); 
+            const currentRecordVal = recordSelect.value; const currentSettingVal = settingLineSelect.value; const currentStatLineVal = statLineSelect.value;
+            
+            recordSelect.innerHTML = '<option value="">請選擇線別</option>'; 
+            settingLineSelect.innerHTML = '<option value="">請選擇線別...</option>'; 
+            statLineSelect.innerHTML = '<option value="">全部線別</option>';
+
+            allLines.forEach(line => {
+                recordSelect.innerHTML += `<option value="${line.name}">${line.name}</option>`; 
+                settingLineSelect.innerHTML += `<option value="${line.id}">${line.name}</option>`; 
+                statLineSelect.innerHTML += `<option value="${line.name}">${line.name}</option>`;
+            });
+
+            if (currentRecordVal && allLines.find(l => l.name === currentRecordVal)) recordSelect.value = currentRecordVal;
+            else if (localStorage.getItem('smtSavedLine')) recordSelect.value = localStorage.getItem('smtSavedLine');
+            
+            if (currentSettingVal && allLines.find(l => l.id === currentSettingVal)) settingLineSelect.value = currentSettingVal;
+            else if (allLines.length > 0) settingLineSelect.value = allLines[0].id; 
+
+            if (currentStatLineVal && allLines.find(l => l.name === currentStatLineVal)) statLineSelect.value = currentStatLineVal;
+
+            onSettingLineChange(); onStatLineChange(); 
+        }
+
+        function onSettingLineChange() {
+            const settingSelect = document.getElementById('settingLineSelect'); const displaySpan = document.getElementById('currentSettingLineDisplay');
+            if (!settingSelect.value) { 
+                displaySpan.innerText = '未選擇'; displaySpan.style.color = '#e53e3e'; 
+            } else { 
+                displaySpan.innerText = settingSelect.options[settingSelect.selectedIndex].text; displaySpan.style.color = '#3182ce'; 
+            }
+            renderSettingMachineList();
+        }
+
+        function renderSettingMachineList() {
+            const settingSelect = document.getElementById('settingLineSelect'); const machineList = document.getElementById('settingMachineList');
+            machineList.innerHTML = ''; const lineId = settingSelect.value; 
+            
+            if (!lineId) { 
+                return machineList.innerHTML = '<li><span style="color: #a0aec0;">請先在上方選擇線別</span></li>'; 
+            } 
+            
+            let targetMachines = allMachines.filter(m => m.line_id === lineId); 
+            if (targetMachines.length === 0) return machineList.innerHTML = '<li><span style="color: #a0aec0;">此線尚無機台</span></li>'; 
+            
+            targetMachines.forEach(m => { machineList.innerHTML += `<li>${m.name}<div class="btn-group"><button class="edit-btn" onclick="editMachine('${m.id}', '${m.name.replace(/'/g, "\\'")}')">編輯</button><button class="delete-btn" onclick="deleteMachine('${m.id}', '${m.name.replace(/'/g, "\\'")}')">刪除</button></div></li>`; });
+        }
+
+        async function addNewLine() { const name = document.getElementById('newLineName').value.trim(); if (!name) return alert('請輸入新線別名稱'); await db.from('lines').insert([{ name }]); document.getElementById('newLineName').value=''; fetchLines(); }
+        
+        async function editSelectedLine() { 
+            const select = document.getElementById('settingLineSelect'); const id = select.value; 
+            if (!id) return alert('請先選擇線別'); 
+            const oldName = select.options[select.selectedIndex].text; 
+            const newName = prompt('新線別名稱：', oldName); 
+            if (newName && newName.trim() !== oldName) { 
+                await db.from('lines').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                await db.from('lines').insert([{ name: newName.trim() }]); 
+                fetchLines(); fetchMachines(); 
+            } 
+        }
+
+        async function deleteSelectedLine() { 
+            const select = document.getElementById('settingLineSelect'); const id = select.value; 
+            if (!id) return alert('請先選擇線別'); 
+            const oldName = select.options[select.selectedIndex].text;
+            if (confirm('警告：確定刪除此線別嗎？(原本已報工的歷史紀錄將保留)')) { 
+                await db.from('lines').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                fetchLines(); fetchMachines(); 
+            } 
+        }
+
+        async function addNewMachineToLine() { const lineId = document.getElementById('settingLineSelect').value; if (!lineId) return alert('請先在上方選擇線別！'); const name = document.getElementById('newMachineName').value.trim(); if (!name) return alert('請輸入機台名稱！'); await db.from('machines').insert([{ name: name, line_id: lineId }]); document.getElementById('newMachineName').value = ''; await fetchMachines(); }
+        
+        async function fetchMachines() { 
+            const { data } = await db.from('machines').select('*, lines(name)'); 
+            allMachines = (data || []).filter(m => !m.name.startsWith('@@DEL@@') && (!m.lines || !m.lines.name.startsWith('@@DEL@@'))); 
+            allMachines.sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
+            renderSettingMachineList(); updateRecordMachineDropdown(); onStatLineChange(); 
+        }
+
+        async function editMachine(id, oldName) { 
+            const newName = prompt('新機台名稱：', oldName); 
+            if (newName && newName.trim() !== oldName) { 
+                const oldItem = allMachines.find(m => m.id === id);
+                await db.from('machines').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                await db.from('machines').insert([{ name: newName.trim(), line_id: oldItem.line_id }]); 
+                fetchMachines(); 
+            } 
+        }
+
+        async function deleteMachine(id, oldName) { 
+            if (confirm('確定刪除這個機台嗎？(原本已報工的歷史紀錄將保留)')) { 
+                await db.from('machines').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                fetchMachines(); 
+            } 
+        }
+
+        function onLineSelectionChange() { 
+            updateRecordMachineDropdown(); 
+            renderDailyHistoryTable(); 
+
+            const selectedLineName = document.getElementById('recordLine').value;
+            const operatorSelect = document.getElementById('recordOperator');
+            if (selectedLineName) {
+                const savedOp = localStorage.getItem('smtSavedOperator_' + selectedLineName);
+                if (savedOp && Array.from(operatorSelect.options).some(opt => opt.value === savedOp)) {
+                    operatorSelect.value = savedOp;
+                } else {
+                    operatorSelect.value = "";
+                }
+            } else {
+                operatorSelect.value = "";
+            }
+        }
+        function updateRecordMachineDropdown() {
+            const recordSelect = document.getElementById('recordMachine'); const selectedLineName = document.getElementById('recordLine').value;
+            recordSelect.innerHTML = '<option value="">請先選擇機台</option>'; if (!selectedLineName) return;
+            const filteredMachines = allMachines.filter(m => m.lines && m.lines.name === selectedLineName);
+            filteredMachines.forEach(m => { recordSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`; });
+        }
+        function onStatLineChange() {
+            const statMachineSelect = document.getElementById('statMachine'); const selectedLineName = document.getElementById('statLine').value;
+            statMachineSelect.innerHTML = '<option value="">全部機台</option>';
+            let targetMachines = selectedLineName ? allMachines.filter(m => m.lines && m.lines.name === selectedLineName) : allMachines;
+            targetMachines.forEach(m => { statMachineSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`; });
+        }
+
+        async function fetchReasons() {
+            const { data } = await db.from('downtime_reasons').select('id, name, is_planned');
+            const plannedList = document.getElementById('plannedReasonList'); 
+            const unplannedList = document.getElementById('unplannedReasonList'); 
+            const select = document.getElementById('downtimeReasonSelect');
+            
+            plannedList.innerHTML = ''; unplannedList.innerHTML = ''; 
+            select.innerHTML = '<option value="">請選擇停機項目</option>';
+            if(!data) return;
+
+            // ★ 將乾淨的清單存入全域，供統計與預覽表動態比對分類使用
+            const activeReasons = data.filter(r => !r.name.startsWith('@@DEL@@'));
+            allReasons = activeReasons;
+            activeReasons.sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
+
+            let optgroupPlanned = '<optgroup label="=== 計畫性停機 (扣除總可用時間) ===">';
+            let optgroupUnplanned = '<optgroup label="=== 非計畫性停機 (扣除稼動率) ===">';
+
+            activeReasons.forEach(r => {
+                if (inlineEditReasonId === r.id) {
+                    const liHTML = `<li style="flex-direction: column; align-items: stretch; gap: 10px; background-color: #ebf8ff; border: 1px solid #3182ce; padding: 15px;">
+                        <div style="font-weight: bold; color: #2b6cb0; font-size: 14px;"><i class="fas fa-edit"></i> 修改項目與分類</div>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="editReasonName_${r.id}" value="${r.name}" style="flex: 2; min-width: 150px; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px;">
+                            <select id="editReasonType_${r.id}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px;">
+                                <option value="true" ${r.is_planned ? 'selected' : ''}>計畫性停機</option>
+                                <option value="false" ${!r.is_planned ? 'selected' : ''}>非計畫性停機</option>
+                            </select>
+                        </div>
+                        <div style="text-align: right; margin-top: 5px;">
+                            <button class="delete-btn" style="background-color: #a0aec0; padding: 6px 12px;" onclick="cancelEditReason()">取消</button>
+                            <button class="edit-btn" style="background-color: #38a169; padding: 6px 15px;" onclick="saveReasonEdit('${r.id}', '${r.name.replace(/'/g, "\\'")}', ${r.is_planned})">儲存</button>
+                        </div>
+                    </li>`;
+                    if (r.is_planned) plannedList.innerHTML += liHTML; else unplannedList.innerHTML += liHTML;
+                } else {
+                    const liHTML = `<li>${r.name} <div class="btn-group"><button class="edit-btn" onclick="startEditReason('${r.id}')">編輯</button><button class="delete-btn" onclick="deleteReason('${r.id}', '${r.name.replace(/'/g, "\\'")}')">刪除</button></div></li>`;
+                    if (r.is_planned) { plannedList.innerHTML += liHTML; optgroupPlanned += `<option value="${r.id}" data-planned="true">${r.name}</option>`; } 
+                    else { unplannedList.innerHTML += liHTML; optgroupUnplanned += `<option value="${r.id}" data-planned="false">${r.name}</option>`; }
+                }
+            });
+
+            optgroupPlanned += '</optgroup>'; optgroupUnplanned += '</optgroup>';
+            select.innerHTML += optgroupPlanned + optgroupUnplanned;
+        }
+
+        async function addReason(isPlanned) { 
+            const inputId = isPlanned ? 'plannedReasonName' : 'unplannedReasonName'; const name = document.getElementById(inputId).value.trim(); 
+            if (name) { await db.from('downtime_reasons').insert([{ name: name, is_planned: isPlanned }]); document.getElementById(inputId).value = ''; fetchReasons(); } 
+        }
+
+        function startEditReason(id) {
+            inlineEditReasonId = id;
+            fetchReasons();
+        }
+
+        function cancelEditReason() {
+            inlineEditReasonId = null;
+            fetchReasons();
+        }
+
+        async function saveReasonEdit(id, oldName, oldIsPlanned) {
+            const nameInput = document.getElementById(`editReasonName_${id}`);
+            const typeSelect = document.getElementById(`editReasonType_${id}`);
+            
+            const newName = nameInput.value.trim();
+            const newIsPlanned = typeSelect.value === 'true';
+
+            if (!newName) return alert('項目名稱不能為空！');
+
+            if (newName === oldName && newIsPlanned === oldIsPlanned) {
+                inlineEditReasonId = null;
+                fetchReasons();
+                return;
+            }
+
+            const delName = '@@DEL@@' + Date.now() + '_' + oldName;
+
+            if (newName === oldName) {
+                const { error: updErr } = await db.from('downtime_reasons').update({ name: delName }).eq('id', id);
+                if (updErr) return alert("修改失敗: " + updErr.message);
+
+                const { error: insErr } = await db.from('downtime_reasons').insert([{ name: newName, is_planned: newIsPlanned }]);
+                if (insErr) {
+                    await db.from('downtime_reasons').update({ name: oldName }).eq('id', id);
+                    return alert("轉換屬性失敗: " + insErr.message);
+                }
+            } else {
+                const { error: insErr } = await db.from('downtime_reasons').insert([{ name: newName, is_planned: newIsPlanned }]);
+                if (insErr) {
+                    return alert("修改失敗 (該名稱可能已被使用): " + insErr.message);
+                }
+                await db.from('downtime_reasons').update({ name: delName }).eq('id', id);
+            }
+            
+            inlineEditReasonId = null;
+            fetchReasons();
+        }
+
+        async function deleteReason(id, oldName) { 
+            if (confirm('確定刪除這個項目嗎？(原本已報工的歷史紀錄將保留)')) { 
+                await db.from('downtime_reasons').update({ name: '@@DEL@@' + Date.now() + '_' + oldName }).eq('id', id); 
+                fetchReasons(); 
+            } 
+        }
+
+        async function updateLineTime() {
+            const date = document.getElementById('recordDate').value; 
+            const line = document.getElementById('recordLine').value;
+            const startTime = getSelectedTime('startHour', 'startMinute'); 
+            const endTime = getSelectedTime('endHour', 'endMinute'); 
+            const isRollingBreak = document.getElementById('isRollingBreak').checked;
+
+            if (!date || !line || !startTime || !endTime) {
+                return alert('請完整填寫日期、線別、開線與結束時間！');
+            }
+
+            const confirmMsg = `確定要將【${date}】${line} 所有已輸入的機台紀錄，\n時間統一更新為 ${startTime} ~ ${endTime}，\n輪休狀態更新為：${isRollingBreak ? '是' : '否'} 嗎？`;
+            
+            if (!confirm(confirmMsg)) return;
+
+            const { data, error } = await db.from('production_records')
+                .update({ 
+                    start_time: startTime, 
+                    end_time: endTime, 
+                    is_rolling_break: isRollingBreak 
+                })
+                .eq('record_date', date)
+                .eq('line_name', line)
+                .select(); 
+
+            if (error) {
+                return alert('更新失敗：' + error.message);
+            }
+
+            if (data && data.length === 0) {
+                return alert('這天此線別尚無任何紀錄，無需更新！');
+            }
+
+            alert(`已成功更新 ${data.length} 筆機台紀錄！`);
+            loadRecordsByDate(); 
+        }
+
+        // ================= 每日報工儲存 =================
+        function addDowntimeToList() {
+            const select = document.getElementById('downtimeReasonSelect');
+            const reasonId = select.value; 
+            if (!reasonId) return alert('請選擇停機項目！');
+            
+            const reasonName = select.options[select.selectedIndex].text;
+            const isPlanned = select.options[select.selectedIndex].getAttribute('data-planned') === 'true';
+            const hours = parseInt(document.getElementById('downtimeHour').value); const minutes = parseInt(document.getElementById('downtimeMinute').value);
+            const totalDuration = (hours * 60) + minutes;
+            const remark = document.getElementById('downtimeRemark').value.trim(); 
+            
+            if (totalDuration <= 0) return alert('停機時間必須大於 0 分鐘！');
+            
+            currentDowntimeEvents.push({ reasonId, reasonName, duration: totalDuration, isPlanned: isPlanned, remark: remark });
+
+            select.value = ''; document.getElementById('downtimeHour').value = '0'; document.getElementById('downtimeMinute').value = '0'; document.getElementById('downtimeRemark').value = '';
+            renderDowntimeTable();
+        }
+
+        function editNewDowntime(idx) {
+            const item = currentDowntimeEvents[idx];
+            document.getElementById('downtimeReasonSelect').value = item.reasonId;
+            document.getElementById('downtimeHour').value = Math.floor(item.duration / 60);
+            document.getElementById('downtimeMinute').value = item.duration % 60;
+            document.getElementById('downtimeRemark').value = item.remark || '';
+            currentDowntimeEvents.splice(idx, 1);
+            renderDowntimeTable();
+        }
+
+        function removeDowntimeFromList(index) { currentDowntimeEvents.splice(index, 1); renderDowntimeTable(); }
+        function renderDowntimeTable() {
+            const tbody = document.getElementById('downtimeTableBody'); tbody.innerHTML = ''; let total = 0;
+            currentDowntimeEvents.forEach((event, index) => { 
+                total += event.duration; 
+                const typeTag = event.isPlanned ? '<span style="color:#d69e2e;font-weight:bold;">[計畫]</span>' : '<span style="color:#e53e3e;font-weight:bold;">[非計畫]</span>';
+                tbody.innerHTML += `<tr>
+                    <td>${event.reasonName}</td>
+                    <td>${typeTag}</td>
+                    <td>${event.duration}</td>
+                    <td style="max-width: 150px; word-break: break-all; white-space: normal;">${event.remark || '-'}</td>
+                    <td>
+                        <div class="btn-group" style="justify-content:center;">
+                            <button class="edit-btn" onclick="editNewDowntime(${index})"><i class="fas fa-edit"></i></button>
+                            <button class="delete-btn" onclick="removeDowntimeFromList(${index})"><i class="fas fa-times"></i></button>
+                        </div>
+                    </td>
+                </tr>`; 
+            });
+            document.getElementById('totalDowntimeDisplay').innerText = total;
+        }
+
+        async function submitMachineRecord() {
+            const dtReason = document.getElementById('downtimeReasonSelect').value;
+            const dtH = parseInt(document.getElementById('downtimeHour').value) || 0;
+            const dtM = parseInt(document.getElementById('downtimeMinute').value) || 0;
+            if (dtReason && (dtH * 60 + dtM) > 0) {
+                addDowntimeToList();
+            }
+
+            const date = document.getElementById('recordDate').value; const line = document.getElementById('recordLine').value;
+            const startTime = getSelectedTime('startHour', 'startMinute'); const endTime = getSelectedTime('endHour', 'endMinute'); 
+            const machineId = document.getElementById('recordMachine').value; const isRollingBreak = document.getElementById('isRollingBreak').checked;
+            const operatorName = document.getElementById('recordOperator').value; 
+
+            if (!date || !line || !startTime || !endTime || !machineId || !operatorName) return alert('請完整填寫上方共用資料、機台名稱 以及 登記人！');
+
+            localStorage.setItem('smtSavedLine', line);
+            localStorage.setItem('smtSavedOperator_' + line, operatorName); 
+
+            const { data: recordData, error: recordError } = await db.from('production_records').insert([{
+                record_date: date, line_name: line, machine_id: machineId, start_time: startTime,
+                end_time: endTime, early_end_time: null, is_rolling_break: isRollingBreak, operator_name: operatorName
+            }]).select();
+
+            if (recordError) return alert('主紀錄儲存失敗：' + recordError.message);
+
+            if (currentDowntimeEvents.length > 0) {
+                const eventsToInsert = currentDowntimeEvents.map(event => ({ record_id: recordData[0].id, reason_id: event.reasonId, duration_minutes: event.duration, remark: event.remark || null }));
+                await db.from('downtime_events').insert(eventsToInsert);
+            }
+            alert('機台紀錄儲存成功！你可以繼續輸入下一台機台。');
+            document.getElementById('recordMachine').value = ''; 
+            document.getElementById('downtimeRemark').value = ''; 
+            currentDowntimeEvents = []; renderDowntimeTable(); loadRecordsByDate();
+        }
+
+        async function addDowntimeToWholeLine() {
+            const date = document.getElementById('recordDate').value;
+            const line = document.getElementById('recordLine').value;
+            const startTime = getSelectedTime('startHour', 'startMinute');
+            const endTime = getSelectedTime('endHour', 'endMinute');
+            const isRollingBreak = document.getElementById('isRollingBreak').checked;
+            const operatorName = document.getElementById('recordOperator').value;
+
+            if (!date || !line || !startTime || !endTime || !operatorName) {
+                return alert('請完整填寫上方共用資料(日期/線別/開線/結束/登記人)！\n(全線套用不需要選擇機台名稱)');
+            }
+
+            const select = document.getElementById('downtimeReasonSelect');
+            const reasonId = select.value; 
+            if (!reasonId) return alert('請選擇停機項目！');
+            
+            const reasonName = select.options[select.selectedIndex].text;
+            const hours = parseInt(document.getElementById('downtimeHour').value); 
+            const minutes = parseInt(document.getElementById('downtimeMinute').value);
+            const totalDuration = (hours * 60) + minutes;
+            const remark = document.getElementById('downtimeRemark').value.trim(); 
+            
+            if (totalDuration <= 0) return alert('停機時間必須大於 0 分鐘！');
+
+            if (!confirm(`確定要將「${reasonName} - ${totalDuration}分鐘」套用到【${line}】的所有機台嗎？\n(將自動排除 X-Ray 相關機台，且立即寫入資料庫！)`)) return;
+
+            localStorage.setItem('smtSavedLine', line);
+            localStorage.setItem('smtSavedOperator_' + line, operatorName); 
+
+            const lineMachines = allMachines.filter(m => m.lines && m.lines.name === line && !m.name.toUpperCase().includes('X-RAY'));
+            if (lineMachines.length === 0) return alert('此線別目前沒有綁定任何機台(或僅有被排除的機台)！');
+
+            const { data: existingRecords, error: fetchErr } = await db.from('production_records')
+                .select('id, machine_id')
+                .eq('record_date', date)
+                .eq('line_name', line);
+
+            if (fetchErr) return alert('檢查現有紀錄失敗: ' + fetchErr.message);
+
+            let newRecordIdsMap = {};
+
+            const machinesWithoutRecord = lineMachines.filter(m => !existingRecords.find(r => r.machine_id === m.id));
+            if (machinesWithoutRecord.length > 0) {
+                const recordsToInsert = machinesWithoutRecord.map(m => ({
+                    record_date: date,
+                    line_name: line,
+                    machine_id: m.id,
+                    start_time: startTime,
+                    end_time: endTime,
+                    early_end_time: null,
+                    is_rolling_break: isRollingBreak,
+                    operator_name: operatorName
+                }));
+                const { data: insertedRecords, error: insertErr } = await db.from('production_records').insert(recordsToInsert).select();
+                if (insertErr) return alert('建立機台主紀錄失敗: ' + insertErr.message);
+                insertedRecords.forEach(r => newRecordIdsMap[r.machine_id] = r.id);
+            }
+
+            let eventsToInsert = [];
+            lineMachines.forEach(m => {
+                let recordId = newRecordIdsMap[m.id];
+                if (!recordId) {
+                    const ext = existingRecords.find(r => r.machine_id === m.id);
+                    if (ext) recordId = ext.id;
+                }
+                if (recordId) {
+                    eventsToInsert.push({
+                        record_id: recordId,
+                        reason_id: reasonId,
+                        duration_minutes: totalDuration,
+                        remark: remark || null
+                    });
+                }
+            });
+
+            if (eventsToInsert.length > 0) {
+                const { error: dtErr } = await db.from('downtime_events').insert(eventsToInsert);
+                if (dtErr) return alert('寫入停機明細失敗: ' + dtErr.message);
+            }
+
+            alert(`已成功將停機套用至全線 ${lineMachines.length} 台機台！\n(已自動排除 X-Ray)`);
+            
+            select.value = ''; document.getElementById('downtimeHour').value = '0'; document.getElementById('downtimeMinute').value = '0'; document.getElementById('downtimeRemark').value = '';
+            loadRecordsByDate();
+        }
+
+        // ================= 每日報工表格展開編輯邏輯 =================
+        async function loadRecordsByDate() {
+            const date = document.getElementById('recordDate').value; if (!date) return;
+            const { data, error } = await db.from('production_records').select('*, machines(name), downtime_events(id, duration_minutes, remark, downtime_reasons(id, name, is_planned))').eq('record_date', date);
+            loadedDailyRecords = data || []; 
+            
+            loadedDailyRecords.sort((a, b) => (stripDel(a.machines?.name) || '').localeCompare(stripDel(b.machines?.name) || '', 'zh-TW'));
+            
+            inlineEditingId = null; 
+            renderDailyHistoryTable();
+        }
+
+        function renderDailyHistoryTable() {
+            const tbody = document.getElementById('dailyHistoryTable'); tbody.innerHTML = '';
+            
+            const selectedLineName = document.getElementById('recordLine').value;
+            let recordsToShow = loadedDailyRecords;
+            if (selectedLineName) {
+                recordsToShow = loadedDailyRecords.filter(r => stripDel(r.line_name) === selectedLineName);
+            }
+
+            if (recordsToShow.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">此線別本日尚無機台紀錄。</td></tr>';
+                return;
+            }
+            
+            recordsToShow.forEach(record => {
+                let mName = stripDel(record.machines?.name);
+                let opName = stripDel(record.operator_name) || '-';
+                let lName = stripDel(record.line_name);
+
+                if (inlineEditingId === record.id) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td colspan="7" style="background-color: #ebf8ff; padding: 15px; border-radius: 8px; text-align: left; border: 2px solid #3182ce;">
+                            <div style="font-weight:bold; margin-bottom:10px; color:#2b6cb0; font-size:16px;">
+                                <i class="fas fa-edit"></i> 編輯明細：${lName} - ${mName}
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 10px; align-items: center; background:#fff; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+                                <div style="display:flex; align-items:center;"><b>登記人:</b>&nbsp; ${generateOperatorSelectHTML(opName)}</div>
+                                <div style="display:flex; align-items:center;"><b>開線:</b>&nbsp; ${generateTimePickerHTML('editStart', record.start_time)}</div>
+                                <div style="display:flex; align-items:center;"><b>結束:</b>&nbsp; ${generateTimePickerHTML('editEnd', record.end_time)}</div>
+                                <div style="display: flex; align-items: center; gap: 5px;">
+                                    <input type="checkbox" id="editRolling" ${record.is_rolling_break ? 'checked' : ''} style="transform: scale(1.3); cursor:pointer;"> 
+                                    <label for="editRolling" style="cursor:pointer; font-weight:bold; color:#4a5568;">輪休不停機</label>
+                                </div>
+                            </div>
+                            <div style="background:#fff; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+                                <b style="color:#4a5568;">停機明細管理:</b>
+                                <div id="inlineDowntimeListContainer" style="margin: 10px 0; display:flex; flex-direction:column; gap:5px;">
+                                    ${generateInlineDowntimeListHTML()}
+                                </div>
+                                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top:10px; border-top:1px dashed #e2e8f0; padding-top:10px;">
+                                    <select id="editDtReason" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:auto;">${document.getElementById('downtimeReasonSelect').innerHTML}</select>
+                                    <select id="editDtHour" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:auto;">${document.getElementById('downtimeHour').innerHTML}</select>
+                                    <select id="editDtMinute" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:auto;">${document.getElementById('downtimeMinute').innerHTML}</select>
+                                    <input type="text" id="editDtRemark" placeholder="備註(選填)" style="padding:5px; border-radius:4px; border:1px solid #cbd5e0; width:120px; flex:1;">
+                                    <button onclick="addInlineDowntime()" style="background-color:#ecc94b; color:#744210; padding:5px 15px; border-radius:4px; border:none; cursor:pointer; font-weight:bold;"><i class="fas fa-plus"></i> 加入停機</button>
+                                </div>
+                            </div>
+                            <div style="margin-top: 15px; text-align: right;">
+                                <button onclick="cancelInlineEdit()" style="background-color: #a0aec0; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">取消修改</button>
+                                <button onclick="saveInlineEdit('${record.id}')" style="background-color: #38a169; color: white; padding: 8px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight:bold;"><i class="fas fa-save"></i> 儲存修改</button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                } else {
+                    let totalDowntime = 0; 
+                    let dtHtml = '';
+                    
+                    if (record.downtime_events && record.downtime_events.length > 0) {
+                        record.downtime_events.forEach(e => { 
+                            totalDowntime += e.duration_minutes; 
+                            const cleanReasonName = stripDel(e.downtime_reasons.name);
+                            
+                            // ★ 動態比對：如果基礎設定已修改分類，就用新的分類顯示
+                            let isPlanned = e.downtime_reasons.is_planned;
+                            const activeR = allReasons.find(r => r.name === cleanReasonName);
+                            if (activeR) isPlanned = activeR.is_planned;
+                            
+                            const typeTag = isPlanned ? '<span style="color:#d69e2e; font-weight:bold;">[計]</span>' : '<span style="color:#e53e3e; font-weight:bold;">[非]</span>';
+                            const remarkText = e.remark ? ` <span style="color:#718096; font-size:12px; word-break: break-all;">(${e.remark})</span>` : '';
+                            dtHtml += `<div style="margin-bottom:2px; white-space: normal; word-break: break-all;">${typeTag} ${cleanReasonName}: <b style="color:#2d3748;">${e.duration_minutes}</b>分${remarkText}</div>`;
+                        });
+                    } else {
+                        dtHtml = '<span style="color:#a0aec0;">無停機</span>';
+                    }
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${lName}</td>
+                        <td>${mName}</td>
+                        <td>${opName}</td>
+                        <td>${record.start_time} ~ ${record.end_time}</td>
+                        <td style="text-align:left; font-size:13px; line-height:1.4;">${dtHtml}</td>
+                        <td style="color:#e53e3e; font-weight:bold; font-size:16px;">${totalDowntime}</td>
+                        <td>
+                            <div class="btn-group" style="justify-content:center;">
+                                <button class="edit-btn" onclick="startInlineEdit('${record.id}')">編輯</button>
+                                <button class="delete-btn" onclick="deleteDailyRecord('${record.id}')">刪除</button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            });
+        }
+
+        async function deleteDailyRecord(id) { if (!confirm('確定刪除此機台紀錄？')) return; await db.from('production_records').delete().eq('id', id); loadRecordsByDate(); }
+
+        function startInlineEdit(id) {
+            inlineEditingId = id;
+            const record = loadedDailyRecords.find(r => r.id === id);
+            inlineDowntimeEvents = [];
+            if (record.downtime_events) {
+                record.downtime_events.forEach(e => {
+                    const cleanName = stripDel(e.downtime_reasons.name);
+                    let isPlanned = e.downtime_reasons.is_planned;
+                    let rId = e.downtime_reasons.id;
+                    
+                    // ★ 編輯時也同步對齊最新狀態，並把ID指過去，方便未來覆寫
+                    const activeR = allReasons.find(r => r.name === cleanName);
+                    if (activeR) {
+                        isPlanned = activeR.is_planned;
+                        rId = activeR.id;
+                    }
+
+                    inlineDowntimeEvents.push({
+                        reasonId: rId,
+                        reasonName: cleanName,
+                        isPlanned: isPlanned,
+                        duration: e.duration_minutes,
+                        remark: e.remark || ''
+                    });
+                });
+            }
+            renderDailyHistoryTable(); 
+        }
+
+        function cancelInlineEdit() { inlineEditingId = null; renderDailyHistoryTable(); }
+
+        function editInlineDowntime(idx) {
+            const item = inlineDowntimeEvents[idx];
+            document.getElementById('editDtReason').value = item.reasonId;
+            document.getElementById('editDtHour').value = Math.floor(item.duration / 60);
+            document.getElementById('editDtMinute').value = item.duration % 60;
+            document.getElementById('editDtRemark').value = item.remark || '';
+            
+            inlineDowntimeEvents.splice(idx, 1);
+            document.getElementById('inlineDowntimeListContainer').innerHTML = generateInlineDowntimeListHTML();
+        }
+
+        function generateInlineDowntimeListHTML() {
+            if (inlineDowntimeEvents.length === 0) return '<span style="color:#a0aec0; font-size:13px;">尚無停機紀錄</span>';
+            let html = '';
+            inlineDowntimeEvents.forEach((e, idx) => {
+                const typeTag = e.isPlanned ? '<span style="color:#d69e2e;">[計]</span>' : '<span style="color:#e53e3e;">[非]</span>';
+                const rText = e.remark ? ` <i style="color:#718096; font-size:12px;">(${e.remark})</i>` : '';
+                html += `<div style="background:#f7fafc; padding:5px 10px; border-radius:4px; border:1px solid #e2e8f0; display:inline-flex; align-items:center; justify-content:space-between; max-width:450px; margin-bottom:5px;">
+                    <span style="word-break: break-all; white-space: normal; padding-right:10px;">${typeTag} ${e.reasonName} - <b>${e.duration}</b> 分鐘${rText}</span>
+                    <div style="display:flex; gap:5px; flex-shrink:0;">
+                        <button onclick="editInlineDowntime(${idx})" style="background:#48bb78; color:white; border:none; border-radius:3px; cursor:pointer; padding:4px 8px;" title="載入編輯"><i class="fas fa-edit"></i></button>
+                        <button onclick="removeInlineDowntime(${idx})" style="background:#e53e3e; color:white; border:none; border-radius:3px; cursor:pointer; padding:4px 8px;" title="移除"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>`;
+            });
+            return html;
+        }
+
+        function addInlineDowntime() {
+            const select = document.getElementById('editDtReason');
+            const reasonId = select.value; 
+            if (!reasonId) return alert('請選擇停機項目！');
+            const reasonName = select.options[select.selectedIndex].text;
+            const isPlanned = select.options[select.selectedIndex].getAttribute('data-planned') === 'true';
+            const hours = parseInt(document.getElementById('editDtHour').value); 
+            const minutes = parseInt(document.getElementById('editDtMinute').value);
+            const totalDuration = (hours * 60) + minutes;
+            const remark = document.getElementById('editDtRemark').value.trim();
+            
+            if (totalDuration <= 0) return alert('停機時間必須大於 0 分鐘！');
+            
+            inlineDowntimeEvents.push({ reasonId, reasonName, duration: totalDuration, isPlanned: isPlanned, remark: remark });
+
+            select.value = ''; document.getElementById('editDtHour').value = '0'; document.getElementById('editDtMinute').value = '0'; document.getElementById('editDtRemark').value = '';
+            document.getElementById('inlineDowntimeListContainer').innerHTML = generateInlineDowntimeListHTML();
+        }
+
+        function removeInlineDowntime(idx) { inlineDowntimeEvents.splice(idx, 1); document.getElementById('inlineDowntimeListContainer').innerHTML = generateInlineDowntimeListHTML(); }
+
+        async function saveInlineEdit(recordId) {
+            const dtReason = document.getElementById('editDtReason').value;
+            const dtH = parseInt(document.getElementById('editDtHour').value) || 0;
+            const dtM = parseInt(document.getElementById('editDtMinute').value) || 0;
+            if (dtReason && (dtH * 60 + dtM) > 0) {
+                addInlineDowntime();
+            }
+
+            const startTime = getSelectedTime('editStartHour', 'editStartMinute');
+            const endTime = getSelectedTime('editEndHour', 'editEndMinute');
+            const isRollingBreak = document.getElementById('editRolling').checked;
+            const operatorName = document.getElementById('editOperatorName').value;
+
+            if (!startTime || !endTime || !operatorName) return alert('開線、結束時間與登記人皆為必填！');
+
+            const { error: recordError } = await db.from('production_records').update({
+                start_time: startTime, end_time: endTime, early_end_time: null, is_rolling_break: isRollingBreak, operator_name: operatorName
+            }).eq('id', recordId);
+
+            if (recordError) return alert('主紀錄更新失敗：' + recordError.message);
+
+            await db.from('downtime_events').delete().eq('record_id', recordId);
+            if (inlineDowntimeEvents.length > 0) {
+                const eventsToInsert = inlineDowntimeEvents.map(e => ({ record_id: recordId, reason_id: e.reasonId, duration_minutes: e.duration, remark: e.remark || null }));
+                await db.from('downtime_events').insert(eventsToInsert);
+            }
+            alert('修改已成功儲存！');
+            loadRecordsByDate(); 
+        }
+
+        // ================= ★ 統計與導出邏輯 ★ =================
+        async function queryStatistics() {
+            const startDate = document.getElementById('statStartDate').value; const endDate = document.getElementById('statEndDate').value; 
+            const lineName = document.getElementById('statLine').value; const machineId = document.getElementById('statMachine').value;
+            
+            if (!startDate || !endDate) return alert('請選擇開始與結束日期！');
+
+            let query = db.from('production_records').select('*, machines(name), downtime_events(duration_minutes, remark, downtime_reasons(name, is_planned))').gte('record_date', startDate).lte('record_date', endDate);
+            if (lineName) query = query.eq('line_name', lineName); if (machineId) query = query.eq('machine_id', machineId);
+
+            const { data: records, error } = await query;
+            
+            let mergedMap = {};
+            (records || []).forEach(r => {
+                let key = `${r.record_date}_${r.machine_id}`;
+                if (!mergedMap[key]) {
+                    mergedMap[key] = { ...r, downtime_events: r.downtime_events ? [...r.downtime_events] : [] };
+                } else {
+                    if (r.downtime_events) {
+                        r.downtime_events.forEach(ev => {
+                            const isDup = mergedMap[key].downtime_events.some(e => 
+                                stripDel(e.downtime_reasons.name) === stripDel(ev.downtime_reasons.name) && 
+                                e.duration_minutes === ev.duration_minutes && 
+                                (e.remark || '') === (ev.remark || '')
+                            );
+                            if (!isDup) {
+                                mergedMap[key].downtime_events.push(ev);
+                            }
+                        });
+                    }
+                }
+            });
+            currentQueriedRecords = Object.values(mergedMap);
+            
+            currentQueriedRecords.sort((a, b) => {
+                if (a.record_date === b.record_date) {
+                    return stripDel(a.machines?.name).localeCompare(stripDel(b.machines?.name), 'zh-TW');
+                }
+                return a.record_date.localeCompare(b.record_date);
+            });
+
+            if (error || currentQueriedRecords.length === 0) { 
+                alert(error ? '查詢失敗！' : '這段期間沒有符合條件的資料！'); 
+                document.getElementById('statOEE').innerText = '0.0%'; document.getElementById('statTotalDowntime').innerText = '0 分鐘'; 
+                document.getElementById('statSummaryBody').innerHTML = '<tr><td colspan="4" style="text-align:center;">無資料</td></tr>';
+                document.getElementById('statDetailBody').innerHTML = '<tr><td colspan="15" style="text-align:center;">無資料</td></tr>';
+                if (downtimeChartInstance) downtimeChartInstance.destroy(); currentExportData = []; simpleExportData = []; weeklyExportData = []; monthlyExportData = []; 
+                document.getElementById('summaryMachineFilter').innerHTML = '<option value="">請重新查詢</option>';
+                return; 
+            }
+
+            const summarySelect = document.getElementById('summaryMachineFilter');
+            summarySelect.innerHTML = '<option value="ALL">全部機台平均</option>';
+            const uniqueMachinesInQuery = {};
+            currentQueriedRecords.forEach(r => {
+                uniqueMachinesInQuery[r.machine_id] = stripDel(r.machines?.name);
+            });
+            
+            const sortedMachineEntries = Object.entries(uniqueMachinesInQuery).sort((a, b) => a[1].localeCompare(b[1], 'zh-TW'));
+            for (const [id, name] of sortedMachineEntries) {
+                summarySelect.innerHTML += `<option value="${id}">${name}</option>`;
+            }
+
+            currentExportData = []; 
+            simpleExportData = []; 
+            weeklyExportData = [];
+            monthlyExportData = [];
+
+            let weeklyMap = {};
+            let monthlyMap = {};
+            let detailHTML = '';
+            
+            currentQueriedRecords.forEach(record => {
+                const plannedActualMin = calculateActualAvailMin(record.start_time, record.end_time, record.is_rolling_break);
+                
+                let recordPlannedDowntime = 0;
+                let recordUnplannedDowntime = 0; 
+                let recordReasonMap = {}; 
+                
+                if (record.downtime_events) {
+                    record.downtime_events.forEach(event => {
+                        const duration = event.duration_minutes; 
+                        const rName = stripDel(event.downtime_reasons.name);
+                        const rMark = event.remark ? event.remark : '';
+                        
+                        // ★ 動態計算分類：覆蓋查詢統計時的邏輯，使用最新狀態
+                        let isPlanned = event.downtime_reasons.is_planned;
+                        const activeR = allReasons.find(r => r.name === rName);
+                        if (activeR) isPlanned = activeR.is_planned;
+                        
+                        if (isPlanned) recordPlannedDowntime += duration;
+                        else recordUnplannedDowntime += duration; 
+                        
+                        if (!recordReasonMap[rName]) {
+                            recordReasonMap[rName] = { duration: duration, isPlanned: isPlanned, remarks: [] };
+                        } else {
+                            recordReasonMap[rName].duration += duration;
+                            recordReasonMap[rName].isPlanned = isPlanned;
+                        }
+                        if (rMark) recordReasonMap[rName].remarks.push(rMark);
+                    });
+                }
+                
+                const actualAvailMin = plannedActualMin - recordPlannedDowntime; 
+                let actualProductionTime = actualAvailMin - recordUnplannedDowntime;
+                if (actualProductionTime < 0) actualProductionTime = 0;
+
+                let recordOEE = actualAvailMin > 0 ? (actualProductionTime / actualAvailMin) * 100 : 0;
+                
+                let rLineName = stripDel(record.line_name);
+                let mName = stripDel(record.machines?.name);
+                let opName = stripDel(record.operator_name) || '-';
+
+                simpleExportData.push({
+                    "日期": record.record_date,
+                    "線別": rLineName,
+                    "機台": mName,
+                    "實際可用時間(分)": actualAvailMin,
+                    "非計畫停機": recordUnplannedDowntime,
+                    "實際生產時間": actualProductionTime,
+                    "稼動率": recordOEE.toFixed(2) + '%'
+                });
+
+                const weekStr = getWeekString(record.record_date);
+                const monthStr = record.record_date.substring(0, 7);
+
+                let wKey = weekStr + "_" + mName;
+                if(!weeklyMap[wKey]) weeklyMap[wKey] = { period: weekStr, machine: mName, avail: 0, unplanned: 0 };
+                weeklyMap[wKey].avail += actualAvailMin;
+                weeklyMap[wKey].unplanned += recordUnplannedDowntime;
+
+                let mKey = monthStr + "_" + mName;
+                if(!monthlyMap[mKey]) monthlyMap[mKey] = { period: monthStr, machine: mName, avail: 0, unplanned: 0 };
+                monthlyMap[mKey].avail += actualAvailMin;
+                monthlyMap[mKey].unplanned += recordUnplannedDowntime;
+
+                const rKeys = Object.keys(recordReasonMap).sort((a, b) => a.localeCompare(b, 'zh-TW'));
+                
+                if (rKeys.length === 0) {
+                    currentExportData.push({ 
+                        "日期": record.record_date, 
+                        "線別": rLineName, 
+                        "機台": mName, 
+                        "登記人": opName,
+                        "開線時間": record.start_time, 
+                        "結束時間": record.end_time,
+                        "有輪休": record.is_rolling_break ? '是' : '否', 
+                        "實際可用時間(分)": actualAvailMin, 
+                        "類別": "-", 
+                        "分組": "-", 
+                        "停機項目": "無", 
+                        "該項停機(分)": 0, 
+                        "實際生產時間": actualProductionTime,
+                        "稼動率(%)": recordOEE.toFixed(2) + '%', 
+                        "備註": "-" 
+                    });
+                    detailHTML += `<tr>
+                        <td>${record.record_date}</td>
+                        <td>${rLineName}</td>
+                        <td>${mName}</td>
+                        <td>${opName}</td>
+                        <td>${record.start_time}</td>
+                        <td>${record.end_time}</td>
+                        <td>${record.is_rolling_break ? '是' : '否'}</td>
+                        <td>${actualAvailMin}</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>無</td>
+                        <td style="color:#e53e3e; font-weight:bold;">0</td>
+                        <td>${actualProductionTime}</td>
+                        <td>${recordOEE.toFixed(2)}%</td>
+                        <td>-</td>
+                    </tr>`;
+                } else {
+                    rKeys.forEach((rName, idx) => {
+                        const tInfo = recordReasonMap[rName];
+                        const combinedRemarks = tInfo.remarks.join(', ');
+                        const exportCategory = tInfo.isPlanned ? '計畫性' : '非計畫性';
+                        const groupName = getGroupByReason(rName);
+                        
+                        currentExportData.push({ 
+                            "日期": record.record_date, 
+                            "線別": rLineName, 
+                            "機台": mName, 
+                            "登記人": opName,
+                            "開線時間": record.start_time, 
+                            "結束時間": record.end_time,
+                            "有輪休": record.is_rolling_break ? '是' : '否', 
+                            "實際可用時間(分)": actualAvailMin, 
+                            "類別": exportCategory, 
+                            "分組": groupName,
+                            "停機項目": rName, 
+                            "該項停機(分)": tInfo.duration, 
+                            "實際生產時間": actualProductionTime,
+                            "稼動率(%)": recordOEE.toFixed(2) + '%', 
+                            "備註": combinedRemarks || '-' 
+                        });
+
+                        const colorStyle = tInfo.isPlanned ? 'color:#d69e2e;' : 'color:#e53e3e;';
+                        
+                        if (idx === 0) {
+                            detailHTML += `<tr>
+                                <td rowspan="${rKeys.length}">${record.record_date}</td>
+                                <td rowspan="${rKeys.length}">${rLineName}</td>
+                                <td rowspan="${rKeys.length}">${mName}</td>
+                                <td rowspan="${rKeys.length}">${opName}</td>
+                                <td rowspan="${rKeys.length}">${record.start_time}</td>
+                                <td rowspan="${rKeys.length}">${record.end_time}</td>
+                                <td rowspan="${rKeys.length}">${record.is_rolling_break ? '是' : '否'}</td>
+                                <td rowspan="${rKeys.length}">${actualAvailMin}</td>
+                                <td style="border-left: 1px solid #e2e8f0; font-size:13px; color:#4a5568;">${exportCategory}</td>
+                                <td style="border-left: 1px solid #e2e8f0; font-size:13px; color:#4a5568;">${groupName}</td>
+                                <td style="border-left: 1px solid #e2e8f0;">${rName}</td>
+                                <td style="font-weight:bold; ${colorStyle}">${tInfo.duration}</td>
+                                <td rowspan="${rKeys.length}">${actualProductionTime}</td>
+                                <td rowspan="${rKeys.length}">${recordOEE.toFixed(2)}%</td>
+                                <td rowspan="${rKeys.length}" style="word-break: break-all; max-width: 150px; white-space: normal;"><span style="font-size:13px; color:#718096;">${combinedRemarks || '-''}</span></td>
+                            </tr>`;
+                        } else {
+                            detailHTML += `<tr>
+                                <td style="border-left: 1px solid #e2e8f0; font-size:13px; color:#4a5568;">${exportCategory}</td>
+                                <td style="border-left: 1px solid #e2e8f0; font-size:13px; color:#4a5568;">${groupName}</td>
+                                <td style="border-left: 1px solid #e2e8f0;">${rName}</td>
+                                <td style="font-weight:bold; ${colorStyle}">${tInfo.duration}</td>
+                            </tr>`;
+                        }
+                    });
+                }
+            });
+
+            document.getElementById('statDetailBody').innerHTML = detailHTML;
+
+            weeklyExportData = Object.values(weeklyMap).map(w => {
+                let actualProd = w.avail - w.unplanned;
+                if (actualProd < 0) actualProd = 0;
+                let oee = w.avail > 0 ? (actualProd / w.avail) * 100 : 0;
+                return { "週別": w.period, "機台": w.machine, "平均可用時間(分)": w.avail, "平均非計畫停機": w.unplanned, "實際生產時間": actualProd, "平均稼動率": oee.toFixed(2) + '%' };
+            });
+            weeklyExportData.sort((a,b) => a.週別.localeCompare(b.週別) || a.機台.localeCompare(b.機台));
+
+            monthlyExportData = Object.values(monthlyMap).map(m => {
+                let actualProd = m.avail - m.unplanned;
+                if (actualProd < 0) actualProd = 0;
+                let oee = m.avail > 0 ? (actualProd / m.avail) * 100 : 0;
+                return { "月份": m.period, "機台": m.machine, "平均可用時間(分)": m.avail, "平均非計畫停機": m.unplanned, "實際生產時間": actualProd, "平均稼動率": oee.toFixed(2) + '%' };
+            });
+            monthlyExportData.sort((a,b) => a.月份.localeCompare(b.月份) || a.機台.localeCompare(b.機台));
+
+            renderSummaryAndChart();
+        }
+
+        function renderSummaryAndChart() {
+            if (!currentQueriedRecords || currentQueriedRecords.length === 0) return;
+            const selectedMachineId = document.getElementById('summaryMachineFilter').value;
+            if (!selectedMachineId) return; 
+
+            let filteredRecords = currentQueriedRecords;
+            if (selectedMachineId !== 'ALL') {
+                filteredRecords = currentQueriedRecords.filter(r => r.machine_id === selectedMachineId);
+            }
+
+            let totalActualAvailTime = 0; let grandTotalUnplannedDowntime = 0; const reasonDowntimeMap = {}; 
+
+            filteredRecords.forEach(record => {
+                const plannedActualMin = calculateActualAvailMin(record.start_time, record.end_time, record.is_rolling_break);
+                
+                let recordPlannedDowntime = 0;
+                if (record.downtime_events) {
+                    record.downtime_events.forEach(event => {
+                        const duration = event.duration_minutes; 
+                        const rName = stripDel(event.downtime_reasons.name); 
+                        
+                        let isPlanned = event.downtime_reasons.is_planned;
+                        const activeR = allReasons.find(r => r.name === rName);
+                        if (activeR) isPlanned = activeR.is_planned;
+
+                        if (isPlanned) recordPlannedDowntime += duration; else grandTotalUnplannedDowntime += duration;
+                        const chartName = isPlanned ? `[計畫] ${rName}` : rName;
+                        reasonDowntimeMap[chartName] = (reasonDowntimeMap[chartName] || 0) + duration;
+                    });
+                }
+                
+                const actualAvailMin = plannedActualMin - recordPlannedDowntime; 
+                totalActualAvailTime += actualAvailMin;
+            });
+
+            let actualRunTime = totalActualAvailTime - grandTotalUnplannedDowntime;
+            if (actualRunTime < 0) actualRunTime = 0;
+
+            let totalOEE = totalActualAvailTime > 0 ? (actualRunTime / totalActualAvailTime) * 100 : 0;
+            
+            document.getElementById('statOEE').innerText = totalOEE.toFixed(1) + '%'; 
+            document.getElementById('statTotalDowntime').innerText = grandTotalUnplannedDowntime + ' 分鐘';
+
+            let summaryDowntimeStr = Object.entries(reasonDowntimeMap).map(([r, t]) => `${r}: <span style="font-weight:bold;">${t}分</span>`).join('<br>') || '無停機紀錄';
+            document.getElementById('statSummaryBody').innerHTML = `<tr><td>${totalActualAvailTime} 分鐘</td><td style="text-align:left; line-height:1.5;">${summaryDowntimeStr}</td><td style="color:#e53e3e; font-weight:bold; font-size:1.1rem;">${grandTotalUnplannedDowntime} 分鐘</td><td style="font-size:1.2rem; font-weight:bold; color:#3182ce;">${totalOEE.toFixed(2)}%</td></tr>`;
+
+            const ctx = document.getElementById('downtimeChart').getContext('2d'); if (downtimeChartInstance) downtimeChartInstance.destroy();
+            
+            const chartLabels = [];
+            const chartData = [];
+            const chartColors = [];
+
+            if (actualRunTime > 0 || Object.keys(reasonDowntimeMap).length > 0) {
+                chartLabels.push('正常稼動時間');
+                chartData.push(actualRunTime);
+                chartColors.push('#48bb78'); 
+            }
+
+            const stopColorPalette = [
+                '#e53e3e', '#3182ce', '#ecc94b', '#9f7aea', '#ed64a6', 
+                '#4fd1c5', '#f6ad55', '#a0aec0', '#b7791f', '#2c3e50', 
+                '#68d391', '#fc8181', '#63b3ed', '#f6e05e', '#b794f4', 
+                '#f687b3', '#76e4f7'
+            ];
+
+            let colorIdx = 0;
+            for (const [rName, t] of Object.entries(reasonDowntimeMap)) {
+                chartLabels.push(rName);
+                chartData.push(t);
+                chartColors.push(stopColorPalette[colorIdx % stopColorPalette.length]);
+                colorIdx++;
+            }
+
+            let sumForAllPie = chartData.reduce((a, b) => a + b, 0);
+            if (sumForAllPie > 0) {
+                const pieLabels = chartLabels.map((k, i) => `${k} (${((chartData[i] / sumForAllPie) * 100).toFixed(1)}%)`);
+                const titleText = selectedMachineId === 'ALL' ? '全部機台總時間佔比分析' : '機台總時間佔比分析';
+                downtimeChartInstance = new Chart(ctx, { type: 'pie', data: { labels: pieLabels, datasets: [{ data: chartData, backgroundColor: chartColors }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' }, title: { display: true, text: titleText, font: { size: 16 } } } } });
+            } else {
+                downtimeChartInstance = new Chart(ctx, { type: 'pie', data: { labels: ['無數據'], datasets: [{ data: [1], backgroundColor: ['#e2e8f0'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: '此期間無任何紀錄', font: { size: 16 } }, tooltip: { enabled: false } } } });
+            }
+        }
+
+        function exportToExcel() { 
+            if (currentExportData.length === 0) return alert('請先查詢資料！'); 
+            
+            const wb = XLSX.utils.book_new(); 
+            const ws1 = XLSX.utils.json_to_sheet(simpleExportData);
+            XLSX.utils.book_append_sheet(wb, ws1, "每日稼動率");
+
+            if (weeklyExportData.length > 0) {
+                const wsWeekly = XLSX.utils.json_to_sheet(weeklyExportData);
+                XLSX.utils.book_append_sheet(wb, wsWeekly, "每週稼動率");
+            }
+
+            if (monthlyExportData.length > 0) {
+                const wsMonthly = XLSX.utils.json_to_sheet(monthlyExportData);
+                XLSX.utils.book_append_sheet(wb, wsMonthly, "每月稼動率");
+            }
+
+            const ws2 = XLSX.utils.json_to_sheet(currentExportData); 
+            XLSX.utils.book_append_sheet(wb, ws2, "停機明細"); 
+            
+            XLSX.writeFile(wb, `中科廠_稼動率統計表_${new Date().toISOString().slice(0, 10)}.xlsx`); 
+        }
+        
+        function switchPage(pageId, title) { 
+            document.querySelectorAll('.page-section').forEach(s => s.style.display = 'none'); 
+            document.getElementById(pageId).style.display = 'block'; 
+            document.getElementById('page-title').innerText = title; 
+            document.querySelectorAll('.nav-links a').forEach(l => l.classList.remove('active')); 
+            document.getElementById('nav-' + pageId).classList.add('active'); 
+        }
+    </script>
 </body>
 </html>

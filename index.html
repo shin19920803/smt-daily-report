@@ -345,7 +345,7 @@
         let inlineEditingId = null;
         let inlineDowntimeEvents = [];
 
-        // ★ 新增：全域陣列，用來儲存最新且活躍的項目，供動態比對使用
+        // ★ 動態追蹤全域作用中的分類 (確保連動更新)
         let allReasons = [];
 
         function stripDel(name) {
@@ -356,6 +356,16 @@
                 return name.substring(7);
             }
             return name;
+        }
+
+        // ★ 動態取得計畫/非計畫狀態的 Helper
+        function getDynamicIsPlanned(rName, originalIsPlanned) {
+            const cleanName = stripDel(rName);
+            const activeR = allReasons.find(r => r.name === cleanName);
+            if (activeR !== undefined) {
+                return activeR.is_planned;
+            }
+            return originalIsPlanned;
         }
 
         let inlineEditReasonId = null;
@@ -680,6 +690,7 @@
             targetMachines.forEach(m => { statMachineSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`; });
         }
 
+        // ================= ★ 基礎設定原因管理 (內聯編輯與屬性互轉) ★ =================
         async function fetchReasons() {
             const { data } = await db.from('downtime_reasons').select('id, name, is_planned');
             const plannedList = document.getElementById('plannedReasonList'); 
@@ -690,7 +701,7 @@
             select.innerHTML = '<option value="">請選擇停機項目</option>';
             if(!data) return;
 
-            // ★ 將乾淨的清單存入全域，供統計與預覽表動態比對分類使用
+            // 抓出活躍名單寫入全域變數，供歷史紀錄動態比對
             const activeReasons = data.filter(r => !r.name.startsWith('@@DEL@@'));
             allReasons = activeReasons;
             activeReasons.sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
@@ -724,6 +735,11 @@
 
             optgroupPlanned += '</optgroup>'; optgroupUnplanned += '</optgroup>';
             select.innerHTML += optgroupPlanned + optgroupUnplanned;
+            
+            // ★ 重新渲染報工預覽表，使其即時套用最新分類
+            if (document.getElementById('recordDate').value) {
+                renderDailyHistoryTable();
+            }
         }
 
         async function addReason(isPlanned) { 
@@ -858,7 +874,9 @@
             const tbody = document.getElementById('downtimeTableBody'); tbody.innerHTML = ''; let total = 0;
             currentDowntimeEvents.forEach((event, index) => { 
                 total += event.duration; 
-                const typeTag = event.isPlanned ? '<span style="color:#d69e2e;font-weight:bold;">[計畫]</span>' : '<span style="color:#e53e3e;font-weight:bold;">[非計畫]</span>';
+                // 暫存列表也動態取得狀態
+                const dynamicIsPlanned = getDynamicIsPlanned(event.reasonName, event.isPlanned);
+                const typeTag = dynamicIsPlanned ? '<span style="color:#d69e2e;font-weight:bold;">[計畫]</span>' : '<span style="color:#e53e3e;font-weight:bold;">[非計畫]</span>';
                 tbody.innerHTML += `<tr>
                     <td>${event.reasonName}</td>
                     <td>${typeTag}</td>
@@ -1070,15 +1088,13 @@
                     if (record.downtime_events && record.downtime_events.length > 0) {
                         record.downtime_events.forEach(e => { 
                             totalDowntime += e.duration_minutes; 
-                            const cleanReasonName = stripDel(e.downtime_reasons.name);
                             
-                            // ★ 動態比對：如果基礎設定已修改分類，就用新的分類顯示
-                            let isPlanned = e.downtime_reasons.is_planned;
-                            const activeR = allReasons.find(r => r.name === cleanReasonName);
-                            if (activeR) isPlanned = activeR.is_planned;
+                            // ★ 動態比對：決定顯示為 計畫性(計) 或 非計畫性(非)
+                            const dynamicIsPlanned = getDynamicIsPlanned(e.downtime_reasons.name, e.downtime_reasons.is_planned);
                             
-                            const typeTag = isPlanned ? '<span style="color:#d69e2e; font-weight:bold;">[計]</span>' : '<span style="color:#e53e3e; font-weight:bold;">[非]</span>';
+                            const typeTag = dynamicIsPlanned ? '<span style="color:#d69e2e; font-weight:bold;">[計]</span>' : '<span style="color:#e53e3e; font-weight:bold;">[非]</span>';
                             const remarkText = e.remark ? ` <span style="color:#718096; font-size:12px; word-break: break-all;">(${e.remark})</span>` : '';
+                            const cleanReasonName = stripDel(e.downtime_reasons.name);
                             dtHtml += `<div style="margin-bottom:2px; white-space: normal; word-break: break-all;">${typeTag} ${cleanReasonName}: <b style="color:#2d3748;">${e.duration_minutes}</b>分${remarkText}</div>`;
                         });
                     } else {
@@ -1113,21 +1129,12 @@
             inlineDowntimeEvents = [];
             if (record.downtime_events) {
                 record.downtime_events.forEach(e => {
-                    const cleanName = stripDel(e.downtime_reasons.name);
-                    let isPlanned = e.downtime_reasons.is_planned;
-                    let rId = e.downtime_reasons.id;
-                    
-                    // ★ 編輯時也同步對齊最新狀態，並把ID指過去，方便未來覆寫
-                    const activeR = allReasons.find(r => r.name === cleanName);
-                    if (activeR) {
-                        isPlanned = activeR.is_planned;
-                        rId = activeR.id;
-                    }
-
+                    // ★ 內聯編輯也抓最新狀態
+                    const dynamicIsPlanned = getDynamicIsPlanned(e.downtime_reasons.name, e.downtime_reasons.is_planned);
                     inlineDowntimeEvents.push({
-                        reasonId: rId,
-                        reasonName: cleanName,
-                        isPlanned: isPlanned,
+                        reasonId: e.downtime_reasons.id,
+                        reasonName: stripDel(e.downtime_reasons.name),
+                        isPlanned: dynamicIsPlanned,
                         duration: e.duration_minutes,
                         remark: e.remark || ''
                     });
@@ -1302,19 +1309,17 @@
                         const rName = stripDel(event.downtime_reasons.name);
                         const rMark = event.remark ? event.remark : '';
                         
-                        // ★ 動態計算分類：覆蓋查詢統計時的邏輯，使用最新狀態
-                        let isPlanned = event.downtime_reasons.is_planned;
-                        const activeR = allReasons.find(r => r.name === rName);
-                        if (activeR) isPlanned = activeR.is_planned;
+                        // ★ 動態比對：統計圖表與匯出也抓最新狀態
+                        const dynamicIsPlanned = getDynamicIsPlanned(event.downtime_reasons.name, event.downtime_reasons.is_planned);
                         
-                        if (isPlanned) recordPlannedDowntime += duration;
+                        if (dynamicIsPlanned) recordPlannedDowntime += duration;
                         else recordUnplannedDowntime += duration; 
                         
                         if (!recordReasonMap[rName]) {
-                            recordReasonMap[rName] = { duration: duration, isPlanned: isPlanned, remarks: [] };
+                            recordReasonMap[rName] = { duration: duration, isPlanned: dynamicIsPlanned, remarks: [] };
                         } else {
                             recordReasonMap[rName].duration += duration;
-                            recordReasonMap[rName].isPlanned = isPlanned;
+                            recordReasonMap[rName].isPlanned = dynamicIsPlanned;
                         }
                         if (rMark) recordReasonMap[rName].remarks.push(rMark);
                     });
@@ -1433,7 +1438,7 @@
                                 <td style="font-weight:bold; ${colorStyle}">${tInfo.duration}</td>
                                 <td rowspan="${rKeys.length}">${actualProductionTime}</td>
                                 <td rowspan="${rKeys.length}">${recordOEE.toFixed(2)}%</td>
-                                <td rowspan="${rKeys.length}" style="word-break: break-all; max-width: 150px; white-space: normal;"><span style="font-size:13px; color:#718096;">${combinedRemarks || '-''}</span></td>
+                                <td rowspan="${rKeys.length}" style="word-break: break-all; max-width: 150px; white-space: normal;"><span style="font-size:13px; color:#718096;">${combinedRemarks || '-'}</span></td>
                             </tr>`;
                         } else {
                             detailHTML += `<tr>
@@ -1489,12 +1494,11 @@
                         const duration = event.duration_minutes; 
                         const rName = stripDel(event.downtime_reasons.name); 
                         
-                        let isPlanned = event.downtime_reasons.is_planned;
-                        const activeR = allReasons.find(r => r.name === rName);
-                        if (activeR) isPlanned = activeR.is_planned;
-
-                        if (isPlanned) recordPlannedDowntime += duration; else grandTotalUnplannedDowntime += duration;
-                        const chartName = isPlanned ? `[計畫] ${rName}` : rName;
+                        // ★ 動態比對圖表資料
+                        const dynamicIsPlanned = getDynamicIsPlanned(event.downtime_reasons.name, event.downtime_reasons.is_planned);
+                        
+                        if (dynamicIsPlanned) recordPlannedDowntime += duration; else grandTotalUnplannedDowntime += duration;
+                        const chartName = dynamicIsPlanned ? `[計畫] ${rName}` : rName;
                         reasonDowntimeMap[chartName] = (reasonDowntimeMap[chartName] || 0) + duration;
                     });
                 }

@@ -1357,11 +1357,21 @@ createApp({
         };
 
         const loadFeeders = async () => {
-            const { data: list } = await _supabase.from('feeders').select('*, feeder_models(brand, model)').order('slot_number');
+            const { data: list, error } = await _supabase.from('feeders').select('*, feeder_models(brand, model)').order('slot_number');
+            if (error) { 
+                console.error('loadFeeders join error, trying without join:', error);
+                // Fallback: load without join, manually map model info
+                const { data: rawList } = await _supabase.from('feeders').select('*').order('slot_number');
+                const mapped = (rawList || []).map(f => {
+                    const fm = eqData.value.feederModels.find(m => m.id === f.feeder_model_id);
+                    return { ...f, feeder_models: fm || { brand: '-', model: '-' } };
+                });
+                feederList.value = mapped.map(f => ({ ...f, _calStatus: 'none', _lastCal: null }));
+                return;
+            }
             const todayDate = new Date().toISOString().split('T')[0];
             const soon = new Date(); soon.setDate(soon.getDate() + 30);
             const soonStr = soon.toISOString().split('T')[0];
-            // Load latest calibration for each feeder
             const feederIds = (list || []).map(f => f.id);
             let calMap = {};
             if (feederIds.length > 0) {
@@ -1381,7 +1391,16 @@ createApp({
         };
 
         const loadNozzleLogs = async () => {
-            const { data: list } = await _supabase.from('nozzle_inventory_logs').select('*, nozzle_models(brand, model)').order('log_date', { ascending: false }).limit(200);
+            const { data: list, error } = await _supabase.from('nozzle_inventory_logs').select('*, nozzle_models(brand, model)').order('log_date', { ascending: false }).limit(200);
+            if (error) {
+                console.error('loadNozzleLogs join error, trying without join:', error);
+                const { data: rawList } = await _supabase.from('nozzle_inventory_logs').select('*').order('log_date', { ascending: false }).limit(200);
+                nozzleLogs.value = (rawList || []).map(log => {
+                    const nm = eqData.value.nozzleModels.find(m => m.id === log.nozzle_model_id);
+                    return { ...log, nozzle_models: nm || { brand: '-', model: '-' } };
+                });
+                return;
+            }
             nozzleLogs.value = list || [];
         };
 

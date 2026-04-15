@@ -317,7 +317,7 @@
                                 <input type="date" v-model="report.date" @change="onDateChange" class="w-full border border-gray-200 p-2 rounded-lg">
                                 <div v-if="report.isEditing && report.originalDate && report.date !== report.originalDate" class="mt-1 text-xs text-orange-600 font-bold bg-orange-50 px-2 py-1 rounded"><i class="fas fa-info-circle mr-1"></i>日期將從 {{ report.originalDate }} 改為 {{ report.date }}，儲存後生效</div>
                             </div>
-                            <div><label class="block text-xs font-bold mb-1 text-gray-400">工單號碼 (僅顯示未完成)</label><select v-model="report.selectedWoNumber" @change="onWoNumberChange" class="w-full border border-gray-200 p-2 rounded-lg bg-white font-mono text-blue-800 font-bold"><option :value="null" disabled>-- 請選擇工單 --</option><option v-for="num in activeWoNumbers" :value="num">{{ num }}</option></select></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">工單號碼 <span v-if="!report.isEditing">(僅顯示未完成)</span></label><select v-model="report.selectedWoNumber" @change="onWoNumberChange" class="w-full border border-gray-200 p-2 rounded-lg bg-white font-mono text-blue-800 font-bold"><option :value="null" disabled>-- 請選擇工單 --</option><option v-for="num in reportWoList" :value="num">{{ num }}</option></select></div>
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">選擇機種</label><select v-model="report.wo_id" @change="fetchDailyRecord" :disabled="!report.selectedWoNumber" class="w-full border border-gray-200 p-2 rounded-lg bg-white font-bold"><option :value="null" disabled>-- 請選擇機種 --</option><option v-for="wo in availableModelsForSelectedWo" :value="wo.id">{{ wo.models?.name }}</option></select></div>
                             <div class="md:col-span-3 mt-2"><label class="block text-xs font-bold mb-1 text-gray-400">當日投入總數</label><div class="flex"><input type="number" v-model="report.inputQty" class="w-full border border-gray-200 p-2 rounded-l-lg text-lg" placeholder="0" min="1"><button @click="saveDailyInput" class="btn-primary rounded-l-none whitespace-nowrap"><i class="fas fa-save mr-1"></i> {{ report.currentId ? '更新' : '建立' }}</button></div></div>
                         </div>
@@ -772,6 +772,15 @@ createApp({
             return [...new Set(active)];
         });
         const uniqueWoNumbers = computed(() => [...new Set(data.value.workOrders.map(w => w.wo_number))]);
+        
+        // 報工用的工單清單：編輯模式下額外包含當前正在編輯的工單號碼
+        const reportWoList = computed(() => {
+            const list = new Set(activeWoNumbers.value);
+            if (report.value.isEditing && report.value.selectedWoNumber) {
+                list.add(report.value.selectedWoNumber);
+            }
+            return [...list];
+        });
         const todayStr = new Date().toISOString().split('T')[0];
 
         // --- Dashboard ---
@@ -1166,7 +1175,7 @@ createApp({
             fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
             oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 
             oocDayModal, openOocDayDetail, 
-            activeWoNumbers, uniqueWoNumbers, availableModelsForSelectedWo,
+            activeWoNumbers, uniqueWoNumbers, reportWoList, availableModelsForSelectedWo,
             settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
             sortedModels, sortedDefectTypes, sortedLocations,
             orderSearch, processedWorkOrders, selectedWoId, selectWoForCalendar, 

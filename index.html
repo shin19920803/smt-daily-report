@@ -668,13 +668,13 @@
                     <div class="text-sm text-gray-400">共 <b class="text-gray-700">{{ feederList.length }}</b> 支 Feeder</div>
                     <button @click="openFeederModal()" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#0d9488,#14b8a6);"><i class="fas fa-plus mr-1"></i> 新增 Feeder</button>
                 </div>
-                <div class="section-card overflow-x-auto max-h-[500px] overflow-y-auto">
-                    <table class="w-full text-left border-collapse relative min-w-[800px]">
+                <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">
+                    <table class="w-full text-left border-collapse relative min-w-[700px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
                             <tr><th class="p-3 border-b">料槍編號</th><th class="p-3 border-b">廠牌</th><th class="p-3 border-b">型號</th><th class="p-3 border-b">MES 左</th><th class="p-3 border-b">MES 右</th><th class="p-3 border-b">入庫日期</th><th class="p-3 border-b text-center">校正狀態</th><th class="p-3 border-b text-center">操作</th></tr>
                         </thead>
                         <tbody>
-                            <tr v-for="f in feederList" :key="f.id" class="hover:bg-gray-50 border-b transition text-sm">
+                            <tr v-for="f in feederList" :key="f.id" @click="selectFeeder(f)" class="border-b transition text-sm cursor-pointer" :class="selectedFeederId === f.id ? 'bg-teal-50 border-l-4 border-teal-500' : 'hover:bg-gray-50'">
                                 <td class="p-3 font-bold font-mono text-teal-700">{{ f.slot_number }}</td>
                                 <td class="p-3">{{ f.feeder_models?.brand }}</td>
                                 <td class="p-3 font-mono">{{ f.feeder_models?.model }}</td>
@@ -688,14 +688,55 @@
                                     <span v-else class="bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full text-xs">未校正</span>
                                 </td>
                                 <td class="p-3 text-center space-x-1">
-                                    <button @click="openCalibrationModal(f)" class="text-teal-400 hover:text-teal-600" title="校正紀錄"><i class="fas fa-clipboard-check"></i></button>
-                                    <button @click="openFeederModal(f)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button>
-                                    <button @click="deleteFeeder(f.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button>
+                                    <button @click.stop="openFeederModal(f)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button>
+                                    <button @click.stop="deleteFeeder(f.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
                             <tr v-if="feederList.length === 0"><td colspan="8"><div class="empty-state py-8"><i class="fas fa-microchip"></i><div class="title">尚無 Feeder</div><div class="hint">點擊右上角新增第一支 Feeder</div></div></td></tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Feeder Detail Panel (shown when a feeder is selected) -->
+                <div v-if="selectedFeederId && selectedFeederObj" class="section-card animate-fade-in">
+                    <div class="px-4 py-3 border-b bg-teal-50 flex justify-between items-center">
+                        <div>
+                            <span class="font-black text-teal-700 font-mono">{{ selectedFeederObj.slot_number }}</span>
+                            <span class="text-sm text-gray-500 ml-2">{{ selectedFeederObj.feeder_models?.brand }} {{ selectedFeederObj.feeder_models?.model }}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="openFeederLogModal('calibration')" class="px-2 py-1 rounded text-xs font-bold text-white bg-teal-600 hover:bg-teal-700"><i class="fas fa-clipboard-check mr-1"></i>校正</button>
+                            <button @click="openFeederLogModal('repair')" class="px-2 py-1 rounded text-xs font-bold text-white bg-blue-600 hover:bg-blue-700"><i class="fas fa-wrench mr-1"></i>維修</button>
+                            <button @click="openFeederLogModal('damage')" class="px-2 py-1 rounded text-xs font-bold text-white bg-red-600 hover:bg-red-700"><i class="fas fa-heart-broken mr-1"></i>損壞</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto max-h-[300px] overflow-y-auto">
+                        <table class="w-full text-left border-collapse min-w-[500px]">
+                            <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                                <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b">結果/狀態</th><th class="p-3 border-b">下次校正日</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="c in calHistory" :key="c.id" class="hover:bg-gray-50 border-b transition text-sm">
+                                    <td class="p-3 font-bold text-gray-700">{{ c.calibration_date }}</td>
+                                    <td class="p-3 text-center">
+                                        <span v-if="c.log_type === 'calibration'" class="bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-clipboard-check mr-1"></i>校正</span>
+                                        <span v-else-if="c.log_type === 'repair'" class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-wrench mr-1"></i>維修</span>
+                                        <span v-else-if="c.log_type === 'damage'" class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-heart-broken mr-1"></i>損壞</span>
+                                        <span v-else class="bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full text-xs font-bold">校正</span>
+                                    </td>
+                                    <td class="p-3">
+                                        <span v-if="c.result === 'pass'" class="text-green-600 font-bold"><i class="fas fa-check-circle mr-1"></i>Pass</span>
+                                        <span v-else-if="c.result === 'fail'" class="text-red-600 font-bold"><i class="fas fa-times-circle mr-1"></i>Fail</span>
+                                        <span v-else class="text-gray-500">{{ c.result || '-' }}</span>
+                                    </td>
+                                    <td class="p-3 text-gray-500 font-mono text-sm">{{ c.next_calibration_date || '-' }}</td>
+                                    <td class="p-3 text-xs text-gray-400 max-w-[150px] truncate" :title="c.notes || ''">{{ c.notes || '-' }}</td>
+                                    <td class="p-3 text-center"><button @click="deleteCalibration(c.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt text-xs"></i></button></td>
+                                </tr>
+                                <tr v-if="calHistory.length === 0"><td colspan="6"><div class="empty-state py-6"><i class="fas fa-clipboard-list" style="font-size:1.5rem"></i><div class="hint">尚無紀錄，點擊上方按鈕新增</div></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -708,14 +749,14 @@
                     <button @click="openNozzleLogModal('broken')" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#dc2626,#ef4444);"><i class="fas fa-heart-broken mr-1"></i> 損壞報廢</button>
                 </div>
 
-                <!-- Inventory Table -->
+                <!-- Inventory Table (clickable rows) -->
                 <div class="section-card overflow-x-auto">
                     <table class="w-full text-left border-collapse min-w-[500px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
                             <tr><th class="p-3 border-b">吸嘴型號</th><th class="p-3 border-b text-center">總入庫</th><th class="p-3 border-b text-center">使用中</th><th class="p-3 border-b text-center">損壞/報廢</th><th class="p-3 border-b text-center">庫存剩餘</th></tr>
                         </thead>
                         <tbody>
-                            <tr v-for="ns in nozzleStock" :key="ns.model_id" class="hover:bg-gray-50 border-b transition text-sm">
+                            <tr v-for="ns in nozzleStock" :key="ns.model_id" @click="selectNozzleModel(ns.model_id)" class="border-b transition text-sm cursor-pointer" :class="selectedNozzleModelId === ns.model_id ? 'bg-orange-50 border-l-4 border-orange-400' : 'hover:bg-gray-50'">
                                 <td class="p-3 font-bold">{{ ns.brand }} <span class="font-mono text-gray-600">{{ ns.model }}</span></td>
                                 <td class="p-3 text-center font-mono text-gray-500">{{ ns.totalIn }}</td>
                                 <td class="p-3 text-center font-mono text-blue-600 font-bold">{{ ns.inUse }}</td>
@@ -730,18 +771,23 @@
                     </table>
                 </div>
 
-                <!-- History Log -->
-                <div class="section-card">
-                    <div class="px-4 py-3 border-b bg-gray-50/50 font-bold text-sm text-gray-600"><i class="fas fa-history mr-2 text-orange-500"></i>異動紀錄</div>
-                    <div class="overflow-x-auto max-h-[350px] overflow-y-auto">
-                        <table class="w-full text-left border-collapse min-w-[550px]">
+                <!-- Nozzle Detail Log (shown when a model is selected) -->
+                <div v-if="selectedNozzleModelId" class="section-card animate-fade-in">
+                    <div class="px-4 py-3 border-b bg-orange-50 flex justify-between items-center">
+                        <div>
+                            <span class="font-black text-orange-700">{{ selectedNozzleModelName }}</span>
+                            <span class="text-sm text-gray-400 ml-2">異動紀錄</span>
+                        </div>
+                        <button @click="selectedNozzleModelId = null" class="text-gray-400 hover:text-gray-600 text-xs"><i class="fas fa-times mr-1"></i>取消篩選</button>
+                    </div>
+                    <div class="overflow-x-auto max-h-[300px] overflow-y-auto">
+                        <table class="w-full text-left border-collapse min-w-[500px]">
                             <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
-                                <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b">型號</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b text-right">數量</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
+                                <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b text-right">數量</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
                             </thead>
                             <tbody>
-                                <tr v-for="log in nozzleLogs" :key="log.id" class="hover:bg-gray-50 border-b transition text-sm">
+                                <tr v-for="log in filteredNozzleLogs" :key="log.id" class="hover:bg-gray-50 border-b transition text-sm">
                                     <td class="p-3 font-bold text-gray-700">{{ log.log_date }}</td>
-                                    <td class="p-3 font-mono text-sm">{{ log.nozzle_models?.brand }} {{ log.nozzle_models?.model }}</td>
                                     <td class="p-3 text-center">
                                         <span v-if="log.change_type === 'in'" class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-arrow-down mr-1"></i>入庫</span>
                                         <span v-else-if="log.change_type === 'use'" class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-arrow-right mr-1"></i>上機</span>
@@ -752,7 +798,7 @@
                                     <td class="p-3 text-xs text-gray-400 max-w-[150px] truncate" :title="log.notes || ''">{{ log.notes || '-' }}</td>
                                     <td class="p-3 text-center"><button @click="deleteNozzleLog(log.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button></td>
                                 </tr>
-                                <tr v-if="nozzleLogs.length === 0"><td colspan="6"><div class="empty-state py-8"><i class="fas fa-box-open"></i><div class="title">尚無異動紀錄</div></div></td></tr>
+                                <tr v-if="filteredNozzleLogs.length === 0"><td colspan="5"><div class="empty-state py-6"><i class="fas fa-box-open" style="font-size:1.5rem"></i><div class="hint">該型號尚無異動紀錄</div></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -780,36 +826,33 @@
                 </div>
             </div>
 
-            <!-- Calibration Modal -->
-            <div v-if="showCalModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showCalModal = false">
-                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[600px] max-h-[90vh] overflow-y-auto animate-fade-in">
-                    <h3 class="text-xl font-black mb-2 text-teal-700"><i class="fas fa-clipboard-check mr-2"></i>校正紀錄</h3>
-                    <div class="text-sm text-gray-400 mb-4">料槍: <b class="text-teal-700 font-mono">{{ calTarget?.slot_number }}</b> ({{ calTarget?.feeder_models?.brand }} {{ calTarget?.feeder_models?.model }})</div>
-                    
-                    <!-- Add calibration -->
-                    <div class="bg-teal-50 p-3 rounded-lg border border-teal-100 mb-4">
-                        <div class="text-xs font-bold text-teal-700 mb-2">新增校正紀錄</div>
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                            <div><label class="text-[10px] text-gray-400">校正日期</label><input type="date" v-model="calForm.calibration_date" class="w-full border border-gray-200 p-1.5 rounded text-sm"></div>
-                            <div><label class="text-[10px] text-gray-400">下次校正日</label><input type="date" v-model="calForm.next_calibration_date" class="w-full border border-gray-200 p-1.5 rounded text-sm"></div>
-                            <div><label class="text-[10px] text-gray-400">結果</label><select v-model="calForm.result" class="w-full border border-gray-200 p-1.5 rounded text-sm bg-white"><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
-                            <div class="flex items-end"><button @click="saveCalibration" class="w-full px-3 py-1.5 rounded text-sm font-bold text-white" style="background:#0d9488;"><i class="fas fa-plus mr-1"></i>新增</button></div>
+            <!-- Feeder Log Modal (校正/維修/損壞) -->
+            <div v-if="showFeederLogModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showFeederLogModal = false">
+                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[450px] animate-fade-in">
+                    <h3 class="text-xl font-black mb-4 border-b pb-2" :class="feederLogForm.log_type === 'calibration' ? 'text-teal-700' : feederLogForm.log_type === 'repair' ? 'text-blue-700' : 'text-red-700'">
+                        <i :class="feederLogForm.log_type === 'calibration' ? 'fas fa-clipboard-check' : feederLogForm.log_type === 'repair' ? 'fas fa-wrench' : 'fas fa-heart-broken'" class="mr-2"></i>
+                        新增{{ feederLogForm.log_type === 'calibration' ? '校正' : feederLogForm.log_type === 'repair' ? '維修' : '損壞' }}紀錄
+                        <span class="text-sm font-normal text-gray-400 ml-2">{{ selectedFeederObj?.slot_number }}</span>
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">日期</label><input type="date" v-model="feederLogForm.calibration_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">紀錄類型</label><select v-model="feederLogForm.log_type" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="calibration">校正</option><option value="repair">維修</option><option value="damage">損壞</option></select></div>
                         </div>
-                        <div class="mt-2"><input v-model="calForm.notes" placeholder="備註 (選填)" class="w-full border border-gray-200 p-1.5 rounded text-sm"></div>
-                    </div>
-
-                    <!-- Calibration history -->
-                    <div class="space-y-2 max-h-60 overflow-y-auto">
-                        <div v-for="c in calHistory" :key="c.id" class="flex items-center justify-between p-2 rounded-lg border text-sm" :class="c.result === 'pass' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'">
-                            <div>
-                                <div class="font-bold" :class="c.result === 'pass' ? 'text-green-700' : 'text-red-700'"><i :class="c.result === 'pass' ? 'fas fa-check-circle' : 'fas fa-times-circle'" class="mr-1"></i>{{ c.calibration_date }}</div>
-                                <div class="text-xs text-gray-400">下次: {{ c.next_calibration_date || '-' }} <span v-if="c.notes" class="ml-2">| {{ c.notes }}</span></div>
-                            </div>
-                            <button @click="deleteCalibration(c.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt text-xs"></i></button>
+                        <div class="grid grid-cols-2 gap-4" v-if="feederLogForm.log_type === 'calibration'">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">下次校正日</label><input type="date" v-model="feederLogForm.next_calibration_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">結果</label><select v-model="feederLogForm.result" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
                         </div>
-                        <div v-if="calHistory.length === 0" class="text-center text-gray-300 py-4 text-xs">尚無校正紀錄</div>
+                        <div v-if="feederLogForm.log_type !== 'calibration'">
+                            <label class="block text-xs font-bold mb-1 text-gray-400">狀況描述</label>
+                            <input v-model="feederLogForm.result" class="w-full border border-gray-200 p-2 rounded-lg text-sm" :placeholder="feederLogForm.log_type === 'repair' ? '維修項目、更換零件...' : '損壞部位、損壞原因...'">
+                        </div>
+                        <div><label class="block text-xs font-bold mb-1 text-gray-400">備註 <span class="font-normal text-gray-300">(選填)</span></label><input v-model="feederLogForm.notes" class="w-full border border-gray-200 p-2 rounded-lg text-sm" placeholder="備註..."></div>
                     </div>
-                    <div class="mt-4 text-right"><button @click="showCalModal = false" class="btn-ghost">關閉</button></div>
+                    <div class="mt-6 flex justify-end gap-2 border-t pt-4">
+                        <button @click="showFeederLogModal = false" class="btn-ghost">取消</button>
+                        <button @click="saveCalibration" class="px-4 py-2 rounded-lg font-bold text-white" :style="feederLogForm.log_type === 'calibration' ? 'background:#0d9488' : feederLogForm.log_type === 'repair' ? 'background:#2563eb' : 'background:#dc2626'">儲存</button>
+                    </div>
                 </div>
             </div>
 
@@ -1338,14 +1381,33 @@ createApp({
         const feederList = ref([]);
         const nozzleLogs = ref([]);
         const showFeederModal = ref(false);
-        const showCalModal = ref(false);
+        const showFeederLogModal = ref(false);
         const showNozzleLogModal = ref(false);
         const feederForm = ref({ id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: '', status: 'active' });
-        const calTarget = ref(null);
-        const calForm = ref({ calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' });
+        const selectedFeederId = ref(null);
         const calHistory = ref([]);
+        const feederLogForm = ref({ calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '', log_type: 'calibration' });
         const nozzleLogForm = ref({ nozzle_model_id: null, change_type: 'in', quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' });
+        const selectedNozzleModelId = ref(null);
         const eqSettingForm = ref({ feederBrand: '', feederModel: '', nozzleBrand: '', nozzleModel: '' });
+
+        const selectedFeederObj = computed(() => feederList.value.find(f => f.id === selectedFeederId.value) || null);
+        const selectedNozzleModelName = computed(() => { const ns = nozzleStock.value.find(s => s.model_id === selectedNozzleModelId.value); return ns ? `${ns.brand} ${ns.model}` : ''; });
+        const filteredNozzleLogs = computed(() => { if (!selectedNozzleModelId.value) return nozzleLogs.value; return nozzleLogs.value.filter(l => l.nozzle_model_id === selectedNozzleModelId.value); });
+
+        const selectFeeder = async (f) => {
+            selectedFeederId.value = selectedFeederId.value === f.id ? null : f.id;
+            if (selectedFeederId.value) {
+                const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', f.id).order('calibration_date', { ascending: false });
+                calHistory.value = list || [];
+            } else { calHistory.value = []; }
+        };
+        const selectNozzleModel = (modelId) => { selectedNozzleModelId.value = selectedNozzleModelId.value === modelId ? null : modelId; };
+        const openFeederLogModal = (type = 'calibration') => {
+            const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
+            feederLogForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: type === 'calibration' ? nextYear.toISOString().split('T')[0] : '', result: type === 'calibration' ? 'pass' : '', notes: '', log_type: type };
+            showFeederLogModal.value = true;
+        };
 
         const loadEqData = async () => {
             const [fm, nm] = await Promise.all([
@@ -1441,35 +1503,22 @@ createApp({
 
         const deleteFeeder = async (id) => { if (!confirm('確定刪除此 Feeder？相關校正紀錄也會一併刪除')) return; loading.value = true; await _supabase.from('feeder_calibrations').delete().eq('feeder_id', id); await _supabase.from('feeders').delete().eq('id', id); await loadFeeders(); loading.value = false; toast('已刪除', 'info'); };
 
-        const openCalibrationModal = async (f) => {
-            calTarget.value = f;
-            calForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' };
-            // Auto-fill next cal date to 1 year later
-            const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
-            calForm.value.next_calibration_date = nextYear.toISOString().split('T')[0];
-            // Load history
-            const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', f.id).order('calibration_date', { ascending: false });
-            calHistory.value = list || [];
-            showCalModal.value = true;
-        };
-
         const saveCalibration = async () => {
-            if (!calForm.value.calibration_date) return toast('請填校正日期', 'warning');
+            if (!feederLogForm.value.calibration_date || !selectedFeederId.value) return toast('請填日期', 'warning');
             loading.value = true;
             try {
-                const { error } = await _supabase.from('feeder_calibrations').insert({ feeder_id: calTarget.value.id, calibration_date: calForm.value.calibration_date, next_calibration_date: calForm.value.next_calibration_date || null, result: calForm.value.result, notes: calForm.value.notes || null });
+                const payload = { feeder_id: selectedFeederId.value, calibration_date: feederLogForm.value.calibration_date, next_calibration_date: feederLogForm.value.next_calibration_date || null, result: feederLogForm.value.result || null, notes: feederLogForm.value.notes || null, log_type: feederLogForm.value.log_type || 'calibration' };
+                const { error } = await _supabase.from('feeder_calibrations').insert(payload);
                 if (error) throw error;
-                const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', calTarget.value.id).order('calibration_date', { ascending: false });
+                const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', selectedFeederId.value).order('calibration_date', { ascending: false });
                 calHistory.value = list || [];
                 await loadFeeders();
-                calForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' };
-                const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
-                calForm.value.next_calibration_date = nextYear.toISOString().split('T')[0];
-                toast('校正紀錄已新增');
+                showFeederLogModal.value = false;
+                toast('紀錄已新增');
             } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
         };
 
-        const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', calTarget.value.id).order('calibration_date', { ascending: false }); calHistory.value = list || []; await loadFeeders(); toast('已刪除', 'info'); };
+        const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); if (selectedFeederId.value) { const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', selectedFeederId.value).order('calibration_date', { ascending: false }); calHistory.value = list || []; } await loadFeeders(); toast('已刪除', 'info'); };
 
         const openNozzleLogModal = (type = 'in') => { nozzleLogForm.value = { nozzle_model_id: null, change_type: type, quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' }; showNozzleLogModal.value = true; };
 
@@ -1568,8 +1617,10 @@ createApp({
             // Equipment
             eqTab, eqData, feederList, nozzleLogs, nozzleStock,
             showFeederModal, feederForm, openFeederModal, saveFeeder, deleteFeeder,
-            showCalModal, calTarget, calForm, calHistory, openCalibrationModal, saveCalibration, deleteCalibration,
+            selectedFeederId, selectedFeederObj, selectFeeder,
+            showFeederLogModal, feederLogForm, openFeederLogModal, calHistory, saveCalibration, deleteCalibration,
             showNozzleLogModal, nozzleLogForm, openNozzleLogModal, saveNozzleLog, deleteNozzleLog,
+            selectedNozzleModelId, selectedNozzleModelName, selectNozzleModel, filteredNozzleLogs,
             eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel
         };
     }

@@ -599,9 +599,19 @@
                         <div><label class="block text-xs font-bold text-gray-400 mb-1">工單號碼</label><input v-model="woForm.number" placeholder="例如 C510..." class="w-full border border-gray-200 p-2 rounded-lg"></div>
                         <div><label class="block text-xs font-bold text-gray-400 mb-1">預計生產數量</label><input v-model="woForm.targetQty" type="number" placeholder="數量" class="w-full border border-gray-200 p-2 rounded-lg"></div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-400 mb-2">{{ isEditingWo ? '對應機種 (編輯模式僅能改單一)' : '選擇生產機種 (可多選)' }}</label>
-                            <div v-if="!isEditingWo" class="border border-gray-200 rounded-lg p-2 max-h-48 overflow-y-auto bg-gray-50 grid grid-cols-2 gap-2">
-                                <label v-for="m in sortedModels" :key="m.id" class="checkbox-wrapper cursor-pointer"><input type="checkbox" :value="m.id" v-model="woForm.selectedModelIds" class="hidden"><div class="px-3 py-2 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 text-sm font-medium transition text-center">{{ m.name }}<i v-if="woForm.selectedModelIds.includes(m.id)" class="fas fa-check-circle text-blue-500 ml-1"></i></div></label>
+                            <label class="block text-xs font-bold text-gray-400 mb-2">{{ isEditingWo ? '對應機種 (編輯模式僅能改單一)' : '選擇生產機種' }}</label>
+                            <div v-if="!isEditingWo">
+                                <!-- Quick Select by group -->
+                                <div class="mb-2">
+                                    <div class="text-[10px] font-bold text-blue-500 mb-1"><i class="fas fa-bolt mr-1"></i>快速選取 (自動勾選 _BOT + _TOP)</div>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <button v-for="g in modelGroups" :key="g.base" @click="toggleModelGroup(g)" type="button" class="px-2.5 py-1.5 rounded-lg text-xs font-bold border transition" :class="g.allSelected ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-400'">{{ g.base }} <span class="text-[10px] opacity-60">({{ g.ids.length }})</span></button>
+                                    </div>
+                                </div>
+                                <div class="border border-gray-200 rounded-lg p-2 max-h-36 overflow-y-auto bg-gray-50 grid grid-cols-2 gap-2">
+                                    <label v-for="m in sortedModels" :key="m.id" class="checkbox-wrapper cursor-pointer"><input type="checkbox" :value="m.id" v-model="woForm.selectedModelIds" class="hidden"><div class="px-3 py-2 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 text-sm font-medium transition text-center">{{ m.name }}<i v-if="woForm.selectedModelIds.includes(m.id)" class="fas fa-check-circle text-blue-500 ml-1"></i></div></label>
+                                </div>
+                                <div class="text-[10px] text-gray-400 mt-1">已選 {{ woForm.selectedModelIds.length }} 個機種</div>
                             </div>
                             <select v-else v-model="woForm.modelId" class="w-full border border-gray-200 p-2 rounded-lg bg-gray-50"><option :value="null" disabled>選擇機種</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select>
                         </div>
@@ -1209,9 +1219,18 @@ createApp({
                 days.push({ dayNum: i, dateStr: dStr, items: dailyItems });
             } return days;
         });
+        const getPreviousWorkday = () => {
+            const d = new Date();
+            const day = d.getDay(); // 0=Sun, 1=Mon...6=Sat
+            if (day === 1) d.setDate(d.getDate() - 3); // Mon → Fri
+            else if (day === 0) d.setDate(d.getDate() - 2); // Sun → Fri
+            else d.setDate(d.getDate() - 1); // others → yesterday
+            return d.toISOString().split('T')[0];
+        };
+
         const openFpyModal = (rec = null) => { 
             if (rec) { isEditingFpy.value = true; fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate, showAllWo: true }; } 
-            else { isEditingFpy.value = false; fpyForm.value = { id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false }; } 
+            else { isEditingFpy.value = false; fpyForm.value = { id: null, date: getPreviousWorkday(), selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false }; } 
             showFpyModal.value = true; 
         };
         const openFpyDayDetail = (day) => { fpyDayModal.value = { show: true, date: day.dateStr, list: day.items }; };
@@ -1481,7 +1500,7 @@ createApp({
 
         const openFeederModal = (f = null) => {
             if (f) feederForm.value = { id: f.id, feeder_model_id: f.feeder_model_id, slot_number: f.slot_number, mes_code_left: f.mes_code_left || '', mes_code_right: f.mes_code_right || '', purchase_date: f.purchase_date || '', status: f.status || 'active' };
-            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: '', status: 'active' };
+            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: new Date().toISOString().split('T')[0], status: 'active' };
             showFeederModal.value = true;
         };
 
@@ -1569,6 +1588,32 @@ createApp({
             data.value.machines = mac.data || []; data.value.oocCauses = oc.data || [];
         };
         const sortedModels = computed(() => [...data.value.models].sort((a,b) => a.name.localeCompare(b.name)));
+        
+        // 機種群組：去掉 _BOT/_TOP 後歸組，用於快速選取
+        const modelGroups = computed(() => {
+            const groups = {};
+            data.value.models.forEach(m => {
+                const base = m.name.replace(/[_\-](BOT|TOP)$/i, '');
+                if (!groups[base]) groups[base] = { base, ids: [] };
+                groups[base].ids.push(m.id);
+            });
+            // 只保留有 2 個以上的群組（有 BOT+TOP 的），或名稱本身就沒有後綴的也保留
+            return Object.values(groups)
+                .filter(g => g.ids.length >= 2 || !data.value.models.find(m => m.id === g.ids[0])?.name.match(/[_\-](BOT|TOP)$/i))
+                .map(g => ({ ...g, allSelected: g.ids.every(id => woForm.value.selectedModelIds.includes(id)) }))
+                .sort((a, b) => a.base.localeCompare(b.base));
+        });
+        const toggleModelGroup = (group) => {
+            if (group.allSelected) {
+                // 取消全部
+                woForm.value.selectedModelIds = woForm.value.selectedModelIds.filter(id => !group.ids.includes(id));
+            } else {
+                // 全選
+                const current = new Set(woForm.value.selectedModelIds);
+                group.ids.forEach(id => current.add(id));
+                woForm.value.selectedModelIds = [...current];
+            }
+        };
         const sortedDefectTypes = computed(() => [...data.value.defectTypes].sort((a,b) => a.name.localeCompare(b.name)));
         const sortedLocations = computed(() => [...data.value.defectLocations].sort((a,b) => a.code.localeCompare(b.code)));
 
@@ -1608,7 +1653,7 @@ createApp({
             oocDayModal, openOocDayDetail, 
             activeWoNumbers, uniqueWoNumbers, reportWoList, availableModelsForSelectedWo,
             settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
-            sortedModels, sortedDefectTypes, sortedLocations,
+            sortedModels, sortedDefectTypes, sortedLocations, modelGroups, toggleModelGroup,
             orderSearch, processedWorkOrders, selectedWoId, selectWoForCalendar, 
             calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal,
             // Equipment

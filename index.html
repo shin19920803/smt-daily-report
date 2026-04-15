@@ -1508,9 +1508,32 @@ createApp({
             if (!feederForm.value.slot_number || !feederForm.value.feeder_model_id) return toast('請填寫料槍編號與型號', 'warning');
             loading.value = true;
             try {
-                const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: feederForm.value.mes_code_left || null, mes_code_right: feederForm.value.mes_code_right || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
+                const editId = feederForm.value.id;
+                const others = feederList.value.filter(f => f.id !== editId);
+                
+                // 檢查料槍編號重複
+                if (others.some(f => f.slot_number === feederForm.value.slot_number)) {
+                    loading.value = false;
+                    return toast('料槍編號「' + feederForm.value.slot_number + '」已存在', 'error');
+                }
+                // 檢查 MES 左重複（有填才檢查）
+                const mesL = feederForm.value.mes_code_left?.trim();
+                if (mesL) {
+                    const dupL = others.find(f => f.mes_code_left === mesL || f.mes_code_right === mesL);
+                    if (dupL) { loading.value = false; return toast('MES 編號「' + mesL + '」已被 ' + dupL.slot_number + ' 使用', 'error'); }
+                }
+                // 檢查 MES 右重複（有填才檢查）
+                const mesR = feederForm.value.mes_code_right?.trim();
+                if (mesR) {
+                    const dupR = others.find(f => f.mes_code_left === mesR || f.mes_code_right === mesR);
+                    if (dupR) { loading.value = false; return toast('MES 編號「' + mesR + '」已被 ' + dupR.slot_number + ' 使用', 'error'); }
+                }
+                // 檢查左右不能相同
+                if (mesL && mesR && mesL === mesR) { loading.value = false; return toast('MES 左右編號不能相同', 'error'); }
+
+                const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: mesL || null, mes_code_right: mesR || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
                 let error;
-                if (feederForm.value.id) ({ error } = await _supabase.from('feeders').update(payload).eq('id', feederForm.value.id));
+                if (editId) ({ error } = await _supabase.from('feeders').update(payload).eq('id', editId));
                 else ({ error } = await _supabase.from('feeders').insert(payload));
                 if (error) throw error;
                 showFeederModal.value = false; await loadFeeders(); toast('Feeder 已儲存');

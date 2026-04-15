@@ -179,6 +179,9 @@
             <a @click="currentTab = 'stats'" :class="{'active': currentTab === 'stats'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-chart-bar w-5 text-center mr-3 text-sm"></i> <span class="text-sm">統計與導出</span>
             </a>
+            <a @click="currentTab = 'equipment'" :class="{'active': currentTab === 'equipment'}" class="sidebar-link rounded-lg">
+                <i class="fas fa-tools w-5 text-center mr-3 text-sm"></i> <span class="text-sm">設備管理</span>
+            </a>
             <a @click="currentTab = 'settings'" :class="{'active': currentTab === 'settings'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-cog w-5 text-center mr-3 text-sm"></i> <span class="text-sm">基礎設定</span>
             </a>
@@ -648,6 +651,169 @@
             </div>
         </div>
 
+        <!-- ==================== EQUIPMENT ==================== -->
+        <div v-if="currentTab === 'equipment'" class="animate-fade-in">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-tools mr-2 text-teal-500"></i>設備管理</h2>
+            </div>
+            <!-- Sub Tabs -->
+            <div class="flex gap-2 mb-6">
+                <button @click="eqTab = 'feeder'" :class="eqTab === 'feeder' ? 'bg-teal-600 text-white shadow' : 'bg-white text-gray-600 border'" class="px-4 py-2 rounded-lg font-bold text-sm transition"><i class="fas fa-microchip mr-1"></i> Feeder 管理</button>
+                <button @click="eqTab = 'nozzle'" :class="eqTab === 'nozzle' ? 'bg-orange-500 text-white shadow' : 'bg-white text-gray-600 border'" class="px-4 py-2 rounded-lg font-bold text-sm transition"><i class="fas fa-bullseye mr-1"></i> 吸嘴管理</button>
+            </div>
+
+            <!-- ===== FEEDER TAB ===== -->
+            <div v-if="eqTab === 'feeder'" class="space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                    <div class="text-sm text-gray-400">共 <b class="text-gray-700">{{ feederList.length }}</b> 支 Feeder</div>
+                    <button @click="openFeederModal()" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#0d9488,#14b8a6);"><i class="fas fa-plus mr-1"></i> 新增 Feeder</button>
+                </div>
+                <div class="section-card overflow-x-auto max-h-[500px] overflow-y-auto">
+                    <table class="w-full text-left border-collapse relative min-w-[800px]">
+                        <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                            <tr><th class="p-3 border-b">料槍編號</th><th class="p-3 border-b">廠牌</th><th class="p-3 border-b">型號</th><th class="p-3 border-b">儀器編號</th><th class="p-3 border-b">MES 左</th><th class="p-3 border-b">MES 右</th><th class="p-3 border-b">入庫日期</th><th class="p-3 border-b text-center">校正狀態</th><th class="p-3 border-b text-center">操作</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="f in feederList" :key="f.id" class="hover:bg-gray-50 border-b transition text-sm">
+                                <td class="p-3 font-bold font-mono text-teal-700">{{ f.slot_number }}</td>
+                                <td class="p-3">{{ f.feeder_models?.brand }}</td>
+                                <td class="p-3 font-mono">{{ f.feeder_models?.model }}</td>
+                                <td class="p-3 font-mono text-gray-500">{{ f.instrument_number || '-' }}</td>
+                                <td class="p-3 font-mono text-blue-600 font-bold">{{ f.mes_code_left || '-' }}</td>
+                                <td class="p-3 font-mono text-purple-600 font-bold">{{ f.mes_code_right || '-' }}</td>
+                                <td class="p-3 text-gray-500">{{ f.purchase_date || '-' }}</td>
+                                <td class="p-3 text-center">
+                                    <span v-if="f._calStatus === 'overdue'" class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-exclamation-circle mr-1"></i>逾期</span>
+                                    <span v-else-if="f._calStatus === 'soon'" class="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-clock mr-1"></i>即將到期</span>
+                                    <span v-else-if="f._calStatus === 'ok'" class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-check mr-1"></i>正常</span>
+                                    <span v-else class="bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full text-xs">未校正</span>
+                                </td>
+                                <td class="p-3 text-center space-x-1">
+                                    <button @click="openCalibrationModal(f)" class="text-teal-400 hover:text-teal-600" title="校正紀錄"><i class="fas fa-clipboard-check"></i></button>
+                                    <button @click="openFeederModal(f)" class="text-blue-400 hover:text-blue-600" title="編輯"><i class="fas fa-pen"></i></button>
+                                    <button @click="deleteFeeder(f.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button>
+                                </td>
+                            </tr>
+                            <tr v-if="feederList.length === 0"><td colspan="9"><div class="empty-state py-8"><i class="fas fa-microchip"></i><div class="title">尚無 Feeder</div><div class="hint">點擊右上角新增第一支 Feeder</div></div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ===== NOZZLE TAB ===== -->
+            <div v-if="eqTab === 'nozzle'" class="space-y-4 animate-fade-in">
+                <!-- Inventory Summary -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div v-for="ns in nozzleStock" :key="ns.model_id" class="kpi-card cyan">
+                        <div class="text-xs text-gray-400 font-bold mb-1">{{ ns.brand }} {{ ns.model }}</div>
+                        <div class="text-2xl font-black" :class="ns.stock <= 0 ? 'text-red-600' : ns.stock <= 5 ? 'text-yellow-600' : 'text-gray-800'">{{ ns.stock }} <span class="text-xs text-gray-400 font-normal">顆</span></div>
+                        <div class="text-[10px] text-gray-300 mt-1">入庫 {{ ns.totalIn }} / 耗損 {{ ns.totalOut }}</div>
+                    </div>
+                    <div v-if="nozzleStock.length === 0" class="col-span-full"><div class="empty-state py-6"><i class="fas fa-bullseye"></i><div class="title">尚無吸嘴庫存</div><div class="hint">請先在「基礎設定」新增吸嘴型號，再新增進出紀錄</div></div></div>
+                </div>
+                <!-- Add log button -->
+                <div class="flex justify-between items-center">
+                    <div class="text-sm text-gray-400">進出紀錄</div>
+                    <button @click="openNozzleLogModal()" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#ea580c,#f97316);"><i class="fas fa-plus mr-1"></i> 新增紀錄</button>
+                </div>
+                <div class="section-card overflow-x-auto max-h-[400px] overflow-y-auto">
+                    <table class="w-full text-left border-collapse relative min-w-[500px]">
+                        <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                            <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b">型號</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b text-right">數量</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="log in nozzleLogs" :key="log.id" class="hover:bg-gray-50 border-b transition text-sm">
+                                <td class="p-3 font-bold text-gray-700">{{ log.log_date }}</td>
+                                <td class="p-3 font-mono">{{ log.nozzle_models?.brand }} {{ log.nozzle_models?.model }}</td>
+                                <td class="p-3 text-center">
+                                    <span v-if="log.change_type === 'in'" class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">入庫</span>
+                                    <span v-else-if="log.change_type === 'broken'" class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">斷裂</span>
+                                    <span v-else class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">報廢</span>
+                                </td>
+                                <td class="p-3 text-right font-bold font-mono" :class="log.change_type === 'in' ? 'text-green-600' : 'text-red-600'">{{ log.change_type === 'in' ? '+' : '-' }}{{ log.quantity }}</td>
+                                <td class="p-3 text-xs text-gray-400 max-w-[150px] truncate">{{ log.notes || '-' }}</td>
+                                <td class="p-3 text-center"><button @click="deleteNozzleLog(log.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button></td>
+                            </tr>
+                            <tr v-if="nozzleLogs.length === 0"><td colspan="6"><div class="empty-state py-8"><i class="fas fa-box-open"></i><div class="title">尚無進出紀錄</div></div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Feeder Modal -->
+            <div v-if="showFeederModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showFeederModal = false">
+                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[500px] animate-fade-in">
+                    <h3 class="text-xl font-black mb-4 border-b pb-2 text-teal-700">{{ feederForm.id ? '編輯 Feeder' : '新增 Feeder' }}</h3>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">料槍編號</label><input v-model="feederForm.slot_number" placeholder="F-001" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">型號</label><select v-model="feederForm.feeder_model_id" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option :value="null" disabled>-- 選擇 --</option><option v-for="m in eqData.feederModels" :value="m.id">{{ m.brand }} - {{ m.model }}</option></select></div>
+                        </div>
+                        <div><label class="block text-xs font-bold mb-1 text-gray-400">儀器編號</label><input v-model="feederForm.instrument_number" placeholder="儀器編號" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">MES 編號 (左)</label><input v-model="feederForm.mes_code_left" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">MES 編號 (右)</label><input v-model="feederForm.mes_code_right" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">入庫日期</label><input type="date" v-model="feederForm.purchase_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">狀態</label><select v-model="feederForm.status" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="active">使用中</option><option value="retired">已停用</option></select></div>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showFeederModal = false" class="btn-ghost">取消</button><button @click="saveFeeder" class="px-4 py-2 rounded-lg font-bold text-white" style="background:linear-gradient(135deg,#0d9488,#14b8a6);">儲存</button></div>
+                </div>
+            </div>
+
+            <!-- Calibration Modal -->
+            <div v-if="showCalModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showCalModal = false">
+                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[600px] max-h-[90vh] overflow-y-auto animate-fade-in">
+                    <h3 class="text-xl font-black mb-2 text-teal-700"><i class="fas fa-clipboard-check mr-2"></i>校正紀錄</h3>
+                    <div class="text-sm text-gray-400 mb-4">料槍: <b class="text-teal-700 font-mono">{{ calTarget?.slot_number }}</b> ({{ calTarget?.feeder_models?.brand }} {{ calTarget?.feeder_models?.model }})</div>
+                    
+                    <!-- Add calibration -->
+                    <div class="bg-teal-50 p-3 rounded-lg border border-teal-100 mb-4">
+                        <div class="text-xs font-bold text-teal-700 mb-2">新增校正紀錄</div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            <div><label class="text-[10px] text-gray-400">校正日期</label><input type="date" v-model="calForm.calibration_date" class="w-full border border-gray-200 p-1.5 rounded text-sm"></div>
+                            <div><label class="text-[10px] text-gray-400">下次校正日</label><input type="date" v-model="calForm.next_calibration_date" class="w-full border border-gray-200 p-1.5 rounded text-sm"></div>
+                            <div><label class="text-[10px] text-gray-400">結果</label><select v-model="calForm.result" class="w-full border border-gray-200 p-1.5 rounded text-sm bg-white"><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
+                            <div class="flex items-end"><button @click="saveCalibration" class="w-full px-3 py-1.5 rounded text-sm font-bold text-white" style="background:#0d9488;"><i class="fas fa-plus mr-1"></i>新增</button></div>
+                        </div>
+                        <div class="mt-2"><input v-model="calForm.notes" placeholder="備註 (選填)" class="w-full border border-gray-200 p-1.5 rounded text-sm"></div>
+                    </div>
+
+                    <!-- Calibration history -->
+                    <div class="space-y-2 max-h-60 overflow-y-auto">
+                        <div v-for="c in calHistory" :key="c.id" class="flex items-center justify-between p-2 rounded-lg border text-sm" :class="c.result === 'pass' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'">
+                            <div>
+                                <div class="font-bold" :class="c.result === 'pass' ? 'text-green-700' : 'text-red-700'"><i :class="c.result === 'pass' ? 'fas fa-check-circle' : 'fas fa-times-circle'" class="mr-1"></i>{{ c.calibration_date }}</div>
+                                <div class="text-xs text-gray-400">下次: {{ c.next_calibration_date || '-' }} <span v-if="c.notes" class="ml-2">| {{ c.notes }}</span></div>
+                            </div>
+                            <button @click="deleteCalibration(c.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt text-xs"></i></button>
+                        </div>
+                        <div v-if="calHistory.length === 0" class="text-center text-gray-300 py-4 text-xs">尚無校正紀錄</div>
+                    </div>
+                    <div class="mt-4 text-right"><button @click="showCalModal = false" class="btn-ghost">關閉</button></div>
+                </div>
+            </div>
+
+            <!-- Nozzle Log Modal -->
+            <div v-if="showNozzleLogModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showNozzleLogModal = false">
+                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[400px] animate-fade-in">
+                    <h3 class="text-xl font-black mb-4 border-b pb-2 text-orange-600">新增吸嘴紀錄</h3>
+                    <div class="space-y-4">
+                        <div><label class="block text-xs font-bold mb-1 text-gray-400">吸嘴型號</label><select v-model="nozzleLogForm.nozzle_model_id" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option :value="null" disabled>-- 選擇 --</option><option v-for="m in eqData.nozzleModels" :value="m.id">{{ m.brand }} - {{ m.model }}</option></select></div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">類型</label><select v-model="nozzleLogForm.change_type" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="in">入庫</option><option value="broken">斷裂</option><option value="scrap">報廢</option></select></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">數量</label><input type="number" v-model="nozzleLogForm.quantity" min="1" class="w-full border border-gray-200 p-2 rounded-lg text-center font-bold"></div>
+                        </div>
+                        <div><label class="block text-xs font-bold mb-1 text-gray-400">日期</label><input type="date" v-model="nozzleLogForm.log_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
+                        <div><label class="block text-xs font-bold mb-1 text-gray-400">備註 <span class="font-normal text-gray-300">(選填)</span></label><input v-model="nozzleLogForm.notes" class="w-full border border-gray-200 p-2 rounded-lg text-sm" placeholder="備註..."></div>
+                    </div>
+                    <div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showNozzleLogModal = false" class="btn-ghost">取消</button><button @click="saveNozzleLog" class="px-4 py-2 rounded-lg font-bold text-white" style="background:linear-gradient(135deg,#ea580c,#f97316);">儲存</button></div>
+                </div>
+            </div>
+        </div>
+
         <!-- ==================== SETTINGS ==================== -->
         <div v-if="currentTab === 'settings'" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-cog mr-2 text-gray-500"></i>系統基礎設定</h2>
@@ -680,6 +846,43 @@
                     </ul>
                 </div>
             </div>
+
+            <!-- Equipment Model Settings -->
+            <h3 class="font-black text-gray-700 mt-8 mb-4"><i class="fas fa-tools mr-2 text-teal-500"></i>設備型號設定</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Feeder Models -->
+                <div class="section-card p-4 h-80 flex flex-col">
+                    <h3 class="font-bold border-b pb-2 mb-2 text-sm text-teal-600">Feeder 型號</h3>
+                    <div class="flex gap-2 mb-3">
+                        <input v-model="eqSettingForm.feederBrand" placeholder="廠牌" class="border border-gray-200 p-2 rounded-lg flex-1 text-sm">
+                        <input v-model="eqSettingForm.feederModel" placeholder="型號" class="border border-gray-200 p-2 rounded-lg flex-1 text-sm">
+                        <button @click="addFeederModel" class="bg-teal-600 text-white px-3 rounded-lg hover:opacity-80 text-sm">+</button>
+                    </div>
+                    <ul class="flex-1 overflow-y-auto space-y-1">
+                        <li v-for="item in eqData.feederModels" :key="item.id" class="flex justify-between items-center p-2 bg-gray-50 rounded-lg text-sm group border border-transparent hover:border-gray-200 transition">
+                            <span>{{ item.brand }} - {{ item.model }}</span>
+                            <button @click="deleteEqModel('feeder_models', item.id)" class="text-red-300 hover:text-red-500 md:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-times text-xs"></i></button>
+                        </li>
+                        <li v-if="eqData.feederModels.length === 0" class="text-center text-gray-300 py-6 text-xs">尚無型號</li>
+                    </ul>
+                </div>
+                <!-- Nozzle Models -->
+                <div class="section-card p-4 h-80 flex flex-col">
+                    <h3 class="font-bold border-b pb-2 mb-2 text-sm text-orange-600">吸嘴型號</h3>
+                    <div class="flex gap-2 mb-3">
+                        <input v-model="eqSettingForm.nozzleBrand" placeholder="廠牌" class="border border-gray-200 p-2 rounded-lg flex-1 text-sm">
+                        <input v-model="eqSettingForm.nozzleModel" placeholder="型號" class="border border-gray-200 p-2 rounded-lg flex-1 text-sm">
+                        <button @click="addNozzleModel" class="bg-orange-500 text-white px-3 rounded-lg hover:opacity-80 text-sm">+</button>
+                    </div>
+                    <ul class="flex-1 overflow-y-auto space-y-1">
+                        <li v-for="item in eqData.nozzleModels" :key="item.id" class="flex justify-between items-center p-2 bg-gray-50 rounded-lg text-sm group border border-transparent hover:border-gray-200 transition">
+                            <span>{{ item.brand }} - {{ item.model }}</span>
+                            <button @click="deleteEqModel('nozzle_models', item.id)" class="text-red-300 hover:text-red-500 md:opacity-0 group-hover:opacity-100 transition-opacity"><i class="fas fa-times text-xs"></i></button>
+                        </li>
+                        <li v-if="eqData.nozzleModels.length === 0" class="text-center text-gray-300 py-6 text-xs">尚無型號</li>
+                    </ul>
+                </div>
+            </div>
         </div>
 
         </div><!-- end max-w-6xl -->
@@ -699,11 +902,12 @@
         <a @click="currentTab = 'orders'" :class="currentTab === 'orders' ? 'active text-indigo-600' : 'text-gray-400'" class="mobile-nav-item">
             <i class="fas fa-clipboard-list text-base"></i><span class="text-[10px] mt-0.5 font-bold">工單</span>
         </a>
-        <a @click="showMobileMore = !showMobileMore" :class="['ooc','stats','settings'].includes(currentTab) ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item relative">
+        <a @click="showMobileMore = !showMobileMore" :class="['ooc','stats','settings','equipment'].includes(currentTab) ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item relative">
             <i class="fas fa-ellipsis-h text-base"></i><span class="text-[10px] mt-0.5 font-bold">更多</span>
             <!-- Popup -->
             <div v-if="showMobileMore" class="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl py-2 w-40 animate-fade-in">
                 <a @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
+                <a @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
                 <a @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
             </div>
@@ -1108,6 +1312,140 @@ createApp({
             } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
         };
 
+        // --- Equipment Management ---
+        const eqTab = ref('feeder');
+        const eqData = ref({ feederModels: [], nozzleModels: [] });
+        const feederList = ref([]);
+        const nozzleLogs = ref([]);
+        const showFeederModal = ref(false);
+        const showCalModal = ref(false);
+        const showNozzleLogModal = ref(false);
+        const feederForm = ref({ id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', instrument_number: '', purchase_date: '', status: 'active' });
+        const calTarget = ref(null);
+        const calForm = ref({ calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' });
+        const calHistory = ref([]);
+        const nozzleLogForm = ref({ nozzle_model_id: null, change_type: 'in', quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' });
+        const eqSettingForm = ref({ feederBrand: '', feederModel: '', nozzleBrand: '', nozzleModel: '' });
+
+        const loadEqData = async () => {
+            const [fm, nm] = await Promise.all([
+                _supabase.from('feeder_models').select('*').order('brand'),
+                _supabase.from('nozzle_models').select('*').order('brand')
+            ]);
+            eqData.value.feederModels = fm.data || [];
+            eqData.value.nozzleModels = nm.data || [];
+        };
+
+        const loadFeeders = async () => {
+            const { data: list } = await _supabase.from('feeders').select('*, feeder_models(brand, model)').order('slot_number');
+            const todayDate = new Date().toISOString().split('T')[0];
+            const soon = new Date(); soon.setDate(soon.getDate() + 30);
+            const soonStr = soon.toISOString().split('T')[0];
+            // Load latest calibration for each feeder
+            const feederIds = (list || []).map(f => f.id);
+            let calMap = {};
+            if (feederIds.length > 0) {
+                const { data: cals } = await _supabase.from('feeder_calibrations').select('*').in('feeder_id', feederIds).order('calibration_date', { ascending: false });
+                (cals || []).forEach(c => { if (!calMap[c.feeder_id]) calMap[c.feeder_id] = c; });
+            }
+            feederList.value = (list || []).map(f => {
+                const lastCal = calMap[f.id];
+                let _calStatus = 'none';
+                if (lastCal && lastCal.next_calibration_date) {
+                    if (lastCal.next_calibration_date < todayDate) _calStatus = 'overdue';
+                    else if (lastCal.next_calibration_date <= soonStr) _calStatus = 'soon';
+                    else _calStatus = 'ok';
+                }
+                return { ...f, _calStatus, _lastCal: lastCal };
+            });
+        };
+
+        const loadNozzleLogs = async () => {
+            const { data: list } = await _supabase.from('nozzle_inventory_logs').select('*, nozzle_models(brand, model)').order('log_date', { ascending: false }).limit(200);
+            nozzleLogs.value = list || [];
+        };
+
+        const nozzleStock = computed(() => {
+            const map = {};
+            nozzleLogs.value.forEach(log => {
+                const mid = log.nozzle_model_id;
+                if (!map[mid]) map[mid] = { model_id: mid, brand: log.nozzle_models?.brand, model: log.nozzle_models?.model, totalIn: 0, totalOut: 0 };
+                if (log.change_type === 'in') map[mid].totalIn += log.quantity;
+                else map[mid].totalOut += log.quantity;
+            });
+            // Also include models with no logs
+            eqData.value.nozzleModels.forEach(m => {
+                if (!map[m.id]) map[m.id] = { model_id: m.id, brand: m.brand, model: m.model, totalIn: 0, totalOut: 0 };
+            });
+            return Object.values(map).map(s => ({ ...s, stock: s.totalIn - s.totalOut }));
+        });
+
+        const openFeederModal = (f = null) => {
+            if (f) feederForm.value = { id: f.id, feeder_model_id: f.feeder_model_id, slot_number: f.slot_number, mes_code_left: f.mes_code_left || '', mes_code_right: f.mes_code_right || '', instrument_number: f.instrument_number || '', purchase_date: f.purchase_date || '', status: f.status || 'active' };
+            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', instrument_number: '', purchase_date: '', status: 'active' };
+            showFeederModal.value = true;
+        };
+
+        const saveFeeder = async () => {
+            if (!feederForm.value.slot_number || !feederForm.value.feeder_model_id) return toast('請填寫料槍編號與型號', 'warning');
+            loading.value = true;
+            try {
+                const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: feederForm.value.mes_code_left || null, mes_code_right: feederForm.value.mes_code_right || null, instrument_number: feederForm.value.instrument_number || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
+                if (feederForm.value.id) await _supabase.from('feeders').update(payload).eq('id', feederForm.value.id);
+                else await _supabase.from('feeders').insert(payload);
+                showFeederModal.value = false; await loadFeeders(); toast('Feeder 已儲存');
+            } catch(e) { toast('儲存失敗: ' + e.message, 'error'); } finally { loading.value = false; }
+        };
+
+        const deleteFeeder = async (id) => { if (!confirm('確定刪除此 Feeder？相關校正紀錄也會一併刪除')) return; loading.value = true; await _supabase.from('feeder_calibrations').delete().eq('feeder_id', id); await _supabase.from('feeders').delete().eq('id', id); await loadFeeders(); loading.value = false; toast('已刪除', 'info'); };
+
+        const openCalibrationModal = async (f) => {
+            calTarget.value = f;
+            calForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' };
+            // Auto-fill next cal date to 1 year later
+            const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
+            calForm.value.next_calibration_date = nextYear.toISOString().split('T')[0];
+            // Load history
+            const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', f.id).order('calibration_date', { ascending: false });
+            calHistory.value = list || [];
+            showCalModal.value = true;
+        };
+
+        const saveCalibration = async () => {
+            if (!calForm.value.calibration_date) return toast('請填校正日期', 'warning');
+            loading.value = true;
+            try {
+                await _supabase.from('feeder_calibrations').insert({ feeder_id: calTarget.value.id, calibration_date: calForm.value.calibration_date, next_calibration_date: calForm.value.next_calibration_date || null, result: calForm.value.result, notes: calForm.value.notes || null });
+                const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', calTarget.value.id).order('calibration_date', { ascending: false });
+                calHistory.value = list || [];
+                await loadFeeders();
+                calForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' };
+                const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
+                calForm.value.next_calibration_date = nextYear.toISOString().split('T')[0];
+                toast('校正紀錄已新增');
+            } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
+        };
+
+        const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', calTarget.value.id).order('calibration_date', { ascending: false }); calHistory.value = list || []; await loadFeeders(); toast('已刪除', 'info'); };
+
+        const openNozzleLogModal = () => { nozzleLogForm.value = { nozzle_model_id: null, change_type: 'in', quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' }; showNozzleLogModal.value = true; };
+
+        const saveNozzleLog = async () => {
+            if (!nozzleLogForm.value.nozzle_model_id || !nozzleLogForm.value.quantity) return toast('請填寫完整', 'warning');
+            loading.value = true;
+            try {
+                await _supabase.from('nozzle_inventory_logs').insert({ nozzle_model_id: nozzleLogForm.value.nozzle_model_id, change_type: nozzleLogForm.value.change_type, quantity: nozzleLogForm.value.quantity, log_date: nozzleLogForm.value.log_date, notes: nozzleLogForm.value.notes || null });
+                showNozzleLogModal.value = false; await loadNozzleLogs(); toast('紀錄已新增');
+            } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
+        };
+
+        const deleteNozzleLog = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('nozzle_inventory_logs').delete().eq('id', id); await loadNozzleLogs(); toast('已刪除', 'info'); };
+
+        // Equipment settings helpers
+        const addFeederModel = async () => { const b = eqSettingForm.value.feederBrand.trim(); const m = eqSettingForm.value.feederModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); await _supabase.from('feeder_models').insert({ brand: b, model: m }); eqSettingForm.value.feederBrand = ''; eqSettingForm.value.feederModel = ''; await loadEqData(); toast('已新增'); };
+        const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); await _supabase.from('nozzle_models').insert({ brand: b, model: m }); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
+        const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; await _supabase.from(table).delete().eq('id', id); await loadEqData(); toast('已刪除', 'info'); };
+
         // --- Settings (PRESERVED) ---
         const settingConfig = ref({ 
             models: { title: '機種清單', colorClass: 'text-indigo-600', btnColor: 'bg-indigo-600', input: '', placeholder: '新機種名稱', field: 'name' }, 
@@ -1154,6 +1492,9 @@ createApp({
             loadFpyHistory(); 
             loadOocHistory(); 
             refreshDashboard();
+            loadEqData();
+            loadFeeders();
+            loadNozzleLogs();
             const today = new Date(); 
             statsFilter.value.end = today.toISOString().split('T')[0]; 
             rawExportFilter.value.end = today.toISOString().split('T')[0]; 
@@ -1179,7 +1520,13 @@ createApp({
             settingConfig, sortedList, addSettingItem, deleteSettingItem, editingId, editingValue, startEdit, saveEdit,
             sortedModels, sortedDefectTypes, sortedLocations,
             orderSearch, processedWorkOrders, selectedWoId, selectWoForCalendar, 
-            calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal
+            calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal,
+            // Equipment
+            eqTab, eqData, feederList, nozzleLogs, nozzleStock,
+            showFeederModal, feederForm, openFeederModal, saveFeeder, deleteFeeder,
+            showCalModal, calTarget, calForm, calHistory, openCalibrationModal, saveCalibration, deleteCalibration,
+            showNozzleLogModal, nozzleLogForm, openNozzleLogModal, saveNozzleLog, deleteNozzleLog,
+            eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel
         };
     }
 }).mount('#app');

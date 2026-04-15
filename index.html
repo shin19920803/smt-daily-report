@@ -671,14 +671,13 @@
                 <div class="section-card overflow-x-auto max-h-[500px] overflow-y-auto">
                     <table class="w-full text-left border-collapse relative min-w-[800px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
-                            <tr><th class="p-3 border-b">料槍編號</th><th class="p-3 border-b">廠牌</th><th class="p-3 border-b">型號</th><th class="p-3 border-b">儀器編號</th><th class="p-3 border-b">MES 左</th><th class="p-3 border-b">MES 右</th><th class="p-3 border-b">入庫日期</th><th class="p-3 border-b text-center">校正狀態</th><th class="p-3 border-b text-center">操作</th></tr>
+                            <tr><th class="p-3 border-b">料槍編號</th><th class="p-3 border-b">廠牌</th><th class="p-3 border-b">型號</th><th class="p-3 border-b">MES 左</th><th class="p-3 border-b">MES 右</th><th class="p-3 border-b">入庫日期</th><th class="p-3 border-b text-center">校正狀態</th><th class="p-3 border-b text-center">操作</th></tr>
                         </thead>
                         <tbody>
                             <tr v-for="f in feederList" :key="f.id" class="hover:bg-gray-50 border-b transition text-sm">
                                 <td class="p-3 font-bold font-mono text-teal-700">{{ f.slot_number }}</td>
                                 <td class="p-3">{{ f.feeder_models?.brand }}</td>
                                 <td class="p-3 font-mono">{{ f.feeder_models?.model }}</td>
-                                <td class="p-3 font-mono text-gray-500">{{ f.instrument_number || '-' }}</td>
                                 <td class="p-3 font-mono text-blue-600 font-bold">{{ f.mes_code_left || '-' }}</td>
                                 <td class="p-3 font-mono text-purple-600 font-bold">{{ f.mes_code_right || '-' }}</td>
                                 <td class="p-3 text-gray-500">{{ f.purchase_date || '-' }}</td>
@@ -694,7 +693,7 @@
                                     <button @click="deleteFeeder(f.id)" class="text-red-300 hover:text-red-500" title="刪除"><i class="fas fa-trash-alt"></i></button>
                                 </td>
                             </tr>
-                            <tr v-if="feederList.length === 0"><td colspan="9"><div class="empty-state py-8"><i class="fas fa-microchip"></i><div class="title">尚無 Feeder</div><div class="hint">點擊右上角新增第一支 Feeder</div></div></td></tr>
+                            <tr v-if="feederList.length === 0"><td colspan="8"><div class="empty-state py-8"><i class="fas fa-microchip"></i><div class="title">尚無 Feeder</div><div class="hint">點擊右上角新增第一支 Feeder</div></div></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -702,41 +701,61 @@
 
             <!-- ===== NOZZLE TAB ===== -->
             <div v-if="eqTab === 'nozzle'" class="space-y-4 animate-fade-in">
-                <!-- Inventory Summary -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div v-for="ns in nozzleStock" :key="ns.model_id" class="kpi-card cyan">
-                        <div class="text-xs text-gray-400 font-bold mb-1">{{ ns.brand }} {{ ns.model }}</div>
-                        <div class="text-2xl font-black" :class="ns.stock <= 0 ? 'text-red-600' : ns.stock <= 5 ? 'text-yellow-600' : 'text-gray-800'">{{ ns.stock }} <span class="text-xs text-gray-400 font-normal">顆</span></div>
-                        <div class="text-[10px] text-gray-300 mt-1">入庫 {{ ns.totalIn }} / 耗損 {{ ns.totalOut }}</div>
-                    </div>
-                    <div v-if="nozzleStock.length === 0" class="col-span-full"><div class="empty-state py-6"><i class="fas fa-bullseye"></i><div class="title">尚無吸嘴庫存</div><div class="hint">請先在「基礎設定」新增吸嘴型號，再新增進出紀錄</div></div></div>
+                <!-- Action buttons -->
+                <div class="flex justify-end gap-2">
+                    <button @click="openNozzleLogModal('in')" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#16a34a,#22c55e);"><i class="fas fa-plus mr-1"></i> 入庫</button>
+                    <button @click="openNozzleLogModal('use')" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#2563eb,#3b82f6);"><i class="fas fa-arrow-right mr-1"></i> 領用上機</button>
+                    <button @click="openNozzleLogModal('broken')" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#dc2626,#ef4444);"><i class="fas fa-heart-broken mr-1"></i> 損壞報廢</button>
                 </div>
-                <!-- Add log button -->
-                <div class="flex justify-between items-center">
-                    <div class="text-sm text-gray-400">進出紀錄</div>
-                    <button @click="openNozzleLogModal()" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#ea580c,#f97316);"><i class="fas fa-plus mr-1"></i> 新增紀錄</button>
-                </div>
-                <div class="section-card overflow-x-auto max-h-[400px] overflow-y-auto">
-                    <table class="w-full text-left border-collapse relative min-w-[500px]">
+
+                <!-- Inventory Table -->
+                <div class="section-card overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[500px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
-                            <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b">型號</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b text-right">數量</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
+                            <tr><th class="p-3 border-b">吸嘴型號</th><th class="p-3 border-b text-center">總入庫</th><th class="p-3 border-b text-center">使用中</th><th class="p-3 border-b text-center">損壞/報廢</th><th class="p-3 border-b text-center">庫存剩餘</th></tr>
                         </thead>
                         <tbody>
-                            <tr v-for="log in nozzleLogs" :key="log.id" class="hover:bg-gray-50 border-b transition text-sm">
-                                <td class="p-3 font-bold text-gray-700">{{ log.log_date }}</td>
-                                <td class="p-3 font-mono">{{ log.nozzle_models?.brand }} {{ log.nozzle_models?.model }}</td>
+                            <tr v-for="ns in nozzleStock" :key="ns.model_id" class="hover:bg-gray-50 border-b transition text-sm">
+                                <td class="p-3 font-bold">{{ ns.brand }} <span class="font-mono text-gray-600">{{ ns.model }}</span></td>
+                                <td class="p-3 text-center font-mono text-gray-500">{{ ns.totalIn }}</td>
+                                <td class="p-3 text-center font-mono text-blue-600 font-bold">{{ ns.inUse }}</td>
+                                <td class="p-3 text-center font-mono text-red-500 font-bold">{{ ns.damaged }}</td>
                                 <td class="p-3 text-center">
-                                    <span v-if="log.change_type === 'in'" class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">入庫</span>
-                                    <span v-else-if="log.change_type === 'broken'" class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">斷裂</span>
-                                    <span v-else class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">報廢</span>
+                                    <span class="font-mono font-black text-lg" :class="ns.stock <= 0 ? 'text-red-600' : ns.stock <= 5 ? 'text-yellow-600' : 'text-green-600'">{{ ns.stock }}</span>
+                                    <span class="text-xs text-gray-400 ml-1">顆</span>
                                 </td>
-                                <td class="p-3 text-right font-bold font-mono" :class="log.change_type === 'in' ? 'text-green-600' : 'text-red-600'">{{ log.change_type === 'in' ? '+' : '-' }}{{ log.quantity }}</td>
-                                <td class="p-3 text-xs text-gray-400 max-w-[150px] truncate">{{ log.notes || '-' }}</td>
-                                <td class="p-3 text-center"><button @click="deleteNozzleLog(log.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button></td>
                             </tr>
-                            <tr v-if="nozzleLogs.length === 0"><td colspan="6"><div class="empty-state py-8"><i class="fas fa-box-open"></i><div class="title">尚無進出紀錄</div></div></td></tr>
+                            <tr v-if="nozzleStock.length === 0"><td colspan="5"><div class="empty-state py-8"><i class="fas fa-bullseye"></i><div class="title">尚無吸嘴庫存</div><div class="hint">請先在「基礎設定」新增吸嘴型號，再新增入庫紀錄</div></div></td></tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- History Log -->
+                <div class="section-card">
+                    <div class="px-4 py-3 border-b bg-gray-50/50 font-bold text-sm text-gray-600"><i class="fas fa-history mr-2 text-orange-500"></i>異動紀錄</div>
+                    <div class="overflow-x-auto max-h-[350px] overflow-y-auto">
+                        <table class="w-full text-left border-collapse min-w-[550px]">
+                            <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
+                                <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b">型號</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b text-right">數量</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="log in nozzleLogs" :key="log.id" class="hover:bg-gray-50 border-b transition text-sm">
+                                    <td class="p-3 font-bold text-gray-700">{{ log.log_date }}</td>
+                                    <td class="p-3 font-mono text-sm">{{ log.nozzle_models?.brand }} {{ log.nozzle_models?.model }}</td>
+                                    <td class="p-3 text-center">
+                                        <span v-if="log.change_type === 'in'" class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-arrow-down mr-1"></i>入庫</span>
+                                        <span v-else-if="log.change_type === 'use'" class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-arrow-right mr-1"></i>上機</span>
+                                        <span v-else-if="log.change_type === 'broken'" class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-heart-broken mr-1"></i>損壞</span>
+                                        <span v-else class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold"><i class="fas fa-trash mr-1"></i>報廢</span>
+                                    </td>
+                                    <td class="p-3 text-right font-bold font-mono" :class="log.change_type === 'in' ? 'text-green-600' : 'text-red-600'">{{ log.change_type === 'in' ? '+' : '-' }}{{ log.quantity }}</td>
+                                    <td class="p-3 text-xs text-gray-400 max-w-[150px] truncate" :title="log.notes || ''">{{ log.notes || '-' }}</td>
+                                    <td class="p-3 text-center"><button @click="deleteNozzleLog(log.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button></td>
+                                </tr>
+                                <tr v-if="nozzleLogs.length === 0"><td colspan="6"><div class="empty-state py-8"><i class="fas fa-box-open"></i><div class="title">尚無異動紀錄</div></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -749,7 +768,6 @@
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">料槍編號</label><input v-model="feederForm.slot_number" placeholder="F-001" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">型號</label><select v-model="feederForm.feeder_model_id" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option :value="null" disabled>-- 選擇 --</option><option v-for="m in eqData.feederModels" :value="m.id">{{ m.brand }} - {{ m.model }}</option></select></div>
                         </div>
-                        <div><label class="block text-xs font-bold mb-1 text-gray-400">儀器編號</label><input v-model="feederForm.instrument_number" placeholder="儀器編號" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
                         <div class="grid grid-cols-2 gap-4">
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">MES 編號 (左)</label><input v-model="feederForm.mes_code_left" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">MES 編號 (右)</label><input v-model="feederForm.mes_code_right" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
@@ -799,17 +817,20 @@
             <!-- Nozzle Log Modal -->
             <div v-if="showNozzleLogModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showNozzleLogModal = false">
                 <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[400px] animate-fade-in">
-                    <h3 class="text-xl font-black mb-4 border-b pb-2 text-orange-600">新增吸嘴紀錄</h3>
+                    <h3 class="text-xl font-black mb-4 border-b pb-2" :class="nozzleLogForm.change_type === 'in' ? 'text-green-600' : nozzleLogForm.change_type === 'use' ? 'text-blue-600' : 'text-red-600'">
+                        <i :class="nozzleLogForm.change_type === 'in' ? 'fas fa-arrow-down' : nozzleLogForm.change_type === 'use' ? 'fas fa-arrow-right' : 'fas fa-heart-broken'" class="mr-2"></i>
+                        {{ nozzleLogForm.change_type === 'in' ? '吸嘴入庫' : nozzleLogForm.change_type === 'use' ? '吸嘴領用上機' : '吸嘴損壞/報廢' }}
+                    </h3>
                     <div class="space-y-4">
                         <div><label class="block text-xs font-bold mb-1 text-gray-400">吸嘴型號</label><select v-model="nozzleLogForm.nozzle_model_id" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option :value="null" disabled>-- 選擇 --</option><option v-for="m in eqData.nozzleModels" :value="m.id">{{ m.brand }} - {{ m.model }}</option></select></div>
                         <div class="grid grid-cols-2 gap-4">
-                            <div><label class="block text-xs font-bold mb-1 text-gray-400">類型</label><select v-model="nozzleLogForm.change_type" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="in">入庫</option><option value="broken">斷裂</option><option value="scrap">報廢</option></select></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">類型</label><select v-model="nozzleLogForm.change_type" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="in">入庫</option><option value="use">領用上機</option><option value="broken">損壞</option><option value="scrap">報廢</option></select></div>
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">數量</label><input type="number" v-model="nozzleLogForm.quantity" min="1" class="w-full border border-gray-200 p-2 rounded-lg text-center font-bold"></div>
                         </div>
                         <div><label class="block text-xs font-bold mb-1 text-gray-400">日期</label><input type="date" v-model="nozzleLogForm.log_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
-                        <div><label class="block text-xs font-bold mb-1 text-gray-400">備註 <span class="font-normal text-gray-300">(選填)</span></label><input v-model="nozzleLogForm.notes" class="w-full border border-gray-200 p-2 rounded-lg text-sm" placeholder="備註..."></div>
+                        <div><label class="block text-xs font-bold mb-1 text-gray-400">備註 <span class="font-normal text-gray-300">(選填)</span></label><input v-model="nozzleLogForm.notes" class="w-full border border-gray-200 p-2 rounded-lg text-sm" :placeholder="nozzleLogForm.change_type === 'broken' ? '哪顆損壞、損壞原因...' : '備註...'"></div>
                     </div>
-                    <div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showNozzleLogModal = false" class="btn-ghost">取消</button><button @click="saveNozzleLog" class="px-4 py-2 rounded-lg font-bold text-white" style="background:linear-gradient(135deg,#ea580c,#f97316);">儲存</button></div>
+                    <div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showNozzleLogModal = false" class="btn-ghost">取消</button><button @click="saveNozzleLog" class="px-4 py-2 rounded-lg font-bold text-white" :style="nozzleLogForm.change_type === 'in' ? 'background:#16a34a' : nozzleLogForm.change_type === 'use' ? 'background:#2563eb' : 'background:#dc2626'">儲存</button></div>
                 </div>
             </div>
         </div>
@@ -1320,7 +1341,7 @@ createApp({
         const showFeederModal = ref(false);
         const showCalModal = ref(false);
         const showNozzleLogModal = ref(false);
-        const feederForm = ref({ id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', instrument_number: '', purchase_date: '', status: 'active' });
+        const feederForm = ref({ id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: '', status: 'active' });
         const calTarget = ref(null);
         const calForm = ref({ calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '' });
         const calHistory = ref([]);
@@ -1369,20 +1390,21 @@ createApp({
             const map = {};
             nozzleLogs.value.forEach(log => {
                 const mid = log.nozzle_model_id;
-                if (!map[mid]) map[mid] = { model_id: mid, brand: log.nozzle_models?.brand, model: log.nozzle_models?.model, totalIn: 0, totalOut: 0 };
+                if (!map[mid]) map[mid] = { model_id: mid, brand: log.nozzle_models?.brand, model: log.nozzle_models?.model, totalIn: 0, inUse: 0, damaged: 0 };
                 if (log.change_type === 'in') map[mid].totalIn += log.quantity;
-                else map[mid].totalOut += log.quantity;
+                else if (log.change_type === 'use') map[mid].inUse += log.quantity;
+                else map[mid].damaged += log.quantity; // broken + scrap
             });
             // Also include models with no logs
             eqData.value.nozzleModels.forEach(m => {
-                if (!map[m.id]) map[m.id] = { model_id: m.id, brand: m.brand, model: m.model, totalIn: 0, totalOut: 0 };
+                if (!map[m.id]) map[m.id] = { model_id: m.id, brand: m.brand, model: m.model, totalIn: 0, inUse: 0, damaged: 0 };
             });
-            return Object.values(map).map(s => ({ ...s, stock: s.totalIn - s.totalOut }));
+            return Object.values(map).map(s => ({ ...s, stock: s.totalIn - s.inUse - s.damaged }));
         });
 
         const openFeederModal = (f = null) => {
-            if (f) feederForm.value = { id: f.id, feeder_model_id: f.feeder_model_id, slot_number: f.slot_number, mes_code_left: f.mes_code_left || '', mes_code_right: f.mes_code_right || '', instrument_number: f.instrument_number || '', purchase_date: f.purchase_date || '', status: f.status || 'active' };
-            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', instrument_number: '', purchase_date: '', status: 'active' };
+            if (f) feederForm.value = { id: f.id, feeder_model_id: f.feeder_model_id, slot_number: f.slot_number, mes_code_left: f.mes_code_left || '', mes_code_right: f.mes_code_right || '', purchase_date: f.purchase_date || '', status: f.status || 'active' };
+            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: '', status: 'active' };
             showFeederModal.value = true;
         };
 
@@ -1390,7 +1412,7 @@ createApp({
             if (!feederForm.value.slot_number || !feederForm.value.feeder_model_id) return toast('請填寫料槍編號與型號', 'warning');
             loading.value = true;
             try {
-                const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: feederForm.value.mes_code_left || null, mes_code_right: feederForm.value.mes_code_right || null, instrument_number: feederForm.value.instrument_number || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
+                const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: feederForm.value.mes_code_left || null, mes_code_right: feederForm.value.mes_code_right || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
                 if (feederForm.value.id) await _supabase.from('feeders').update(payload).eq('id', feederForm.value.id);
                 else await _supabase.from('feeders').insert(payload);
                 showFeederModal.value = false; await loadFeeders(); toast('Feeder 已儲存');
@@ -1428,7 +1450,7 @@ createApp({
 
         const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', calTarget.value.id).order('calibration_date', { ascending: false }); calHistory.value = list || []; await loadFeeders(); toast('已刪除', 'info'); };
 
-        const openNozzleLogModal = () => { nozzleLogForm.value = { nozzle_model_id: null, change_type: 'in', quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' }; showNozzleLogModal.value = true; };
+        const openNozzleLogModal = (type = 'in') => { nozzleLogForm.value = { nozzle_model_id: null, change_type: type, quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' }; showNozzleLogModal.value = true; };
 
         const saveNozzleLog = async () => {
             if (!nozzleLogForm.value.nozzle_model_id || !nozzleLogForm.value.quantity) return toast('請填寫完整', 'warning');

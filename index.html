@@ -1442,9 +1442,9 @@ createApp({
         const deleteNozzleLog = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('nozzle_inventory_logs').delete().eq('id', id); await loadNozzleLogs(); toast('已刪除', 'info'); };
 
         // Equipment settings helpers
-        const addFeederModel = async () => { const b = eqSettingForm.value.feederBrand.trim(); const m = eqSettingForm.value.feederModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); await _supabase.from('feeder_models').insert({ brand: b, model: m }); eqSettingForm.value.feederBrand = ''; eqSettingForm.value.feederModel = ''; await loadEqData(); toast('已新增'); };
-        const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); await _supabase.from('nozzle_models').insert({ brand: b, model: m }); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
-        const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; await _supabase.from(table).delete().eq('id', id); await loadEqData(); toast('已刪除', 'info'); };
+        const addFeederModel = async () => { const b = eqSettingForm.value.feederBrand.trim(); const m = eqSettingForm.value.feederModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('feeder_models').insert({ brand: b, model: m }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.feederBrand = ''; eqSettingForm.value.feederModel = ''; await loadEqData(); toast('已新增'); };
+        const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('nozzle_models').insert({ brand: b, model: m }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
+        const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; const { error } = await _supabase.from(table).delete().eq('id', id); if (error) return toast('刪除失敗: ' + error.message, 'error'); await loadEqData(); toast('已刪除', 'info'); };
 
         // --- Settings (PRESERVED) ---
         const settingConfig = ref({ 

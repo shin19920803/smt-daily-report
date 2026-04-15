@@ -772,9 +772,8 @@
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">MES 編號 (左)</label><input v-model="feederForm.mes_code_left" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">MES 編號 (右)</label><input v-model="feederForm.mes_code_right" class="w-full border border-gray-200 p-2 rounded-lg font-mono"></div>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div><label class="block text-xs font-bold mb-1 text-gray-400">入庫日期</label><input type="date" v-model="feederForm.purchase_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
-                            <div><label class="block text-xs font-bold mb-1 text-gray-400">狀態</label><select v-model="feederForm.status" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="active">使用中</option><option value="retired">已停用</option></select></div>
+                        <div>
+                            <label class="block text-xs font-bold mb-1 text-gray-400">入庫日期</label><input type="date" v-model="feederForm.purchase_date" class="w-full border border-gray-200 p-2 rounded-lg">
                         </div>
                     </div>
                     <div class="mt-6 flex justify-end gap-2 border-t pt-4"><button @click="showFeederModal = false" class="btn-ghost">取消</button><button @click="saveFeeder" class="px-4 py-2 rounded-lg font-bold text-white" style="background:linear-gradient(135deg,#0d9488,#14b8a6);">儲存</button></div>
@@ -1413,8 +1412,10 @@ createApp({
             loading.value = true;
             try {
                 const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: feederForm.value.mes_code_left || null, mes_code_right: feederForm.value.mes_code_right || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
-                if (feederForm.value.id) await _supabase.from('feeders').update(payload).eq('id', feederForm.value.id);
-                else await _supabase.from('feeders').insert(payload);
+                let error;
+                if (feederForm.value.id) ({ error } = await _supabase.from('feeders').update(payload).eq('id', feederForm.value.id));
+                else ({ error } = await _supabase.from('feeders').insert(payload));
+                if (error) throw error;
                 showFeederModal.value = false; await loadFeeders(); toast('Feeder 已儲存');
             } catch(e) { toast('儲存失敗: ' + e.message, 'error'); } finally { loading.value = false; }
         };
@@ -1437,7 +1438,8 @@ createApp({
             if (!calForm.value.calibration_date) return toast('請填校正日期', 'warning');
             loading.value = true;
             try {
-                await _supabase.from('feeder_calibrations').insert({ feeder_id: calTarget.value.id, calibration_date: calForm.value.calibration_date, next_calibration_date: calForm.value.next_calibration_date || null, result: calForm.value.result, notes: calForm.value.notes || null });
+                const { error } = await _supabase.from('feeder_calibrations').insert({ feeder_id: calTarget.value.id, calibration_date: calForm.value.calibration_date, next_calibration_date: calForm.value.next_calibration_date || null, result: calForm.value.result, notes: calForm.value.notes || null });
+                if (error) throw error;
                 const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', calTarget.value.id).order('calibration_date', { ascending: false });
                 calHistory.value = list || [];
                 await loadFeeders();
@@ -1456,7 +1458,8 @@ createApp({
             if (!nozzleLogForm.value.nozzle_model_id || !nozzleLogForm.value.quantity) return toast('請填寫完整', 'warning');
             loading.value = true;
             try {
-                await _supabase.from('nozzle_inventory_logs').insert({ nozzle_model_id: nozzleLogForm.value.nozzle_model_id, change_type: nozzleLogForm.value.change_type, quantity: nozzleLogForm.value.quantity, log_date: nozzleLogForm.value.log_date, notes: nozzleLogForm.value.notes || null });
+                const { error } = await _supabase.from('nozzle_inventory_logs').insert({ nozzle_model_id: nozzleLogForm.value.nozzle_model_id, change_type: nozzleLogForm.value.change_type, quantity: nozzleLogForm.value.quantity, log_date: nozzleLogForm.value.log_date, notes: nozzleLogForm.value.notes || null });
+                if (error) throw error;
                 showNozzleLogModal.value = false; await loadNozzleLogs(); toast('紀錄已新增');
             } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
         };

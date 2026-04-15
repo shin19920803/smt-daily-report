@@ -681,10 +681,20 @@
                 <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">
                     <table class="w-full text-left border-collapse relative min-w-[700px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
-                            <tr><th class="p-3 border-b">料槍編號</th><th class="p-3 border-b">廠牌</th><th class="p-3 border-b">型號</th><th class="p-3 border-b">MES 左</th><th class="p-3 border-b">MES 右</th><th class="p-3 border-b">入庫日期</th><th class="p-3 border-b text-center">使用狀態</th><th class="p-3 border-b text-center">校正狀態</th><th class="p-3 border-b text-center">操作</th></tr>
+                            <tr>
+                                <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('slot_number')">料槍編號 <i :class="feederSortIcon('slot_number')" class="ml-1"></i></th>
+                                <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('brand')">廠牌 <i :class="feederSortIcon('brand')" class="ml-1"></i></th>
+                                <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('model')">型號 <i :class="feederSortIcon('model')" class="ml-1"></i></th>
+                                <th class="p-3 border-b">MES 左</th>
+                                <th class="p-3 border-b">MES 右</th>
+                                <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('purchase_date')">入庫日期 <i :class="feederSortIcon('purchase_date')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('status')">使用狀態 <i :class="feederSortIcon('status')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('_calStatus')">校正狀態 <i :class="feederSortIcon('_calStatus')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center">操作</th>
+                            </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="f in feederList" :key="f.id" @click="selectFeeder(f)" class="border-b transition text-sm cursor-pointer" :class="selectedFeederId === f.id ? 'bg-teal-50 border-l-4 border-teal-500' : 'hover:bg-gray-50'">
+                            <tr v-for="f in sortedFeederList" :key="f.id" @click="selectFeeder(f)" class="border-b transition text-sm cursor-pointer" :class="selectedFeederId === f.id ? 'bg-teal-50 border-l-4 border-teal-500' : 'hover:bg-gray-50'">
                                 <td class="p-3 font-bold font-mono text-teal-700">{{ f.slot_number }}</td>
                                 <td class="p-3">{{ f.feeder_models?.brand }}</td>
                                 <td class="p-3 font-mono">{{ f.feeder_models?.model }}</td>
@@ -770,10 +780,16 @@
                 <div class="section-card overflow-x-auto">
                     <table class="w-full text-left border-collapse min-w-[500px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
-                            <tr><th class="p-3 border-b">吸嘴型號</th><th class="p-3 border-b text-center">總入庫</th><th class="p-3 border-b text-center">使用中</th><th class="p-3 border-b text-center">損壞/報廢</th><th class="p-3 border-b text-center">庫存剩餘</th></tr>
+                            <tr>
+                                <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setNozzleSort('model')">吸嘴型號 <i :class="nozzleSortIcon('model')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center cursor-pointer hover:text-gray-800 select-none" @click="setNozzleSort('totalIn')">總入庫 <i :class="nozzleSortIcon('totalIn')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center cursor-pointer hover:text-gray-800 select-none" @click="setNozzleSort('inUse')">使用中 <i :class="nozzleSortIcon('inUse')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center cursor-pointer hover:text-gray-800 select-none" @click="setNozzleSort('damaged')">損壞/報廢 <i :class="nozzleSortIcon('damaged')" class="ml-1"></i></th>
+                                <th class="p-3 border-b text-center cursor-pointer hover:text-gray-800 select-none" @click="setNozzleSort('stock')">庫存剩餘 <i :class="nozzleSortIcon('stock')" class="ml-1"></i></th>
+                            </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="ns in nozzleStock" :key="ns.model_id" @click="selectNozzleModel(ns.model_id)" class="border-b transition text-sm cursor-pointer" :class="selectedNozzleModelId === ns.model_id ? 'bg-orange-50 border-l-4 border-orange-400' : 'hover:bg-gray-50'">
+                            <tr v-for="ns in sortedNozzleStock" :key="ns.model_id" @click="selectNozzleModel(ns.model_id)" class="border-b transition text-sm cursor-pointer" :class="selectedNozzleModelId === ns.model_id ? 'bg-orange-50 border-l-4 border-orange-400' : 'hover:bg-gray-50'">
                                 <td class="p-3 font-bold">{{ ns.brand }} <span class="font-mono text-gray-600">{{ ns.model }}</span></td>
                                 <td class="p-3 text-center font-mono text-gray-500">{{ ns.totalIn }}</td>
                                 <td class="p-3 text-center font-mono text-blue-600 font-bold">{{ ns.inUse }}</td>
@@ -783,7 +799,7 @@
                                     <span class="text-xs text-gray-400 ml-1">顆</span>
                                 </td>
                             </tr>
-                            <tr v-if="nozzleStock.length === 0"><td colspan="5"><div class="empty-state py-8"><i class="fas fa-bullseye"></i><div class="title">尚無吸嘴庫存</div><div class="hint">請先在「基礎設定」新增吸嘴型號，再新增入庫紀錄</div></div></td></tr>
+                            <tr v-if="sortedNozzleStock.length === 0"><td colspan="5"><div class="empty-state py-8"><i class="fas fa-bullseye"></i><div class="title">尚無吸嘴庫存</div><div class="hint">請先在「基礎設定」新增吸嘴型號，再新增入庫紀錄</div></div></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1420,6 +1436,41 @@ createApp({
         const selectedNozzleModelName = computed(() => { const ns = nozzleStock.value.find(s => s.model_id === selectedNozzleModelId.value); return ns ? `${ns.brand} ${ns.model}` : ''; });
         const filteredNozzleLogs = computed(() => { if (!selectedNozzleModelId.value) return nozzleLogs.value; return nozzleLogs.value.filter(l => l.nozzle_model_id === selectedNozzleModelId.value); });
 
+        // --- Feeder Sort ---
+        const feederSort = ref({ key: 'slot_number', dir: 'asc' });
+        const setFeederSort = (key) => { if (feederSort.value.key === key) feederSort.value.dir = feederSort.value.dir === 'asc' ? 'desc' : 'asc'; else { feederSort.value.key = key; feederSort.value.dir = 'asc'; } };
+        const feederSortIcon = (key) => { if (feederSort.value.key !== key) return 'fas fa-sort text-gray-300'; return feederSort.value.dir === 'asc' ? 'fas fa-sort-up text-teal-600' : 'fas fa-sort-down text-teal-600'; };
+        const sortedFeederList = computed(() => {
+            const list = [...feederList.value];
+            const { key, dir } = feederSort.value;
+            const mult = dir === 'asc' ? 1 : -1;
+            list.sort((a, b) => {
+                let va, vb;
+                if (key === 'brand') { va = a.feeder_models?.brand || ''; vb = b.feeder_models?.brand || ''; }
+                else if (key === 'model') { va = a.feeder_models?.model || ''; vb = b.feeder_models?.model || ''; }
+                else { va = a[key] || ''; vb = b[key] || ''; }
+                if (typeof va === 'string') return va.localeCompare(vb) * mult;
+                return ((va > vb ? 1 : va < vb ? -1 : 0)) * mult;
+            });
+            return list;
+        });
+
+        // --- Nozzle Sort ---
+        const nozzleSort = ref({ key: 'model', dir: 'asc' });
+        const setNozzleSort = (key) => { if (nozzleSort.value.key === key) nozzleSort.value.dir = nozzleSort.value.dir === 'asc' ? 'desc' : 'asc'; else { nozzleSort.value.key = key; nozzleSort.value.dir = 'asc'; } };
+        const nozzleSortIcon = (key) => { if (nozzleSort.value.key !== key) return 'fas fa-sort text-gray-300'; return nozzleSort.value.dir === 'asc' ? 'fas fa-sort-up text-orange-500' : 'fas fa-sort-down text-orange-500'; };
+        const sortedNozzleStock = computed(() => {
+            const list = [...nozzleStock.value];
+            const { key, dir } = nozzleSort.value;
+            const mult = dir === 'asc' ? 1 : -1;
+            list.sort((a, b) => {
+                let va, vb;
+                if (key === 'model') { va = `${a.brand} ${a.model}`; vb = `${b.brand} ${b.model}`; return va.localeCompare(vb) * mult; }
+                else { va = a[key] || 0; vb = b[key] || 0; return (va - vb) * mult; }
+            });
+            return list;
+        });
+
         const selectFeeder = async (f) => {
             selectedFeederId.value = selectedFeederId.value === f.id ? null : f.id;
             if (selectedFeederId.value) {
@@ -1709,6 +1760,8 @@ createApp({
             calendarYear, calendarMonth, calendarDays, calendarPadding, changeMonth, isToday, openDayDetail, dayDetailModal,
             // Equipment
             eqTab, eqData, feederList, nozzleLogs, nozzleStock,
+            feederSort, setFeederSort, feederSortIcon, sortedFeederList,
+            nozzleSort, setNozzleSort, nozzleSortIcon, sortedNozzleStock,
             showFeederModal, feederForm, openFeederModal, saveFeeder, deleteFeeder, feederSummary, toggleFeederStatus,
             selectedFeederId, selectedFeederObj, selectFeeder,
             showFeederLogModal, feederLogForm, openFeederLogModal, calHistory, saveCalibration, deleteCalibration,

@@ -1605,13 +1605,11 @@ createApp({
         });
         const toggleModelGroup = (group) => {
             if (group.allSelected) {
-                // 取消全部
-                woForm.value.selectedModelIds = woForm.value.selectedModelIds.filter(id => !group.ids.includes(id));
+                // 取消選取
+                woForm.value.selectedModelIds = [];
             } else {
-                // 全選
-                const current = new Set(woForm.value.selectedModelIds);
-                group.ids.forEach(id => current.add(id));
-                woForm.value.selectedModelIds = [...current];
+                // 單選：清掉全部，只選這組
+                woForm.value.selectedModelIds = [...group.ids];
             }
         };
         const sortedDefectTypes = computed(() => [...data.value.defectTypes].sort((a,b) => a.name.localeCompare(b.name)));

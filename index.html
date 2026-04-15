@@ -713,7 +713,7 @@
                     <div class="overflow-x-auto max-h-[300px] overflow-y-auto">
                         <table class="w-full text-left border-collapse min-w-[500px]">
                             <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
-                                <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b">結果/狀態</th><th class="p-3 border-b">下次校正日</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
+                                <tr><th class="p-3 border-b">日期</th><th class="p-3 border-b text-center">類型</th><th class="p-3 border-b">結果/狀態</th><th class="p-3 border-b">備註</th><th class="p-3 border-b text-center">操作</th></tr>
                             </thead>
                             <tbody>
                                 <tr v-for="c in calHistory" :key="c.id" class="hover:bg-gray-50 border-b transition text-sm">
@@ -729,11 +729,10 @@
                                         <span v-else-if="c.result === 'fail'" class="text-red-600 font-bold"><i class="fas fa-times-circle mr-1"></i>Fail</span>
                                         <span v-else class="text-gray-500">{{ c.result || '-' }}</span>
                                     </td>
-                                    <td class="p-3 text-gray-500 font-mono text-sm">{{ c.next_calibration_date || '-' }}</td>
                                     <td class="p-3 text-xs text-gray-400 max-w-[150px] truncate" :title="c.notes || ''">{{ c.notes || '-' }}</td>
                                     <td class="p-3 text-center"><button @click="deleteCalibration(c.id)" class="text-red-300 hover:text-red-500"><i class="fas fa-trash-alt text-xs"></i></button></td>
                                 </tr>
-                                <tr v-if="calHistory.length === 0"><td colspan="6"><div class="empty-state py-6"><i class="fas fa-clipboard-list" style="font-size:1.5rem"></i><div class="hint">尚無紀錄，點擊上方按鈕新增</div></div></td></tr>
+                                <tr v-if="calHistory.length === 0"><td colspan="5"><div class="empty-state py-6"><i class="fas fa-clipboard-list" style="font-size:1.5rem"></i><div class="hint">尚無紀錄，點擊上方按鈕新增</div></div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -840,8 +839,7 @@
                             <div><label class="block text-xs font-bold mb-1 text-gray-400">紀錄類型</label><select v-model="feederLogForm.log_type" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="calibration">校正</option><option value="repair">維修</option><option value="damage">損壞</option></select></div>
                         </div>
                         <div class="grid grid-cols-2 gap-4" v-if="feederLogForm.log_type === 'calibration'">
-                            <div><label class="block text-xs font-bold mb-1 text-gray-400">下次校正日</label><input type="date" v-model="feederLogForm.next_calibration_date" class="w-full border border-gray-200 p-2 rounded-lg"></div>
-                            <div><label class="block text-xs font-bold mb-1 text-gray-400">結果</label><select v-model="feederLogForm.result" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
+                            <div class="col-span-2"><label class="block text-xs font-bold mb-1 text-gray-400">結果</label><select v-model="feederLogForm.result" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
                         </div>
                         <div v-if="feederLogForm.log_type !== 'calibration'">
                             <label class="block text-xs font-bold mb-1 text-gray-400">狀況描述</label>
@@ -1404,8 +1402,7 @@ createApp({
         };
         const selectNozzleModel = (modelId) => { selectedNozzleModelId.value = selectedNozzleModelId.value === modelId ? null : modelId; };
         const openFeederLogModal = (type = 'calibration') => {
-            const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
-            feederLogForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: type === 'calibration' ? nextYear.toISOString().split('T')[0] : '', result: type === 'calibration' ? 'pass' : '', notes: '', log_type: type };
+            feederLogForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: type === 'calibration' ? 'pass' : '', notes: '', log_type: type };
             showFeederLogModal.value = true;
         };
 

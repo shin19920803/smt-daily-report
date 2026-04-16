@@ -61,9 +61,12 @@
         .toast-warning { background: linear-gradient(135deg, #d97706, #f59e0b); }
         .toast-info { background: linear-gradient(135deg, #2563eb, #3b82f6); }
 
-        /* Sticky Table Headers */
-        th { position: sticky; top: 0; z-index: 10; white-space: nowrap; }
+        /* Sticky Table Headers - enhanced for scrollable containers */
+        th { position: sticky; top: 0; z-index: 10; white-space: nowrap; background-color: #f9fafb; }
         td { white-space: nowrap; }
+        .eq-table-wrap { overflow: auto; max-height: 300px; border-radius: 12px; border: 1px solid var(--border); }
+        .eq-table-wrap table { border-collapse: separate; border-spacing: 0; }
+        .eq-table-wrap th { position: sticky; top: 0; z-index: 10; background: #f9fafb; border-bottom: 2px solid #e2e8f0; }
         .selected-row { background-color: #eff6ff; border-left: 4px solid #8b5cf6; }
         .checkbox-wrapper input:checked + div { background-color: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
         
@@ -212,13 +215,22 @@
 
         <!-- ==================== DASHBOARD ==================== -->
         <div v-if="currentTab === 'dashboard'" class="space-y-6 animate-fade-in">
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <div>
                     <h2 class="text-xl md:text-2xl font-black text-gray-800">總覽儀表板</h2>
-                    <p class="text-xs text-gray-400 mt-1">{{ todayStr }} — 即時生產概況</p>
                 </div>
-                <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt mr-1"></i> 刷新</button>
+                <div class="flex items-center gap-2">
+                    <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-left text-xs"></i></button>
+                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                        <i class="fas fa-calendar-day text-blue-500 text-sm"></i>
+                        <input type="date" v-model="dashDate" @change="refreshDashboard" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;">
+                    </div>
+                    <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-right text-xs"></i></button>
+                    <button @click="dashDate = new Date().toISOString().split('T')[0]; refreshDashboard()" class="px-2 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition">今天</button>
+                    <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
+                </div>
             </div>
+            <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} — {{ dashDate === new Date().toISOString().split('T')[0] ? '今日' : '' }}生產概況</p>
 
             <!-- KPI Cards -->
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
@@ -227,15 +239,15 @@
                     <div class="text-2xl font-black text-gray-800">{{ dashboard.activeWoCount }}</div>
                 </div>
                 <div class="kpi-card green">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-cubes mr-1 text-green-500"></i>今日投入</div>
+                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-cubes mr-1 text-green-500"></i>當日投入</div>
                     <div class="text-2xl font-black text-gray-800">{{ dashboard.todayInput }}</div>
                 </div>
                 <div class="kpi-card purple">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-check-circle mr-1 text-purple-500"></i>今日良率</div>
+                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-check-circle mr-1 text-purple-500"></i>當日良率</div>
                     <div class="text-2xl font-black" :class="dashboard.todayYield >= 98 ? 'text-green-600' : dashboard.todayYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.todayYield }}%</div>
                 </div>
                 <div class="kpi-card red">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-times-circle mr-1 text-red-500"></i>今日不良</div>
+                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-times-circle mr-1 text-red-500"></i>當日不良</div>
                     <div class="text-2xl font-black text-gray-800">{{ dashboard.todayDefects }}</div>
                 </div>
                 <div class="kpi-card yellow">
@@ -678,8 +690,8 @@
                     <div class="text-sm text-gray-400">共 <b class="text-gray-700">{{ feederSummary.total }}</b> 支 · <span class="text-blue-600 font-bold">{{ feederSummary.inUse }}</span> 使用中 · <span class="text-gray-500">{{ feederSummary.idle }}</span> 未使用</div>
                     <button @click="openFeederModal()" class="px-3 py-2 rounded-lg font-bold text-sm text-white" style="background:linear-gradient(135deg,#0d9488,#14b8a6);"><i class="fas fa-plus mr-1"></i> 新增 Feeder</button>
                 </div>
-                <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">
-                    <table class="w-full text-left border-collapse relative min-w-[700px]">
+                <div class="eq-table-wrap">
+                    <table class="w-full text-left relative min-w-[700px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
                             <tr>
                                 <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setFeederSort('slot_number')">料槍編號 <i :class="feederSortIcon('slot_number')" class="ml-1"></i></th>
@@ -777,8 +789,8 @@
                 </div>
 
                 <!-- Inventory Table (clickable rows) -->
-                <div class="section-card overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[500px]">
+                <div class="eq-table-wrap">
+                    <table class="w-full text-left min-w-[500px]">
                         <thead class="bg-gray-50 text-gray-500 uppercase text-xs">
                             <tr>
                                 <th class="p-3 border-b cursor-pointer hover:text-gray-800 select-none" @click="setNozzleSort('model')">吸嘴型號 <i :class="nozzleSortIcon('model')" class="ml-1"></i></th>
@@ -1086,38 +1098,41 @@ createApp({
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
+        const dashDate = ref(new Date().toISOString().split('T')[0]);
+
+        const changeDashDate = (delta) => {
+            const d = new Date(dashDate.value);
+            d.setDate(d.getDate() + delta);
+            dashDate.value = d.toISOString().split('T')[0];
+            refreshDashboard();
+        };
 
         const refreshDashboard = async () => {
-            // Active WO count
             dashboard.value.activeWoCount = activeWoNumbers.value.length;
 
-            // Today's data
-            const today = new Date().toISOString().split('T')[0];
-            const { data: todayProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').eq('production_date', today);
+            const targetDate = dashDate.value;
+            const { data: todayProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').eq('production_date', targetDate);
             let tInput = 0, tDefects = 0;
             (todayProds || []).forEach(p => { tInput += p.input_quantity; p.defect_logs.forEach(d => { tDefects += d.quantity; }); });
             dashboard.value.todayInput = tInput;
             dashboard.value.todayDefects = tDefects;
             dashboard.value.todayYield = tInput ? ((tInput - tDefects) / tInput * 100).toFixed(1) : '100.0';
 
-            // This month OOC count
-            const monthStart = today.slice(0, 7) + '-01';
-            const { data: oocMonth, count: oocCount } = await _supabase.from('ooc_records').select('id', { count: 'exact' }).gte('production_date', monthStart);
+            const monthStart = targetDate.slice(0, 7) + '-01';
+            const { data: oocMonth, count: oocCount } = await _supabase.from('ooc_records').select('id', { count: 'exact' }).gte('production_date', monthStart).lte('production_date', targetDate);
             dashboard.value.monthOocCount = oocCount || 0;
 
-            // Week average yield
-            const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+            const weekAgo = new Date(targetDate); weekAgo.setDate(weekAgo.getDate() - 7);
             const weekStr = weekAgo.toISOString().split('T')[0];
-            const { data: weekProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').gte('production_date', weekStr);
+            const { data: weekProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').gte('production_date', weekStr).lte('production_date', targetDate);
             let wInput = 0, wDefects = 0;
             (weekProds || []).forEach(p => { wInput += p.input_quantity; p.defect_logs.forEach(d => { wDefects += d.quantity; }); });
             dashboard.value.weekAvgYield = wInput ? ((wInput - wDefects) / wInput * 100).toFixed(1) : '100.0';
 
-            // Recent records for dashboard
-            const { data: recentProds } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(id)').order('production_date', { ascending: false }).limit(8);
+            const { data: recentProds } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(id)').eq('production_date', targetDate).order('production_date', { ascending: false }).limit(20);
             dashboardRecentProds.value = (recentProds || []).map(item => ({ ...item, defect_count: item.defect_logs.length }));
 
-            const { data: recentOoc } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').order('production_date', {ascending:false}).limit(5);
+            const { data: recentOoc } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').eq('production_date', targetDate).order('production_date', {ascending:false}).limit(10);
             dashboardRecentOoc.value = recentOoc || [];
         };
 
@@ -1745,7 +1760,7 @@ createApp({
         return {
             currentTab, loading, showWoModal, showMobileMore, data, toasts,
             getWoColor, fpyTargets, saveFpyTargets, isFpyBelowTarget, todayStr,
-            dashboard, dashboardRecentProds, dashboardRecentOoc, refreshDashboard,
+            dashboard, dashboardRecentProds, dashboardRecentOoc, refreshDashboard, dashDate, changeDashDate,
             report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory, onDateChange, cancelEdit,
             woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, markWoComplete, onWoNumberChange,
             statsFilter, statsResult, calculateStats, exportToExcel,

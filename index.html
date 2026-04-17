@@ -321,11 +321,11 @@
                 <div class="lg:col-span-2 space-y-6">
                     <!-- Step 1 -->
                     <div class="section-card p-4 md:p-6 border-l-4 border-blue-500 relative">
-                        <div v-if="report.currentId" class="absolute top-3 right-3 flex items-center gap-2">
-                            <span class="bg-yellow-50 text-yellow-700 text-xs px-2 py-1 rounded-full font-bold"><i class="fas fa-pen mr-1"></i>編輯模式</span>
-                            <button @click="cancelEdit" class="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full font-bold hover:bg-gray-200 transition"><i class="fas fa-times mr-1"></i>取消</button>
+                        <div class="flex items-center gap-2 mb-4">
+                            <button v-if="report.isEditing" @click="cancelEdit" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center transition" title="回到新增模式"><i class="fas fa-arrow-left text-sm"></i></button>
+                            <h3 class="font-bold text-lg text-blue-800">步驟 1: 設定生產數據</h3>
+                            <span v-if="report.currentId" class="bg-yellow-50 text-yellow-700 text-xs px-2 py-0.5 rounded-full font-bold ml-auto"><i class="fas fa-pen mr-1"></i>編輯模式</span>
                         </div>
-                        <h3 class="font-bold text-lg mb-4 text-blue-800">步驟 1: 設定生產數據</h3>
 
                         <!-- Date -->
                         <div class="mb-4">

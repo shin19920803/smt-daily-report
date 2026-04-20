@@ -322,7 +322,7 @@
                     <!-- Step 1 -->
                     <div class="section-card p-4 md:p-6 border-l-4 border-blue-500 relative">
                         <div class="flex items-center gap-2 mb-4">
-                            <button v-if="report.isEditing" @click="cancelEdit" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center transition" title="回到新增模式"><i class="fas fa-arrow-left text-sm"></i></button>
+                            <button v-if="report.selectedWoNumber && report.wo_id" @click="backToWoList" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-blue-500 hover:text-white text-gray-600 flex items-center justify-center transition" title="返回工單選擇"><i class="fas fa-arrow-left text-sm"></i></button>
                             <h3 class="font-bold text-lg text-blue-800">步驟 1: 設定生產數據</h3>
                             <span v-if="report.currentId" class="bg-yellow-50 text-yellow-700 text-xs px-2 py-0.5 rounded-full font-bold ml-auto"><i class="fas fa-pen mr-1"></i>編輯模式</span>
                         </div>
@@ -1190,6 +1190,12 @@ createApp({
             await fetchDailyRecord();
         };
         
+        // 返回工單選擇 (編輯模式會整個取消，新增模式只清工單)
+        const backToWoList = () => {
+            if (report.value.isEditing) cancelEdit();
+            else onWoNumberChange();
+        };
+        
         // 日期變更處理：編輯模式下不重新查詢，僅記錄新日期待儲存時一併更新
         const onDateChange = () => {
             if (report.value.isEditing && report.value.currentId) {
@@ -1806,7 +1812,7 @@ createApp({
             currentTab, loading, showWoModal, showMobileMore, data, toasts,
             getWoColor, fpyTargets, saveFpyTargets, isFpyBelowTarget, todayStr,
             dashboard, dashboardRecentProds, dashboardRecentOoc, refreshDashboard, dashDate, changeDashDate,
-            report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory, onDateChange, cancelEdit, selectReportWo,
+            report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory, onDateChange, cancelEdit, selectReportWo, backToWoList,
             woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, markWoComplete, onWoNumberChange,
             statsFilter, statsResult, calculateStats, exportToExcel,
             rawExportFilter, exportRawData,

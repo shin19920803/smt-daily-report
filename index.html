@@ -693,7 +693,7 @@
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="statsFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="statsFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">機種</label><select v-model="statsFilter.modelId" class="w-full border border-gray-200 p-2 rounded-lg text-sm"><option value="all">全部</option><option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option></select></div>
-                    <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="statsFilter.woId" class="w-full border border-gray-200 p-2 rounded-lg text-sm"><option value="all">全部</option><option v-for="w in data.workOrders" :value="w.id">{{ w.wo_number }}</option></select></div>
+                    <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="statsFilter.woId" class="w-full border border-gray-200 p-2 rounded-lg text-sm"><option value="all">全部</option><option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option></select></div>
                     <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateStats" class="btn-primary text-sm">執行統計</button><button @click="exportToExcel" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> 導出完整報表</button></div>
                 </div>
             </div>
@@ -1610,7 +1610,7 @@ createApp({
                 const { data: rows } = await query; 
                 let filtered = rows || []; 
                 if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId); 
-                if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == statsFilter.value.woId); 
+                if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.wo_number === statsFilter.value.woId); 
                 
                 let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {}; 
                 const typeLocMap = {}; // { typeName: { locCode: qty } }

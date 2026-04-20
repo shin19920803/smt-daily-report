@@ -699,15 +699,31 @@
             </div>
             <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
                 <div class="section-card p-4"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">總合統計</h3><div class="grid grid-cols-2 gap-4"><div class="p-3 bg-gray-50 rounded-lg"><div class="text-xs text-gray-400">總投入數</div><div class="text-xl font-black font-mono">{{ statsResult.totalInput }}</div></div><div class="p-3 bg-red-50 rounded-lg"><div class="text-xs text-red-400">總不良數</div><div class="text-xl font-black text-red-600 font-mono">{{ statsResult.totalDefects }}</div></div><div class="col-span-2 p-4 rounded-lg text-center" :class="statsResult.yieldRate >= 98 ? 'bg-green-50' : statsResult.yieldRate >= 95 ? 'bg-yellow-50' : 'bg-red-50'"><div class="text-xs text-gray-500 mb-1">良率 (Yield Rate)</div><div class="text-3xl font-black font-mono" :class="statsResult.yieldRate >= 98 ? 'text-green-600' : statsResult.yieldRate >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ statsResult.yieldRate }}%</div></div></div></div>
-                <div class="section-card p-4"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">不良現象統計</h3>
+                <div class="section-card p-4"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">不良現象統計 <span class="text-xs font-normal text-gray-400">(點擊查看位置分佈)</span></h3>
                     <ul class="space-y-2 max-h-60 overflow-y-auto">
-                        <li v-for="item in statsResult.byType" class="text-sm p-2 hover:bg-gray-50 border-b border-dashed">
-                            <div class="flex justify-between mb-1"><span class="font-bold text-gray-700">{{ item.name }}</span><span class="font-bold font-mono">{{ item.qty }} <span class="text-gray-400">({{ item.ratio }}%)</span></span></div>
+                        <li v-for="item in statsResult.byType" :key="item.name" @click="selectedDefectType = selectedDefectType === item.name ? null : item.name" class="text-sm p-2 border-b border-dashed cursor-pointer rounded transition" :class="selectedDefectType === item.name ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-gray-50'">
+                            <div class="flex justify-between mb-1"><span class="font-bold text-gray-700">{{ item.name }} <i v-if="selectedDefectType === item.name" class="fas fa-check-circle text-red-500 ml-1 text-xs"></i></span><span class="font-bold font-mono">{{ item.qty }} <span class="text-gray-400">({{ item.ratio }}%)</span></span></div>
                             <div class="w-full bg-gray-100 rounded-full h-1.5"><div class="bg-red-400 h-1.5 rounded-full transition-all" :style="{width: item.ratio + '%'}"></div></div>
                         </li>
                     </ul>
                 </div>
                 <div class="section-card p-4 col-span-1 md:col-span-2"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">位置異常統計</h3><div class="flex flex-wrap gap-2"><span v-for="loc in statsResult.byLocation" class="px-3 py-1.5 bg-gray-50 rounded-lg text-sm border font-mono">{{ loc.code }}: <span class="font-bold text-red-600">{{ loc.qty }}</span></span></div></div>
+
+                <!-- Selected Defect Type Breakdown -->
+                <div v-if="selectedDefectType && typeLocBreakdown.length > 0" class="section-card p-4 col-span-1 md:col-span-2 border-l-4 border-red-500 animate-fade-in">
+                    <div class="flex justify-between items-center border-b pb-2 mb-4">
+                        <h3 class="font-bold text-red-700"><i class="fas fa-search-location mr-1"></i>「{{ selectedDefectType }}」位置分佈 <span class="text-xs font-normal text-gray-400 ml-2">總數 {{ typeLocTotal }}</span></h3>
+                        <button @click="selectedDefectType = null" class="text-gray-400 hover:text-red-500 text-xs"><i class="fas fa-times mr-1"></i>關閉</button>
+                    </div>
+                    <div class="space-y-1.5">
+                        <div v-for="(loc, idx) in typeLocBreakdown" :key="loc.code" class="flex items-center gap-3 p-2 bg-red-50/50 rounded-lg">
+                            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-300 text-gray-600'">{{ idx + 1 }}</div>
+                            <div class="font-mono font-bold text-gray-700 w-24">{{ loc.code }}</div>
+                            <div class="flex-1"><div class="w-full bg-gray-200 rounded-full h-2"><div class="h-2 rounded-full bg-red-500 transition-all" :style="{width: (loc.qty / typeLocBreakdown[0].qty * 100) + '%'}"></div></div></div>
+                            <div class="font-mono text-sm font-bold text-red-600 w-16 text-right">{{ loc.qty }} <span class="text-xs text-gray-400">({{ (loc.qty / typeLocTotal * 100).toFixed(1) }}%)</span></div>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Top 10 Pareto: 位號柏拉圖 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2">
@@ -1546,6 +1562,13 @@ createApp({
         // --- Stats & Export (format preserved exactly) ---
         const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
+        const selectedDefectType = ref(null);
+        const typeLocBreakdown = computed(() => {
+            if (!selectedDefectType.value || !statsResult.value?.typeLocMap) return [];
+            const map = statsResult.value.typeLocMap[selectedDefectType.value] || {};
+            return Object.entries(map).map(([code, qty]) => ({ code, qty })).sort((a, b) => b.qty - a.qty);
+        });
+        const typeLocTotal = computed(() => typeLocBreakdown.value.reduce((s, l) => s + l.qty, 0));
         const trendColors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'];
         const trendTypeColor = (typeName) => {
             if (!statsResult.value || !statsResult.value.topTypeNames) return '#6b7280';
@@ -1590,6 +1613,7 @@ createApp({
                 if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == statsFilter.value.woId); 
                 
                 let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {}; 
+                const typeLocMap = {}; // { typeName: { locCode: qty } }
                 // Per-day data for trend
                 const dayMap = {}; // { date: { input, defects, byType:{type:qty} } }
                 // Location frequency: how many days each location appeared
@@ -1609,6 +1633,9 @@ createApp({
                         typeMap[tName] = (typeMap[tName] || 0) + log.quantity; 
                         const lCode = log.defect_locations?.code || 'Unknown'; 
                         locMap[lCode] = (locMap[lCode] || 0) + log.quantity; 
+                        
+                        if (!typeLocMap[tName]) typeLocMap[tName] = {};
+                        typeLocMap[tName][lCode] = (typeLocMap[tName][lCode] || 0) + log.quantity;
                         
                         dayMap[day.production_date].defects += log.quantity;
                         dayMap[day.production_date].byType[tName] = (dayMap[day.production_date].byType[tName] || 0) + log.quantity;
@@ -1667,7 +1694,7 @@ createApp({
                 statsResult.value = { 
                     totalInput, totalDefects, 
                     yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100, 
-                    byType, byLocation, 
+                    byType, byLocation, typeLocMap,
                     topLocations, trend, topTypeNames, anomalies, totalDays
                 }; 
                 toast("統計完成"); 
@@ -2041,7 +2068,7 @@ createApp({
             dashboard, dashboardRecentProds, dashboardRecentOoc, refreshDashboard, dashDate, changeDashDate,
             report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory, onDateChange, cancelEdit, selectReportWo, backToWoList,
             woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, markWoComplete, onWoNumberChange,
-            statsFilter, statsResult, calculateStats, exportToExcel, trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints,
+            statsFilter, statsResult, calculateStats, exportToExcel, trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints, selectedDefectType, typeLocBreakdown, typeLocTotal,
             rawExportFilter, exportRawData,
             fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
             oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 

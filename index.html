@@ -356,7 +356,7 @@
                                     <div class="p-2 flex items-center justify-between">
                                         <div class="font-mono font-bold text-blue-700 text-sm">{{ num }}</div>
                                         <div class="flex gap-1 flex-wrap">
-                                            <button v-for="wo in data.workOrders.filter(w => w.wo_number === num)" :key="wo.id" @click="selectReportWo(num, wo.id)" class="px-2 py-0.5 rounded text-xs font-bold border border-gray-200 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition">
+                                            <button v-for="wo in data.workOrders.filter(w => w.wo_number === num)" :key="wo.id" @click="selectReportWo(num, wo.id)" :disabled="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed" class="px-2 py-0.5 rounded text-xs font-bold border transition" :class="(wo.target_quantity - (wo.current_input || 0)) <= 0 || wo.is_closed ? 'bg-gray-100 text-gray-300 border-gray-200 cursor-not-allowed line-through' : 'border-gray-200 hover:bg-blue-500 hover:text-white hover:border-blue-500'">
                                                 {{ wo.models?.name?.match(/[_\-](BOT|TOP)$/i)?.[1]?.toUpperCase() || wo.models?.name }}
                                             </button>
                                         </div>

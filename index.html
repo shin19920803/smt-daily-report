@@ -3,42 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統 (v9.0 Enhanced)</title>
+    <title>SMT 生產管理系統</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
         :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --accent-blue: #3b82f6;
-            --accent-purple: #8b5cf6;
-            --accent-red: #ef4444;
-            --accent-green: #22c55e;
-            --accent-yellow: #eab308;
-            --accent-orange: #f97316;
-            --accent-cyan: #06b6d4;
+            --sidebar-bg: #1a2035;
+            --sidebar-active: #2563eb;
+            --accent-blue: #2563eb;
+            --accent-purple: #7c3aed;
+            --accent-red: #dc2626;
+            --accent-green: #16a34a;
+            --accent-yellow: #d97706;
+            --accent-orange: #ea580c;
+            --accent-cyan: #0891b2;
             --surface: #ffffff;
-            --surface-hover: #f8fafc;
-            --border: #e2e8f0;
-            --text-primary: #0f172a;
-            --text-secondary: #64748b;
-            --text-muted: #94a3b8;
+            --border: #e5e7eb;
+            --bg-main: #f0f2f5;
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --text-muted: #9ca3af;
         }
         
         * { font-family: 'Noto Sans TC', sans-serif; }
         .font-mono { font-family: 'JetBrains Mono', monospace !important; }
 
         /* Animations */
-        .animate-fade-in { animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
         @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
         .animate-slide-in { animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         
@@ -52,92 +52,109 @@
 
         /* Toast */
         .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-        .toast-item { pointer-events: auto; padding: 14px 20px; border-radius: 12px; color: white; font-weight: 700; font-size: 0.875rem; box-shadow: 0 8px 30px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px; animation: toastIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); max-width: 380px; backdrop-filter: blur(10px); }
-        .toast-item.leaving { animation: toastOut 0.3s ease-in forwards; }
-        @keyframes toastIn { from { opacity: 0; transform: translateX(60px) scale(0.95); } to { opacity: 1; transform: translateX(0) scale(1); } }
-        @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(60px); } }
-        .toast-success { background: linear-gradient(135deg, #059669, #10b981); }
-        .toast-error { background: linear-gradient(135deg, #dc2626, #ef4444); }
-        .toast-warning { background: linear-gradient(135deg, #d97706, #f59e0b); }
-        .toast-info { background: linear-gradient(135deg, #2563eb, #3b82f6); }
+        .toast-item { pointer-events: auto; padding: 12px 18px; border-radius: 10px; color: white; font-weight: 600; font-size: 0.875rem; box-shadow: 0 4px 20px rgba(0,0,0,0.12); display: flex; align-items: center; gap: 10px; animation: toastIn 0.35s cubic-bezier(0.16, 1, 0.3, 1); max-width: 360px; }
+        .toast-item.leaving { animation: toastOut 0.25s ease-in forwards; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
+        .toast-success { background: #16a34a; }
+        .toast-error { background: #dc2626; }
+        .toast-warning { background: #d97706; }
+        .toast-info { background: #2563eb; }
 
-        /* Sticky Table Headers - enhanced for scrollable containers */
+        /* Sticky Table Headers */
         th { position: sticky; top: 0; z-index: 10; white-space: nowrap; background-color: #f9fafb; }
         td { white-space: nowrap; }
-        .eq-table-wrap { overflow: auto; max-height: 300px; border-radius: 12px; border: 1px solid var(--border); }
+        .eq-table-wrap { overflow: auto; max-height: 300px; border-radius: 10px; border: 1px solid var(--border); }
         .eq-table-wrap table { border-collapse: separate; border-spacing: 0; }
-        .eq-table-wrap th { position: sticky; top: 0; z-index: 10; background: #f9fafb; border-bottom: 2px solid #e2e8f0; }
-        .selected-row { background-color: #eff6ff; border-left: 4px solid #8b5cf6; }
-        .checkbox-wrapper input:checked + div { background-color: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
+        .eq-table-wrap th { position: sticky; top: 0; z-index: 10; background: #f9fafb; border-bottom: 2px solid #e5e7eb; }
+        .selected-row { background-color: #eff6ff; border-left: 3px solid #2563eb; }
+        .checkbox-wrapper input:checked + div { background-color: #eff6ff; border-color: #2563eb; color: #1d4ed8; }
         
         /* Calendar */
         .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background-color: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-        .calendar-cell { min-height: 60px; background: white; padding: 2px; font-size: 0.7rem; transition: all 0.2s; cursor: pointer; display: flex; flex-direction: column; }
+        .calendar-cell { min-height: 60px; background: white; padding: 2px; font-size: 0.7rem; transition: all 0.15s; cursor: pointer; display: flex; flex-direction: column; }
         @media (min-width: 768px) {
             .calendar-cell { min-height: 80px; padding: 4px; font-size: 0.75rem; }
-            .calendar-grid { gap: 2px; }
+            .calendar-grid { gap: 1px; }
         }
         .calendar-cell:hover { background-color: #f8fafc; }
-        .calendar-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: bold; padding-bottom: 8px; color: #4b5563; font-size: 0.8rem; }
-        .prod-tag { margin-bottom: 1px; padding: 1px 3px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.65rem; font-weight: 600; border: 1px solid transparent; }
+        .calendar-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: 700; padding-bottom: 8px; color: #4b5563; font-size: 0.75rem; }
+        .prod-tag { margin-bottom: 1px; padding: 1px 4px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.65rem; font-weight: 600; border: 1px solid transparent; }
         .prod-tag.highlight { border-width: 2px; font-weight: 800; }
-        .fpy-tag { margin-bottom: 1px; padding: 1px 3px; border-radius: 3px; font-size: 0.6rem; font-weight: 600; border: 1px solid transparent; }
+        .fpy-tag { margin-bottom: 1px; padding: 1px 4px; border-radius: 3px; font-size: 0.6rem; font-weight: 600; border: 1px solid transparent; }
         .fpy-tag.highlight { border-width: 2px; font-weight: 800; }
         .fpy-tag.warning { background-color: #fef2f2 !important; color: #991b1b !important; border-color: #fca5a5 !important; }
-        .ooc-tag { margin-bottom: 1px; padding: 1px 3px; border-radius: 3px; background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; font-size: 0.6rem; font-weight: 600; }
+        .ooc-tag { margin-bottom: 1px; padding: 1px 4px; border-radius: 3px; background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; font-size: 0.6rem; font-weight: 600; }
         
-        /* Sidebar */
-        .sidebar-link { display: flex; align-items: center; padding: 10px 24px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent; color: #94a3b8; font-weight: 500; }
-        .sidebar-link:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
-        .sidebar-link.active { background: linear-gradient(90deg, rgba(59,130,246,0.15), transparent); border-left-color: #3b82f6; color: #ffffff; font-weight: 700; }
+        /* Sidebar - refined dark */
+        .sidebar-link { display: flex; align-items: center; padding: 9px 16px; cursor: pointer; transition: all 0.15s; border-radius: 8px; color: #94a3b8; font-weight: 500; margin: 1px 0; }
+        .sidebar-link:hover { background: rgba(255,255,255,0.06); color: #e2e8f0; }
+        .sidebar-link.active { background: rgba(37,99,235,0.18); color: #93c5fd; font-weight: 700; }
+        .sidebar-link.active i { color: #60a5fa; }
 
-        /* KPI Cards */
-        .kpi-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid var(--border); transition: all 0.2s; position: relative; overflow: hidden; }
-        .kpi-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-1px); }
-        .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
-        .kpi-card.blue::before { background: linear-gradient(90deg, #3b82f6, #06b6d4); }
-        .kpi-card.red::before { background: linear-gradient(90deg, #ef4444, #f97316); }
-        .kpi-card.green::before { background: linear-gradient(90deg, #22c55e, #10b981); }
-        .kpi-card.purple::before { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
-        .kpi-card.yellow::before { background: linear-gradient(90deg, #eab308, #f59e0b); }
-        .kpi-card.cyan::before { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
+        /* KPI Cards - clean enterprise */
+        .kpi-card { background: white; border-radius: 10px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border: 1px solid var(--border); transition: all 0.15s; position: relative; overflow: hidden; }
+        .kpi-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.09); transform: translateY(-1px); }
+        .kpi-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; margin-bottom: 12px; }
+        .kpi-icon.blue { background: #dbeafe; color: #2563eb; }
+        .kpi-icon.green { background: #dcfce7; color: #16a34a; }
+        .kpi-icon.purple { background: #ede9fe; color: #7c3aed; }
+        .kpi-icon.red { background: #fee2e2; color: #dc2626; }
+        .kpi-icon.yellow { background: #fef9c3; color: #ca8a04; }
+        .kpi-icon.cyan { background: #cffafe; color: #0891b2; }
 
-        /* Better input styling */
+        /* Input styling */
         input, select, textarea { font-size: 16px !important; border-radius: 8px !important; }
-        input:focus, select:focus, textarea:focus { outline: none; ring: 2; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); border-color: #3b82f6 !important; }
+        input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); border-color: #2563eb !important; }
 
         /* Scrollbar */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
 
         /* Modal backdrop */
         .modal-backdrop { backdrop-filter: blur(4px); }
 
         /* Empty state */
         .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: var(--text-muted); }
-        .empty-state i { font-size: 3rem; margin-bottom: 12px; opacity: 0.3; }
-        .empty-state .title { font-weight: 700; font-size: 1rem; color: var(--text-secondary); margin-bottom: 4px; }
+        .empty-state i { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.2; }
+        .empty-state .title { font-weight: 700; font-size: 0.95rem; color: var(--text-secondary); margin-bottom: 4px; }
         .empty-state .hint { font-size: 0.8rem; }
 
         /* Mobile nav */
-        .mobile-nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 2px; flex: 1; transition: all 0.2s; border-radius: 8px; margin: 2px; }
-        .mobile-nav-item.active { background: rgba(59,130,246,0.15); }
+        .mobile-nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 2px; flex: 1; transition: all 0.15s; border-radius: 8px; margin: 2px; }
+        .mobile-nav-item.active { background: rgba(37,99,235,0.1); }
 
         /* Section card */
-        .section-card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid var(--border); overflow: hidden; }
+        .section-card { background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border: 1px solid var(--border); overflow: hidden; }
+        
+        /* Page header */
+        .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+        .page-title { font-size: 1.25rem; font-weight: 900; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+        .page-title-dot { width: 4px; height: 20px; border-radius: 2px; }
+        
+        /* Card header */
+        .card-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 0.85rem; color: #374151; background: #fafafa; display: flex; align-items: center; gap: 8px; }
+        .card-header-icon { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; }
 
-        /* Button styles */
-        .btn-primary { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; font-weight: 700; padding: 8px 20px; border-radius: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(59,130,246,0.25); }
-        .btn-primary:hover { box-shadow: 0 4px 12px rgba(59,130,246,0.35); transform: translateY(-1px); }
-        .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; font-weight: 700; padding: 8px 20px; border-radius: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(239,68,68,0.25); }
-        .btn-danger:hover { box-shadow: 0 4px 12px rgba(239,68,68,0.35); transform: translateY(-1px); }
-        .btn-purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; font-weight: 700; padding: 8px 20px; border-radius: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(139,92,246,0.25); }
-        .btn-purple:hover { box-shadow: 0 4px 12px rgba(139,92,246,0.35); transform: translateY(-1px); }
-        .btn-success { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-weight: 700; padding: 8px 20px; border-radius: 8px; transition: all 0.2s; }
-        .btn-ghost { background: transparent; color: var(--text-secondary); font-weight: 500; padding: 8px 16px; border-radius: 8px; transition: all 0.2s; }
-        .btn-ghost:hover { background: #f1f5f9; }
+        /* Button styles - flat, professional */
+        .btn-primary { background: #2563eb; color: white; font-weight: 600; padding: 8px 18px; border-radius: 8px; transition: all 0.15s; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-danger { background: #dc2626; color: white; font-weight: 600; padding: 8px 18px; border-radius: 8px; transition: all 0.15s; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-purple { background: #7c3aed; color: white; font-weight: 600; padding: 8px 18px; border-radius: 8px; transition: all 0.15s; }
+        .btn-purple:hover { background: #6d28d9; }
+        .btn-success { background: #16a34a; color: white; font-weight: 600; padding: 8px 18px; border-radius: 8px; transition: all 0.15s; }
+        .btn-success:hover { background: #15803d; }
+        .btn-ghost { background: transparent; color: var(--text-secondary); font-weight: 500; padding: 8px 14px; border-radius: 8px; transition: all 0.15s; border: 1px solid var(--border); }
+        .btn-ghost:hover { background: #f3f4f6; }
+        
+        /* Stats chart container */
+        .echart-container { width: 100%; height: 300px; }
+        
+        /* Step badge */
+        .step-badge { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.8rem; flex-shrink: 0; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
@@ -161,9 +178,9 @@
                 </div>
                 <h1 class="text-xl font-black text-white tracking-wide">SMT</h1>
             </div>
-            <p class="text-[10px] text-slate-500 font-mono">v9.0 Enhanced</p>
+            <p class="text-[10px] text-slate-500 font-mono">生產管理系統</p>
         </div>
-        <nav class="flex-1 py-4 space-y-1 overflow-y-auto px-2">
+        <nav class="flex-1 py-3 overflow-y-auto px-3 space-y-0.5">
             <a @click="currentTab = 'dashboard'" :class="{'active': currentTab === 'dashboard'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-th-large w-5 text-center mr-3 text-sm"></i> <span class="text-sm">總覽儀表板</span>
             </a>
@@ -201,7 +218,7 @@
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 overflow-y-auto relative pb-20 md:pb-4" style="background: #f8fafc;">
+    <main class="flex-1 overflow-y-auto relative pb-20 md:pb-4" style="background: #f0f2f5;">
         
         <!-- Skeleton Loading Overlay -->
         <div v-if="loading" class="absolute inset-0 bg-white/60 flex justify-center items-center z-50" style="backdrop-filter: blur(2px);">
@@ -217,7 +234,7 @@
         <div v-if="currentTab === 'dashboard'" class="space-y-6 animate-fade-in">
             <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <div>
-                    <h2 class="text-xl md:text-2xl font-black text-gray-800">總覽儀表板</h2>
+                    <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-blue-600 rounded inline-block"></span>總覽儀表板</h2>
                 </div>
                 <div class="flex items-center gap-2">
                     <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-left text-xs"></i></button>
@@ -233,37 +250,61 @@
             <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} — {{ dashDate === new Date().toISOString().split('T')[0] ? '今日' : '' }}生產概況</p>
 
             <!-- KPI Cards -->
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
-                <div class="kpi-card blue">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-spinner fa-pulse mr-1 text-blue-500"></i>進行中工單</div>
-                    <div class="text-2xl font-black text-gray-800">{{ dashboard.activeWoCount }}</div>
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div class="kpi-card">
+                    <div class="kpi-icon blue"><i class="fas fa-layer-group"></i></div>
+                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.activeWoCount }}</div>
+                    <div class="text-xs text-gray-400 font-medium">進行中工單</div>
                 </div>
-                <div class="kpi-card green">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-cubes mr-1 text-green-500"></i>當日投入</div>
-                    <div class="text-2xl font-black text-gray-800">{{ dashboard.todayInput }}</div>
+                <div class="kpi-card">
+                    <div class="kpi-icon green"><i class="fas fa-cubes"></i></div>
+                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.todayInput }}</div>
+                    <div class="text-xs text-gray-400 font-medium">當日投入</div>
                 </div>
-                <div class="kpi-card purple">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-check-circle mr-1 text-purple-500"></i>當日良率</div>
-                    <div class="text-2xl font-black" :class="dashboard.todayYield >= 98 ? 'text-green-600' : dashboard.todayYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.todayYield }}%</div>
+                <div class="kpi-card">
+                    <div class="kpi-icon purple"><i class="fas fa-chart-pie"></i></div>
+                    <div class="text-2xl font-black mb-0.5" :class="dashboard.todayYield >= 98 ? 'text-green-600' : dashboard.todayYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.todayYield }}%</div>
+                    <div class="text-xs text-gray-400 font-medium">當日良率</div>
                 </div>
-                <div class="kpi-card red">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-times-circle mr-1 text-red-500"></i>當日不良</div>
-                    <div class="text-2xl font-black text-gray-800">{{ dashboard.todayDefects }}</div>
+                <div class="kpi-card">
+                    <div class="kpi-icon red"><i class="fas fa-times-circle"></i></div>
+                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.todayDefects }}</div>
+                    <div class="text-xs text-gray-400 font-medium">當日不良</div>
                 </div>
-                <div class="kpi-card yellow">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-exclamation-triangle mr-1 text-yellow-500"></i>本月 OOC</div>
-                    <div class="text-2xl font-black text-gray-800">{{ dashboard.monthOocCount }}</div>
+                <div class="kpi-card">
+                    <div class="kpi-icon yellow"><i class="fas fa-exclamation-triangle"></i></div>
+                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.monthOocCount }}</div>
+                    <div class="text-xs text-gray-400 font-medium">本月 OOC</div>
                 </div>
-                <div class="kpi-card cyan">
-                    <div class="text-xs text-gray-400 font-bold mb-1"><i class="fas fa-wave-square mr-1 text-cyan-500"></i>本週均良率</div>
-                    <div class="text-2xl font-black" :class="dashboard.weekAvgYield >= 98 ? 'text-green-600' : dashboard.weekAvgYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.weekAvgYield }}%</div>
+                <div class="kpi-card">
+                    <div class="kpi-icon cyan"><i class="fas fa-chart-line"></i></div>
+                    <div class="text-2xl font-black mb-0.5" :class="dashboard.weekAvgYield >= 98 ? 'text-green-600' : dashboard.weekAvgYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.weekAvgYield }}%</div>
+                    <div class="text-xs text-gray-400 font-medium">本週均良率</div>
+                </div>
+            </div>
+
+            <!-- Dashboard ECharts -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="section-card">
+                    <div class="card-header">
+                        <div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-chart-line text-xs"></i></div>
+                        近 14 日良率趨勢
+                    </div>
+                    <div id="dashYieldChart" style="width:100%;height:220px;"></div>
+                </div>
+                <div class="section-card">
+                    <div class="card-header">
+                        <div class="card-header-icon" style="background:#dcfce7;color:#16a34a"><i class="fas fa-chart-bar text-xs"></i></div>
+                        近 14 日每日投入量
+                    </div>
+                    <div id="dashInputChart" style="width:100%;height:220px;"></div>
                 </div>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <!-- Recent Activity -->
                 <div class="section-card">
-                    <div class="px-4 py-3 border-b bg-gray-50/50 font-bold text-sm text-gray-600"><i class="fas fa-clock mr-2 text-blue-500"></i>近期生產動態</div>
+                    <div class="card-header"><div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-clock text-xs"></i></div>近期生產動態</div>
                     <div class="p-3 space-y-2 max-h-64 overflow-y-auto">
                         <div v-for="rec in dashboardRecentProds" :key="rec.id" class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm border border-transparent hover:border-gray-100 transition">
                             <div class="flex items-center gap-3">
@@ -289,7 +330,7 @@
 
                 <!-- Recent OOC -->
                 <div class="section-card">
-                    <div class="px-4 py-3 border-b bg-gray-50/50 font-bold text-sm text-gray-600"><i class="fas fa-exclamation-circle mr-2 text-red-500"></i>近期品質異常</div>
+                    <div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-exclamation-circle text-xs"></i></div>近期品質異常</div>
                     <div class="p-3 space-y-2 max-h-64 overflow-y-auto">
                         <div v-for="rec in dashboardRecentOoc" :key="rec.id" class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm border border-transparent hover:border-gray-100 transition">
                             <div class="flex items-center gap-3">
@@ -687,7 +728,12 @@
 
         <!-- ==================== STATS ==================== -->
         <div v-if="currentTab === 'stats'" class="animate-fade-in">
-            <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-chart-bar mr-2 text-blue-500"></i>統計與導出</h2>
+            <div class="page-header mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-1 h-6 rounded bg-blue-600"></div>
+                    <h2 class="text-xl font-black text-gray-900">統計與導出</h2>
+                </div>
+            </div>
             <div class="section-card p-4 mb-6">
                 <div class="flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end">
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="statsFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
@@ -696,6 +742,16 @@
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="statsFilter.woId" class="w-full border border-gray-200 p-2 rounded-lg text-sm"><option value="all">全部</option><option v-for="num in uniqueWoNumbers" :value="num">{{ num }}</option></select></div>
                     <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateStats" class="btn-primary text-sm">執行統計</button><button @click="exportToExcel" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i> 導出完整報表</button></div>
                 </div>
+            </div>
+
+            <!-- Pareto Chart Panel -->
+            <div v-if="statsResult" class="section-card mb-6 animate-fade-in">
+                <div class="card-header">
+                    <div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-sort-amount-down text-xs"></i></div>
+                    不良現象 Pareto 圖分析
+                    <span class="ml-auto text-xs text-gray-400 font-normal">柱狀=數量，折線=累積佔比</span>
+                </div>
+                <div id="paretoChart" style="width:100%;height:320px;"></div>
             </div>
             <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
                 <div class="section-card p-4"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">總合統計</h3><div class="grid grid-cols-2 gap-4"><div class="p-3 bg-gray-50 rounded-lg"><div class="text-xs text-gray-400">總投入數</div><div class="text-xl font-black font-mono">{{ statsResult.totalInput }}</div></div><div class="p-3 bg-red-50 rounded-lg"><div class="text-xs text-red-400">總不良數</div><div class="text-xl font-black text-red-600 font-mono">{{ statsResult.totalDefects }}</div></div><div class="col-span-2 p-4 rounded-lg text-center" :class="statsResult.yieldRate >= 98 ? 'bg-green-50' : statsResult.yieldRate >= 95 ? 'bg-yellow-50' : 'bg-red-50'"><div class="text-xs text-gray-500 mb-1">良率 (Yield Rate)</div><div class="text-3xl font-black font-mono" :class="statsResult.yieldRate >= 98 ? 'text-green-600' : statsResult.yieldRate >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ statsResult.yieldRate }}%</div></div></div></div>
@@ -2074,6 +2130,85 @@ createApp({
         const sortedDefectTypes = computed(() => [...data.value.defectTypes].sort((a,b) => a.name.localeCompare(b.name)));
         const sortedLocations = computed(() => [...data.value.defectLocations].sort((a,b) => a.code.localeCompare(b.code)));
 
+ 
+        // ==================== ECHARTS: DASHBOARD CHARTS ====================
+        let dashYieldChartInst = null;
+        let dashInputChartInst = null;
+        let paretoChartInst = null;
+
+        const initDashboardCharts = async () => {
+            const today = new Date();
+            const days = [];
+            for (let i = 13; i >= 0; i--) {
+                const d = new Date(today); d.setDate(d.getDate() - i);
+                days.push(d.toISOString().split('T')[0]);
+            }
+            const { data: prods } = await _supabase
+                .from('daily_production')
+                .select('production_date, input_quantity, defect_logs(quantity)')
+                .gte('production_date', days[0]).lte('production_date', days[days.length-1]);
+            const dayMap = {};
+            days.forEach(d => { dayMap[d] = { input: 0, defects: 0 }; });
+            (prods || []).forEach(p => {
+                if (dayMap[p.production_date]) {
+                    dayMap[p.production_date].input += p.input_quantity;
+                    dayMap[p.production_date].defects += (p.defect_logs||[]).reduce((s,d)=>s+d.quantity,0);
+                }
+            });
+            const labels = days.map(d => d.slice(5));
+            const yields = days.map(d => { const {input,defects}=dayMap[d]; return input>0?parseFloat(((input-defects)/input*100).toFixed(2)):null; });
+            const inputs = days.map(d => dayMap[d].input);
+            await Vue.nextTick();
+            const yieldEl = document.getElementById('dashYieldChart');
+            if (yieldEl) {
+                if (!dashYieldChartInst) dashYieldChartInst = echarts.init(yieldEl);
+                dashYieldChartInst.setOption({
+                    grid:{top:28,right:20,bottom:36,left:48},
+                    tooltip:{trigger:'axis',formatter:p=>{const v=p[0];return v.name+'<br/>'+(v.value!==null?'<b>'+v.value+'%</b>':'無資料');}},
+                    xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
+                    yAxis:{type:'value',min:v=>Math.max(90,Math.floor(v.min-1)),max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
+                    series:[{type:'line',data:yields,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#7c3aed',width:2.5},itemStyle:{color:'#7c3aed'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(124,58,237,0.15)'},{offset:1,color:'rgba(124,58,237,0)'}]}},markLine:{silent:true,lineStyle:{color:'#dc2626',type:'dashed',width:1},data:[{yAxis:98,label:{formatter:'目標98%',position:'end',fontSize:10,color:'#dc2626'}}]}}]
+                });
+            }
+            const inputEl = document.getElementById('dashInputChart');
+            if (inputEl) {
+                if (!dashInputChartInst) dashInputChartInst = echarts.init(inputEl);
+                dashInputChartInst.setOption({
+                    grid:{top:28,right:20,bottom:36,left:48},
+                    tooltip:{trigger:'axis',formatter:p=>p[0].name+'<br/><b>'+p[0].value+' pcs</b>'},
+                    xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
+                    yAxis:{type:'value',axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
+                    series:[{type:'bar',data:inputs,barMaxWidth:28,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#2563eb'},{offset:1,color:'#93c5fd'}]},borderRadius:[4,4,0,0]},emphasis:{itemStyle:{color:'#1d4ed8'}}}]
+                });
+            }
+        };
+
+        const renderParetoChart = () => {
+            Vue.nextTick(() => {
+                const el = document.getElementById('paretoChart');
+                if (!el || !statsResult.value || !statsResult.value.byType || statsResult.value.byType.length===0) return;
+                if (!paretoChartInst) paretoChartInst = echarts.init(el);
+                const sorted = [...statsResult.value.byType].sort((a,b)=>b.qty-a.qty);
+                const names = sorted.map(x=>x.name); const qtys = sorted.map(x=>x.qty);
+                const total = qtys.reduce((s,v)=>s+v,0);
+                let cum=0; const cumPct=qtys.map(q=>{cum+=q;return parseFloat((cum/total*100).toFixed(1));});
+                paretoChartInst.setOption({
+                    tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+                    legend:{data:['不良數量','累積佔比'],top:4,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
+                    grid:{top:40,right:60,bottom:60,left:50},
+                    xAxis:{type:'category',data:names,axisLabel:{fontSize:10,color:'#374151',rotate:names.some(n=>n.length>4)?20:0},axisLine:{lineStyle:{color:'#e5e7eb'}}},
+                    yAxis:[{type:'value',name:'數量',nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'累積%',min:0,max:100,nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
+                    series:[
+                        {name:'不良數量',type:'bar',data:qtys,barMaxWidth:40,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#dc2626'},{offset:1,color:'#fca5a5'}]},borderRadius:[4,4,0,0]},label:{show:true,position:'top',fontSize:10,color:'#374151',formatter:'{c}'}},
+                        {name:'累積佔比',type:'line',yAxisIndex:1,data:cumPct,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#2563eb',width:2},itemStyle:{color:'#2563eb'},label:{show:true,position:'top',fontSize:9,color:'#2563eb',formatter:'{c}%'},markLine:{silent:true,lineStyle:{color:'#d97706',type:'dashed',width:1.5},data:[{yAxis:80,label:{formatter:'80%',position:'start',fontSize:10,color:'#d97706'}}]}}
+                    ]
+                });
+            });
+        };
+
+        watch(() => statsResult.value, (val) => { if (val && currentTab.value==='stats') renderParetoChart(); });
+        watch(currentTab, async (tab) => { if (tab==='dashboard') { await initDashboardCharts(); } else if (tab==='stats' && statsResult.value) { renderParetoChart(); } });
+
         // Close mobile menu when tab changes
         watch(currentTab, () => { showMobileMore.value = false; });
 
@@ -2087,6 +2222,7 @@ createApp({
             loadEqData();
             loadFeeders();
             loadNozzleLogs();
+            setTimeout(() => initDashboardCharts(), 800);
             const today = new Date(); 
             rawExportFilter.value.end = today.toISOString().split('T')[0]; 
             fpyFilter.value.end = today.toISOString().split('T')[0]; 
@@ -2120,7 +2256,8 @@ createApp({
             showFeederLogModal, feederLogForm, openFeederLogModal, calHistory, saveCalibration, deleteCalibration,
             showNozzleLogModal, nozzleLogForm, openNozzleLogModal, saveNozzleLog, deleteNozzleLog,
             selectedNozzleModelId, selectedNozzleModelName, selectNozzleModel, filteredNozzleLogs,
-            eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel
+            eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel,
+            renderParetoChart, initDashboardCharts
         };
     }
 }).mount('#app');

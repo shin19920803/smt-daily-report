@@ -1170,7 +1170,7 @@
                         <label class="block text-xs font-bold text-gray-400 mb-1">選擇機種</label>
                         <select v-model="bom.modelId" @change="loadBomData" class="w-full border border-gray-200 p-2 rounded-lg bg-white font-bold">
                             <option :value="null" disabled>-- 請選擇機種 --</option>
-                            <option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option>
+                            <option v-for="g in bomModelList" :value="g.base">{{ g.base }}</option>
                         </select>
                     </div>
                     <div v-if="bom.modelId" class="flex gap-2">
@@ -1192,8 +1192,10 @@
             <div v-if="bom.modelId && bom.bomList.length > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <!-- Left: Image -->
                 <div class="section-card p-4">
-                    <h3 class="font-bold text-sm text-gray-600 border-b pb-2 mb-3"><i class="fas fa-image mr-1 text-teal-500"></i>PCB 圖面 <span v-if="bom.images.length > 1" class="text-xs font-normal text-gray-400">({{ bom.images.length }} 頁)</span></h3>
-                    <div v-if="bom.images.length > 0" class="overflow-auto max-h-[500px] rounded-lg border space-y-2">
+                    <h3 class="font-bold text-sm text-gray-600 border-b pb-2 mb-3"><i class="fas fa-image mr-1 text-teal-500"></i>PCB 圖面 <span v-if="bom.images.length > 1" class="text-xs font-normal text-gray-400">({{ bom.images.length }} 頁)</span>
+                        <button v-if="bom.images.length > 0" @click="bom.zoomModal = true" class="ml-2 text-xs text-blue-500 hover:text-blue-700"><i class="fas fa-expand mr-1"></i>放大</button>
+                    </h3>
+                    <div v-if="bom.images.length > 0" class="overflow-auto max-h-[500px] rounded-lg border space-y-2 cursor-zoom-in" @click="bom.zoomModal = true">
                         <img v-for="(img, idx) in bom.images" :key="idx" :src="img" class="w-full" :alt="'PCB Page ' + (idx+1)">
                     </div>
                     <div v-else class="empty-state py-10"><i class="fas fa-image"></i><div class="title">尚未上傳圖片</div><div class="hint">點擊上方「上傳圖片」按鈕（支援 PDF 自動拆頁）</div></div>
@@ -1234,9 +1236,20 @@
             <div v-else-if="bom.modelId && bom.bomList.length === 0" class="section-card">
                 <div class="empty-state py-16"><i class="fas fa-file-upload"></i><div class="title">尚無料號資料</div><div class="hint">請上傳該機種的 Excel 檔案（含位置與料號）</div></div>
             </div>
-        </div>
 
-        <!-- ==================== SETTINGS ==================== -->
+            <!-- Zoom Modal -->
+            <div v-if="bom.zoomModal" class="fixed inset-0 bg-black/90 z-50 flex flex-col" @click.self="bom.zoomModal = false">
+                <div class="flex justify-between items-center p-3">
+                    <span class="text-white text-sm font-bold"><i class="fas fa-search-plus mr-1"></i>雙指縮放 / 捲動瀏覽</span>
+                    <button @click="bom.zoomModal = false" class="text-white text-2xl hover:text-red-400 transition"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="flex-1 overflow-auto p-2" style="touch-action: pinch-zoom;">
+                    <div v-for="(img, idx) in bom.images" :key="'z'+idx" class="mb-2">
+                        <img :src="img" class="w-full max-w-none" style="min-width: 100%;" :alt="'Page ' + (idx+1)">
+                    </div>
+                </div>
+            </div>
+        </div>
         <div v-if="currentTab === 'settings'" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-cog mr-2 text-gray-500"></i>系統基礎設定</h2>
             
@@ -2296,74 +2309,65 @@ createApp({
         watch(currentTab, () => { showMobileMore.value = false; });
 
         // --- BOM 料號查詢 ---
-        const bom = ref({ modelId: null, bomList: [], images: [], search: '', selectedLoc: null });
+        const bom = ref({ modelId: null, bomList: [], images: [], search: '', selectedLoc: null, zoomModal: false });
+        
+        const bomModelList = computed(() => {
+            const groups = {};
+            data.value.models.forEach(m => { const base = m.name.replace(/[_\-](BOT|TOP)$/i, ''); if (!groups[base]) groups[base] = { base, ids: [] }; groups[base].ids.push(m.id); });
+            return Object.values(groups).sort((a, b) => a.base.localeCompare(b.base));
+        });
+        const bomModelIds = computed(() => { const g = bomModelList.value.find(g => g.base === bom.value.modelId); return g ? g.ids : []; });
         
         const loadBomData = async () => {
-            if (!bom.value.modelId) return;
+            if (bomModelIds.value.length === 0) return;
             bom.value.bomList = []; bom.value.images = []; bom.value.search = ''; bom.value.selectedLoc = null;
-            const { data: list } = await _supabase.from('bom_data').select('location_code, part_number').eq('model_id', bom.value.modelId).order('location_code');
-            bom.value.bomList = list || [];
-            const { data: imgs } = await _supabase.from('bom_images').select('id, image_data').eq('model_id', bom.value.modelId).order('id');
+            const { data: list } = await _supabase.from('bom_data').select('location_code, part_number').in('model_id', bomModelIds.value).order('location_code');
+            const seen = new Set(); const unique = [];
+            (list || []).forEach(r => { const key = r.location_code + '|' + r.part_number; if (!seen.has(key)) { seen.add(key); unique.push(r); } });
+            bom.value.bomList = unique;
+            const { data: imgs } = await _supabase.from('bom_images').select('id, image_data').in('model_id', bomModelIds.value).order('id');
             bom.value.images = (imgs || []).map(i => i.image_data);
         };
 
         const uploadBomExcel = async (e) => {
-            const file = e.target.files[0]; if (!file || !bom.value.modelId) return;
-            loading.value = true;
+            const file = e.target.files[0]; if (!file || bomModelIds.value.length === 0) return;
+            const tid = bomModelIds.value[0]; loading.value = true;
             try {
                 const ab = await file.arrayBuffer();
-                const wb = XLSX.read(ab);
-                const ws = wb.Sheets[wb.SheetNames[0]];
+                const wb = XLSX.read(ab); const ws = wb.Sheets[wb.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-                await _supabase.from('bom_data').delete().eq('model_id', bom.value.modelId);
+                for (const mid of bomModelIds.value) await _supabase.from('bom_data').delete().eq('model_id', mid);
                 const inserts = [];
                 for (let i = 1; i < rows.length; i++) {
-                    const row = rows[i];
-                    const partNumber = row[3] ? String(row[3]).trim() : '';
-                    const locations = row[8] ? String(row[8]).trim() : '';
-                    if (!partNumber || !locations) continue;
-                    locations.split(',').forEach(loc => { const code = loc.trim(); if (code) inserts.push({ model_id: bom.value.modelId, location_code: code, part_number: partNumber }); });
+                    const row = rows[i]; const pn = row[3] ? String(row[3]).trim() : ''; const locs = row[8] ? String(row[8]).trim() : '';
+                    if (!pn || !locs) continue;
+                    locs.split(',').forEach(loc => { const c = loc.trim(); if (c) inserts.push({ model_id: tid, location_code: c, part_number: pn }); });
                 }
                 if (inserts.length > 0) { for (let i = 0; i < inserts.length; i += 500) { const { error } = await _supabase.from('bom_data').insert(inserts.slice(i, i + 500)); if (error) throw error; } }
-                await loadBomData();
-                toast(`已匯入 ${inserts.length} 筆位置資料`);
-            } catch(err) { toast('Excel 匯入失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
+                await loadBomData(); toast(`已匯入 ${inserts.length} 筆`);
+            } catch(err) { toast('匯入失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
         };
 
         const uploadBomImage = async (e) => {
-            const file = e.target.files[0]; if (!file || !bom.value.modelId) return;
-            loading.value = true;
+            const file = e.target.files[0]; if (!file || bomModelIds.value.length === 0) return;
+            const tid = bomModelIds.value[0]; loading.value = true;
             try {
-                // 先清除舊圖
-                await _supabase.from('bom_images').delete().eq('model_id', bom.value.modelId);
-                
+                for (const mid of bomModelIds.value) await _supabase.from('bom_images').delete().eq('model_id', mid);
                 if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-                    // PDF: 用 pdf.js 拆每頁轉成圖片
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
                     const ab = await file.arrayBuffer();
                     const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
-                    const inserts = [];
                     for (let p = 1; p <= pdf.numPages; p++) {
-                        const page = await pdf.getPage(p);
-                        const scale = 2;
-                        const vp = page.getViewport({ scale });
-                        const canvas = document.createElement('canvas');
-                        canvas.width = vp.width; canvas.height = vp.height;
+                        const page = await pdf.getPage(p); const vp = page.getViewport({ scale: 2 });
+                        const canvas = document.createElement('canvas'); canvas.width = vp.width; canvas.height = vp.height;
                         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-                        const dataUrl = canvas.toDataURL('image/png');
-                        inserts.push({ model_id: bom.value.modelId, image_data: dataUrl });
+                        const { error } = await _supabase.from('bom_images').insert({ model_id: tid, image_data: canvas.toDataURL('image/png') }); if (error) throw error;
                     }
-                    for (const ins of inserts) {
-                        const { error } = await _supabase.from('bom_images').insert(ins);
-                        if (error) throw error;
-                    }
-                    toast(`PDF 已拆成 ${inserts.length} 頁圖片`);
+                    toast(`PDF ${pdf.numPages} 頁已上傳`);
                 } else {
-                    // 普通圖片
                     const reader = new FileReader();
                     const dataUrl = await new Promise((res, rej) => { reader.onload = () => res(reader.result); reader.onerror = rej; reader.readAsDataURL(file); });
-                    const { error } = await _supabase.from('bom_images').insert({ model_id: bom.value.modelId, image_data: dataUrl });
-                    if (error) throw error;
+                    const { error } = await _supabase.from('bom_images').insert({ model_id: tid, image_data: dataUrl }); if (error) throw error;
                     toast('圖片已上傳');
                 }
                 await loadBomData();
@@ -2371,10 +2375,8 @@ createApp({
         };
 
         const deleteBomData = async () => {
-            if (!confirm('確定清除此機種的所有料號資料與圖片？')) return;
-            loading.value = true;
-            await _supabase.from('bom_data').delete().eq('model_id', bom.value.modelId);
-            await _supabase.from('bom_images').delete().eq('model_id', bom.value.modelId);
+            if (!confirm('確定清除？')) return; loading.value = true;
+            for (const mid of bomModelIds.value) { await _supabase.from('bom_data').delete().eq('model_id', mid); await _supabase.from('bom_images').delete().eq('model_id', mid); }
             bom.value.bomList = []; bom.value.images = []; bom.value.selectedLoc = null;
             loading.value = false; toast('已清除', 'info');
         };
@@ -2439,7 +2441,7 @@ createApp({
             eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel,
             renderParetoChart, initDashboardCharts,
             // BOM
-            bom, loadBomData, uploadBomExcel, uploadBomImage, deleteBomData, filteredBomList, samePnLocations
+            bom, loadBomData, uploadBomExcel, uploadBomImage, deleteBomData, filteredBomList, samePnLocations, bomModelList
         };
     }
 }).mount('#app');

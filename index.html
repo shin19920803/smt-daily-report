@@ -10,6 +10,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
@@ -1190,11 +1192,11 @@
             <div v-if="bom.modelId && bom.bomList.length > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <!-- Left: Image -->
                 <div class="section-card p-4">
-                    <h3 class="font-bold text-sm text-gray-600 border-b pb-2 mb-3"><i class="fas fa-image mr-1 text-teal-500"></i>PCB 圖面</h3>
-                    <div v-if="bom.imageData" class="overflow-auto max-h-[500px] rounded-lg border">
-                        <img :src="bom.imageData" class="w-full" alt="PCB Layout">
+                    <h3 class="font-bold text-sm text-gray-600 border-b pb-2 mb-3"><i class="fas fa-image mr-1 text-teal-500"></i>PCB 圖面 <span v-if="bom.images.length > 1" class="text-xs font-normal text-gray-400">({{ bom.images.length }} 頁)</span></h3>
+                    <div v-if="bom.images.length > 0" class="overflow-auto max-h-[500px] rounded-lg border space-y-2">
+                        <img v-for="(img, idx) in bom.images" :key="idx" :src="img" class="w-full" :alt="'PCB Page ' + (idx+1)">
                     </div>
-                    <div v-else class="empty-state py-10"><i class="fas fa-image"></i><div class="title">尚未上傳圖片</div><div class="hint">點擊上方「上傳圖片」按鈕</div></div>
+                    <div v-else class="empty-state py-10"><i class="fas fa-image"></i><div class="title">尚未上傳圖片</div><div class="hint">點擊上方「上傳圖片」按鈕（支援 PDF 自動拆頁）</div></div>
                 </div>
 
                 <!-- Right: Search + List -->
@@ -2294,15 +2296,15 @@ createApp({
         watch(currentTab, () => { showMobileMore.value = false; });
 
         // --- BOM 料號查詢 ---
-        const bom = ref({ modelId: null, bomList: [], imageData: null, search: '', selectedLoc: null });
+        const bom = ref({ modelId: null, bomList: [], images: [], search: '', selectedLoc: null });
         
         const loadBomData = async () => {
             if (!bom.value.modelId) return;
-            bom.value.bomList = []; bom.value.imageData = null; bom.value.search = ''; bom.value.selectedLoc = null;
+            bom.value.bomList = []; bom.value.images = []; bom.value.search = ''; bom.value.selectedLoc = null;
             const { data: list } = await _supabase.from('bom_data').select('location_code, part_number').eq('model_id', bom.value.modelId).order('location_code');
             bom.value.bomList = list || [];
-            const { data: img } = await _supabase.from('bom_images').select('image_data').eq('model_id', bom.value.modelId).maybeSingle();
-            bom.value.imageData = img?.image_data || null;
+            const { data: imgs } = await _supabase.from('bom_images').select('id, image_data').eq('model_id', bom.value.modelId).order('id');
+            bom.value.images = (imgs || []).map(i => i.image_data);
         };
 
         const uploadBomExcel = async (e) => {
@@ -2332,14 +2334,40 @@ createApp({
             const file = e.target.files[0]; if (!file || !bom.value.modelId) return;
             loading.value = true;
             try {
-                const reader = new FileReader();
-                const dataUrl = await new Promise((res, rej) => { reader.onload = () => res(reader.result); reader.onerror = rej; reader.readAsDataURL(file); });
-                const existing = await _supabase.from('bom_images').select('id').eq('model_id', bom.value.modelId).maybeSingle();
-                if (existing.data) await _supabase.from('bom_images').update({ image_data: dataUrl }).eq('model_id', bom.value.modelId);
-                else { const { error } = await _supabase.from('bom_images').insert({ model_id: bom.value.modelId, image_data: dataUrl }); if (error) throw error; }
-                bom.value.imageData = dataUrl;
-                toast('圖片已上傳');
-            } catch(err) { toast('圖片上傳失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
+                // 先清除舊圖
+                await _supabase.from('bom_images').delete().eq('model_id', bom.value.modelId);
+                
+                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                    // PDF: 用 pdf.js 拆每頁轉成圖片
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                    const ab = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+                    const inserts = [];
+                    for (let p = 1; p <= pdf.numPages; p++) {
+                        const page = await pdf.getPage(p);
+                        const scale = 2;
+                        const vp = page.getViewport({ scale });
+                        const canvas = document.createElement('canvas');
+                        canvas.width = vp.width; canvas.height = vp.height;
+                        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+                        const dataUrl = canvas.toDataURL('image/png');
+                        inserts.push({ model_id: bom.value.modelId, image_data: dataUrl });
+                    }
+                    for (const ins of inserts) {
+                        const { error } = await _supabase.from('bom_images').insert(ins);
+                        if (error) throw error;
+                    }
+                    toast(`PDF 已拆成 ${inserts.length} 頁圖片`);
+                } else {
+                    // 普通圖片
+                    const reader = new FileReader();
+                    const dataUrl = await new Promise((res, rej) => { reader.onload = () => res(reader.result); reader.onerror = rej; reader.readAsDataURL(file); });
+                    const { error } = await _supabase.from('bom_images').insert({ model_id: bom.value.modelId, image_data: dataUrl });
+                    if (error) throw error;
+                    toast('圖片已上傳');
+                }
+                await loadBomData();
+            } catch(err) { toast('上傳失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
         };
 
         const deleteBomData = async () => {
@@ -2347,7 +2375,7 @@ createApp({
             loading.value = true;
             await _supabase.from('bom_data').delete().eq('model_id', bom.value.modelId);
             await _supabase.from('bom_images').delete().eq('model_id', bom.value.modelId);
-            bom.value.bomList = []; bom.value.imageData = null; bom.value.selectedLoc = null;
+            bom.value.bomList = []; bom.value.images = []; bom.value.selectedLoc = null;
             loading.value = false; toast('已清除', 'info');
         };
 

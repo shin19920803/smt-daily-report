@@ -202,6 +202,9 @@
             <a @click="currentTab = 'equipment'" :class="{'active': currentTab === 'equipment'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-tools w-5 text-center mr-3 text-sm"></i> <span class="text-sm">設備管理</span>
             </a>
+            <a @click="currentTab = 'bom'" :class="{'active': currentTab === 'bom'}" class="sidebar-link rounded-lg">
+                <i class="fas fa-search-location w-5 text-center mr-3 text-sm"></i> <span class="text-sm">料號查詢</span>
+            </a>
             <a @click="currentTab = 'settings'" :class="{'active': currentTab === 'settings'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-cog w-5 text-center mr-3 text-sm"></i> <span class="text-sm">基礎設定</span>
             </a>
@@ -1154,6 +1157,83 @@
             </div>
         </div>
 
+        <!-- ==================== BOM 料號查詢 ==================== -->
+        <div v-if="currentTab === 'bom'" class="animate-fade-in">
+            <h2 class="text-xl md:text-2xl font-black mb-4 text-gray-800"><i class="fas fa-search-location mr-2 text-indigo-500"></i>料號查詢</h2>
+
+            <!-- Select Model + Upload -->
+            <div class="section-card p-4 mb-4">
+                <div class="flex flex-col md:flex-row gap-4 items-stretch md:items-end">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-gray-400 mb-1">選擇機種</label>
+                        <select v-model="bom.modelId" @change="loadBomData" class="w-full border border-gray-200 p-2 rounded-lg bg-white font-bold">
+                            <option :value="null" disabled>-- 請選擇機種 --</option>
+                            <option v-for="m in sortedModels" :value="m.id">{{ m.name }}</option>
+                        </select>
+                    </div>
+                    <div v-if="bom.modelId" class="flex gap-2">
+                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer transition">
+                            <i class="fas fa-file-excel mr-1"></i>上傳 Excel
+                            <input type="file" accept=".xlsx,.xls,.csv" @change="uploadBomExcel" class="hidden">
+                        </label>
+                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 cursor-pointer transition">
+                            <i class="fas fa-image mr-1"></i>上傳圖片
+                            <input type="file" accept="image/*,.pdf" @change="uploadBomImage" class="hidden">
+                        </label>
+                        <button v-if="bom.bomList.length > 0" @click="deleteBomData" class="px-3 py-2 rounded-lg text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 transition"><i class="fas fa-trash-alt mr-1"></i>清除資料</button>
+                    </div>
+                </div>
+                <div v-if="bom.modelId && bom.bomList.length > 0" class="mt-2 text-xs text-gray-400">已載入 <b class="text-gray-700">{{ bom.bomList.length }}</b> 筆位置資料</div>
+            </div>
+
+            <!-- Main Content -->
+            <div v-if="bom.modelId && bom.bomList.length > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Left: Image -->
+                <div class="section-card p-4">
+                    <h3 class="font-bold text-sm text-gray-600 border-b pb-2 mb-3"><i class="fas fa-image mr-1 text-teal-500"></i>PCB 圖面</h3>
+                    <div v-if="bom.imageData" class="overflow-auto max-h-[500px] rounded-lg border">
+                        <img :src="bom.imageData" class="w-full" alt="PCB Layout">
+                    </div>
+                    <div v-else class="empty-state py-10"><i class="fas fa-image"></i><div class="title">尚未上傳圖片</div><div class="hint">點擊上方「上傳圖片」按鈕</div></div>
+                </div>
+
+                <!-- Right: Search + List -->
+                <div class="section-card p-4 flex flex-col" style="max-height:580px;">
+                    <h3 class="font-bold text-sm text-gray-600 border-b pb-2 mb-3"><i class="fas fa-list mr-1 text-indigo-500"></i>位置 / 料號對照</h3>
+                    <!-- Search -->
+                    <div class="relative mb-3">
+                        <i class="fas fa-search absolute left-3 top-2.5 text-gray-300 text-sm"></i>
+                        <input v-model="bom.search" placeholder="搜尋位置或料號..." class="w-full border border-gray-200 p-2 pl-9 rounded-lg text-sm">
+                    </div>
+                    <!-- List -->
+                    <div class="flex-1 overflow-y-auto space-y-1">
+                        <div v-for="item in filteredBomList" :key="item.location_code" @click="bom.selectedLoc = (bom.selectedLoc === item.location_code ? null : item.location_code)" class="p-2.5 rounded-lg border transition cursor-pointer" :class="bom.selectedLoc === item.location_code ? 'bg-indigo-50 border-indigo-400' : 'bg-gray-50 border-transparent hover:border-gray-200'">
+                            <div class="flex justify-between items-center">
+                                <span class="font-mono font-bold text-indigo-700">{{ item.location_code }}</span>
+                                <span class="font-mono text-sm text-gray-600 bg-white px-2 py-0.5 rounded border">{{ item.part_number }}</span>
+                            </div>
+                        </div>
+                        <div v-if="filteredBomList.length === 0" class="empty-state py-6"><i class="fas fa-search" style="font-size:1.5rem"></i><div class="hint">無符合的結果</div></div>
+                    </div>
+                    <!-- Selected detail -->
+                    <div v-if="bom.selectedLoc" class="mt-3 p-3 bg-indigo-50 rounded-lg border border-indigo-200 animate-fade-in">
+                        <div class="text-xs text-gray-400 mb-1">選取位置</div>
+                        <div class="font-mono font-black text-indigo-700 text-lg">{{ bom.selectedLoc }}</div>
+                        <div class="text-xs text-gray-400 mt-2 mb-1">料號</div>
+                        <div class="font-mono font-bold text-gray-800">{{ bom.bomList.find(b => b.location_code === bom.selectedLoc)?.part_number }}</div>
+                        <div class="text-xs text-gray-400 mt-2 mb-1">相同料號的其他位置</div>
+                        <div class="flex flex-wrap gap-1">
+                            <span v-for="loc in samePnLocations" :key="loc" class="px-2 py-0.5 bg-white rounded text-xs font-mono border" :class="loc === bom.selectedLoc ? 'border-indigo-400 text-indigo-700 font-bold' : ''">{{ loc }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-else-if="bom.modelId && bom.bomList.length === 0" class="section-card">
+                <div class="empty-state py-16"><i class="fas fa-file-upload"></i><div class="title">尚無料號資料</div><div class="hint">請上傳該機種的 Excel 檔案（含位置與料號）</div></div>
+            </div>
+        </div>
+
         <!-- ==================== SETTINGS ==================== -->
         <div v-if="currentTab === 'settings'" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-cog mr-2 text-gray-500"></i>系統基礎設定</h2>
@@ -1242,12 +1322,13 @@
         <a @click="currentTab = 'orders'" :class="currentTab === 'orders' ? 'active text-indigo-600' : 'text-gray-400'" class="mobile-nav-item">
             <i class="fas fa-clipboard-list text-base"></i><span class="text-[10px] mt-0.5 font-bold">工單</span>
         </a>
-        <a @click="showMobileMore = !showMobileMore" :class="['ooc','stats','settings','equipment'].includes(currentTab) ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item relative">
+        <a @click="showMobileMore = !showMobileMore" :class="['ooc','stats','settings','equipment','bom'].includes(currentTab) ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item relative">
             <i class="fas fa-ellipsis-h text-base"></i><span class="text-[10px] mt-0.5 font-bold">更多</span>
             <!-- Popup -->
             <div v-if="showMobileMore" class="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl py-2 w-40 animate-fade-in">
                 <a @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
                 <a @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
+                <a @click="currentTab='bom'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='bom' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-600'"><i class="fas fa-search-location w-5 mr-2"></i>料號</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
                 <a @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
             </div>
@@ -1370,7 +1451,7 @@ createApp({
         };
 
         // --- Report Logic (PRESERVED) ---
-        const report = ref({ date: (() => { const d = new Date(); const day = d.getDay(); if (day === 1) d.setDate(d.getDate() - 3); else if (day === 0) d.setDate(d.getDate() - 2); else d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })(), wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
+        const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
         const rawExportFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
@@ -1407,7 +1488,7 @@ createApp({
             report.value.currentId = null;
             report.value.logs = [];
             report.value.inputQty = 0;
-            report.value.date = getPreviousWorkday();
+            report.value.date = new Date().toISOString().split('T')[0];
             report.value.wo_id = null;
             report.value.selectedWoNumber = null;
         };
@@ -2212,6 +2293,77 @@ createApp({
         // Close mobile menu when tab changes
         watch(currentTab, () => { showMobileMore.value = false; });
 
+        // --- BOM 料號查詢 ---
+        const bom = ref({ modelId: null, bomList: [], imageData: null, search: '', selectedLoc: null });
+        
+        const loadBomData = async () => {
+            if (!bom.value.modelId) return;
+            bom.value.bomList = []; bom.value.imageData = null; bom.value.search = ''; bom.value.selectedLoc = null;
+            const { data: list } = await _supabase.from('bom_data').select('location_code, part_number').eq('model_id', bom.value.modelId).order('location_code');
+            bom.value.bomList = list || [];
+            const { data: img } = await _supabase.from('bom_images').select('image_data').eq('model_id', bom.value.modelId).maybeSingle();
+            bom.value.imageData = img?.image_data || null;
+        };
+
+        const uploadBomExcel = async (e) => {
+            const file = e.target.files[0]; if (!file || !bom.value.modelId) return;
+            loading.value = true;
+            try {
+                const ab = await file.arrayBuffer();
+                const wb = XLSX.read(ab);
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                await _supabase.from('bom_data').delete().eq('model_id', bom.value.modelId);
+                const inserts = [];
+                for (let i = 1; i < rows.length; i++) {
+                    const row = rows[i];
+                    const partNumber = row[3] ? String(row[3]).trim() : '';
+                    const locations = row[8] ? String(row[8]).trim() : '';
+                    if (!partNumber || !locations) continue;
+                    locations.split(',').forEach(loc => { const code = loc.trim(); if (code) inserts.push({ model_id: bom.value.modelId, location_code: code, part_number: partNumber }); });
+                }
+                if (inserts.length > 0) { for (let i = 0; i < inserts.length; i += 500) { const { error } = await _supabase.from('bom_data').insert(inserts.slice(i, i + 500)); if (error) throw error; } }
+                await loadBomData();
+                toast(`已匯入 ${inserts.length} 筆位置資料`);
+            } catch(err) { toast('Excel 匯入失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
+        };
+
+        const uploadBomImage = async (e) => {
+            const file = e.target.files[0]; if (!file || !bom.value.modelId) return;
+            loading.value = true;
+            try {
+                const reader = new FileReader();
+                const dataUrl = await new Promise((res, rej) => { reader.onload = () => res(reader.result); reader.onerror = rej; reader.readAsDataURL(file); });
+                const existing = await _supabase.from('bom_images').select('id').eq('model_id', bom.value.modelId).maybeSingle();
+                if (existing.data) await _supabase.from('bom_images').update({ image_data: dataUrl }).eq('model_id', bom.value.modelId);
+                else { const { error } = await _supabase.from('bom_images').insert({ model_id: bom.value.modelId, image_data: dataUrl }); if (error) throw error; }
+                bom.value.imageData = dataUrl;
+                toast('圖片已上傳');
+            } catch(err) { toast('圖片上傳失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
+        };
+
+        const deleteBomData = async () => {
+            if (!confirm('確定清除此機種的所有料號資料與圖片？')) return;
+            loading.value = true;
+            await _supabase.from('bom_data').delete().eq('model_id', bom.value.modelId);
+            await _supabase.from('bom_images').delete().eq('model_id', bom.value.modelId);
+            bom.value.bomList = []; bom.value.imageData = null; bom.value.selectedLoc = null;
+            loading.value = false; toast('已清除', 'info');
+        };
+
+        const filteredBomList = computed(() => {
+            if (!bom.value.search) return bom.value.bomList;
+            const q = bom.value.search.toLowerCase();
+            return bom.value.bomList.filter(b => b.location_code.toLowerCase().includes(q) || b.part_number.toLowerCase().includes(q));
+        });
+
+        const samePnLocations = computed(() => {
+            if (!bom.value.selectedLoc) return [];
+            const sel = bom.value.bomList.find(b => b.location_code === bom.value.selectedLoc);
+            if (!sel) return [];
+            return bom.value.bomList.filter(b => b.part_number === sel.part_number).map(b => b.location_code).sort();
+        });
+
         onMounted(async () => { 
             loadFpyTargets();
             await loadBaseData(); 
@@ -2257,7 +2409,9 @@ createApp({
             showNozzleLogModal, nozzleLogForm, openNozzleLogModal, saveNozzleLog, deleteNozzleLog,
             selectedNozzleModelId, selectedNozzleModelName, selectNozzleModel, filteredNozzleLogs,
             eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel,
-            renderParetoChart, initDashboardCharts
+            renderParetoChart, initDashboardCharts,
+            // BOM
+            bom, loadBomData, uploadBomExcel, uploadBomImage, deleteBomData, filteredBomList, samePnLocations
         };
     }
 }).mount('#app');

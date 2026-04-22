@@ -1238,15 +1238,22 @@
             </div>
 
             <!-- Zoom Modal -->
-            <div v-if="bom.zoomModal" class="fixed inset-0 bg-black/90 z-50 flex flex-col" @click.self="bom.zoomModal = false">
-                <div class="flex justify-between items-center p-3">
-                    <span class="text-white text-sm font-bold"><i class="fas fa-search-plus mr-1"></i>雙指縮放 / 捲動瀏覽</span>
-                    <button @click="bom.zoomModal = false" class="text-white text-2xl hover:text-red-400 transition"><i class="fas fa-times"></i></button>
+            <div v-if="bom.zoomModal" class="fixed inset-0 bg-black z-50 flex flex-col" style="touch-action:none;">
+                <div class="flex justify-between items-center p-3 flex-shrink-0">
+                    <span class="text-white text-sm font-bold"><i class="fas fa-search-plus mr-1"></i>雙指縮放</span>
+                    <button @click="bom.zoomModal = false" class="w-10 h-10 flex items-center justify-center text-white text-2xl hover:text-red-400"><i class="fas fa-times"></i></button>
                 </div>
-                <div class="flex-1 overflow-auto p-2" style="touch-action: pinch-zoom;">
-                    <div v-for="(img, idx) in bom.images" :key="'z'+idx" class="mb-2">
-                        <img :src="img" class="w-full max-w-none" style="min-width: 100%;" :alt="'Page ' + (idx+1)">
+                <div class="flex-1 overflow-hidden relative" ref="zoomContainer"
+                     @touchstart="onZoomTouchStart" @touchmove="onZoomTouchMove" @touchend="onZoomTouchEnd"
+                     @wheel="onZoomWheel">
+                    <div :style="{transform: `translate(${zoomState.x}px, ${zoomState.y}px) scale(${zoomState.scale})`, transformOrigin: '0 0', transition: zoomState.touching ? 'none' : 'transform 0.2s'}">
+                        <img v-for="(img, idx) in bom.images" :key="'z'+idx" :src="img" class="w-full" :alt="'Page ' + (idx+1)" style="display:block;">
                     </div>
+                </div>
+                <div class="flex justify-center gap-3 p-2 flex-shrink-0">
+                    <button @click="zoomState.scale = Math.max(0.5, zoomState.scale - 0.5)" class="px-3 py-1 bg-white/20 text-white rounded text-sm font-bold">−</button>
+                    <button @click="zoomState.scale = 1; zoomState.x = 0; zoomState.y = 0" class="px-3 py-1 bg-white/20 text-white rounded text-sm font-bold">{{ Math.round(zoomState.scale * 100) }}%</button>
+                    <button @click="zoomState.scale = Math.min(5, zoomState.scale + 0.5)" class="px-3 py-1 bg-white/20 text-white rounded text-sm font-bold">+</button>
                 </div>
             </div>
         </div>
@@ -2387,6 +2394,22 @@ createApp({
             return bom.value.bomList.filter(b => b.location_code.toLowerCase().includes(q) || b.part_number.toLowerCase().includes(q));
         });
 
+        // Zoom state & handlers
+        const zoomState = ref({ scale: 1, x: 0, y: 0, touching: false });
+        let _zoomStart = { dist: 0, scale: 1, x: 0, y: 0, cx: 0, cy: 0, single: false, sx: 0, sy: 0 };
+        const getDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        const onZoomTouchStart = (e) => {
+            if (e.touches.length === 2) { _zoomStart = { dist: getDist(e.touches), scale: zoomState.value.scale, x: zoomState.value.x, y: zoomState.value.y }; zoomState.value.touching = true; }
+            else if (e.touches.length === 1) { _zoomStart = { single: true, sx: e.touches[0].clientX - zoomState.value.x, sy: e.touches[0].clientY - zoomState.value.y }; zoomState.value.touching = true; }
+        };
+        const onZoomTouchMove = (e) => {
+            e.preventDefault();
+            if (e.touches.length === 2) { const d = getDist(e.touches); zoomState.value.scale = Math.max(0.5, Math.min(5, _zoomStart.scale * (d / _zoomStart.dist))); }
+            else if (e.touches.length === 1 && _zoomStart.single) { zoomState.value.x = e.touches[0].clientX - _zoomStart.sx; zoomState.value.y = e.touches[0].clientY - _zoomStart.sy; }
+        };
+        const onZoomTouchEnd = () => { zoomState.value.touching = false; };
+        const onZoomWheel = (e) => { e.preventDefault(); const d = e.deltaY > 0 ? -0.2 : 0.2; zoomState.value.scale = Math.max(0.5, Math.min(5, zoomState.value.scale + d)); };
+
         const samePnLocations = computed(() => {
             if (!bom.value.selectedLoc) return [];
             const sel = bom.value.bomList.find(b => b.location_code === bom.value.selectedLoc);
@@ -2441,7 +2464,8 @@ createApp({
             eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel,
             renderParetoChart, initDashboardCharts,
             // BOM
-            bom, loadBomData, uploadBomExcel, uploadBomImage, deleteBomData, filteredBomList, samePnLocations, bomModelList
+            bom, loadBomData, uploadBomExcel, uploadBomImage, deleteBomData, filteredBomList, samePnLocations, bomModelList,
+            zoomState, onZoomTouchStart, onZoomTouchMove, onZoomTouchEnd, onZoomWheel
         };
     }
 }).mount('#app');

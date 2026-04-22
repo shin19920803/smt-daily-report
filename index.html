@@ -1370,7 +1370,7 @@ createApp({
         };
 
         // --- Report Logic (PRESERVED) ---
-        const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
+        const report = ref({ date: (() => { const d = new Date(); const day = d.getDay(); if (day === 1) d.setDate(d.getDate() - 3); else if (day === 0) d.setDate(d.getDate() - 2); else d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })(), wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
         const rawExportFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
@@ -1407,7 +1407,7 @@ createApp({
             report.value.currentId = null;
             report.value.logs = [];
             report.value.inputQty = 0;
-            report.value.date = new Date().toISOString().split('T')[0];
+            report.value.date = getPreviousWorkday();
             report.value.wo_id = null;
             report.value.selectedWoNumber = null;
         };

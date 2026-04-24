@@ -202,6 +202,9 @@
             <a @click="currentTab = 'equipment'" :class="{'active': currentTab === 'equipment'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-tools w-5 text-center mr-3 text-sm"></i> <span class="text-sm">設備管理</span>
             </a>
+            <a @click="currentTab = 'feederMerge'" :class="{'active': currentTab === 'feederMerge'}" class="sidebar-link rounded-lg">
+                <i class="fas fa-project-diagram w-5 text-center mr-3 text-sm"></i> <span class="text-sm">料站整合</span>
+            </a>
             <a @click="currentTab = 'settings'" :class="{'active': currentTab === 'settings'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-cog w-5 text-center mr-3 text-sm"></i> <span class="text-sm">基礎設定</span>
             </a>
@@ -1157,6 +1160,50 @@
             </div>
         </div>
 
+        <!-- ==================== FEEDER MERGE 料站整合 ==================== -->
+        <div v-if="currentTab === 'feederMerge'" class="animate-fade-in">
+            <h2 class="text-xl md:text-2xl font-black mb-4 text-gray-800"><i class="fas fa-project-diagram mr-2 text-cyan-500"></i>料站整合</h2>
+            <div class="section-card p-4 md:p-6 mb-4">
+                <p class="text-sm text-gray-500 mb-4">上傳 <b>BOM Excel</b>（含「元件料號」欄）+ <b>Feeder CSV</b>（含「机器编号」欄），系統自動整合後下載結果。</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 mb-1">BOM 檔案 (Excel)</label>
+                        <label class="flex items-center justify-center p-6 border-2 border-dashed rounded-lg cursor-pointer transition" :class="fmState.bomFile ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-cyan-400'">
+                            <div class="text-center">
+                                <i :class="fmState.bomFile ? 'fas fa-check-circle text-green-500 text-2xl' : 'fas fa-file-excel text-gray-300 text-2xl'" class="mb-1"></i>
+                                <div class="text-sm font-bold" :class="fmState.bomFile ? 'text-green-700' : 'text-gray-400'">{{ fmState.bomFile ? fmState.bomFile.name : '點擊選擇 Excel' }}</div>
+                            </div>
+                            <input type="file" accept=".xlsx,.xls" @change="fmState.bomFile = $event.target.files[0]" class="hidden">
+                        </label>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 mb-1">Feeder 檔案 (CSV)</label>
+                        <label class="flex items-center justify-center p-6 border-2 border-dashed rounded-lg cursor-pointer transition" :class="fmState.feederFile ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-cyan-400'">
+                            <div class="text-center">
+                                <i :class="fmState.feederFile ? 'fas fa-check-circle text-green-500 text-2xl' : 'fas fa-file-csv text-gray-300 text-2xl'" class="mb-1"></i>
+                                <div class="text-sm font-bold" :class="fmState.feederFile ? 'text-green-700' : 'text-gray-400'">{{ fmState.feederFile ? fmState.feederFile.name : '點擊選擇 CSV' }}</div>
+                            </div>
+                            <input type="file" accept=".csv" @change="fmState.feederFile = $event.target.files[0]" class="hidden">
+                        </label>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="runFeederMerge" :disabled="!fmState.bomFile || !fmState.feederFile" class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"><i class="fas fa-cogs mr-1"></i> 開始整合</button>
+                    <button v-if="fmState.result" @click="downloadFmResult" class="btn-success"><i class="fas fa-download mr-1"></i> 下載結果 CSV</button>
+                </div>
+            </div>
+            <!-- Preview -->
+            <div v-if="fmState.result" class="section-card animate-fade-in">
+                <div class="px-4 py-3 border-b bg-gray-50/50 font-bold text-sm text-gray-600"><i class="fas fa-table mr-2 text-cyan-500"></i>整合結果預覽 <span class="text-xs font-normal text-gray-400">共 {{ fmState.result.length }} 筆</span></div>
+                <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+                    <table class="w-full text-left text-sm min-w-[800px]">
+                        <thead class="bg-gray-50 text-gray-500 uppercase text-xs"><tr><th class="p-2 border-b">機台</th><th class="p-2 border-b">RANGE</th><th class="p-2 border-b">棧位</th><th class="p-2 border-b">料號</th><th class="p-2 border-b">SPEC1</th><th class="p-2 border-b">FeederType</th><th class="p-2 border-b">SPEC2</th><th class="p-2 border-b">數量</th><th class="p-2 border-b">位置</th></tr></thead>
+                        <tbody><tr v-for="(r,i) in fmState.result" :key="i" class="border-b hover:bg-gray-50"><td class="p-2">{{r.機台代碼}}</td><td class="p-2 font-mono">{{r.RANGE}}</td><td class="p-2 font-mono font-bold text-cyan-700">{{r.棧位}}</td><td class="p-2 font-mono text-sm">{{r.料號}}</td><td class="p-2 text-xs">{{r.SPEC1}}</td><td class="p-2 font-mono text-blue-600">{{r.FeedrType}}</td><td class="p-2">{{r.SPEC2}}</td><td class="p-2 text-center">{{r.數量}}</td><td class="p-2 text-xs">{{r.位置}}</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <!-- ==================== SETTINGS ==================== -->
         <div v-if="currentTab === 'settings'" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-cog mr-2 text-gray-500"></i>系統基礎設定</h2>
@@ -1245,12 +1292,13 @@
         <a @click="currentTab = 'orders'" :class="currentTab === 'orders' ? 'active text-indigo-600' : 'text-gray-400'" class="mobile-nav-item">
             <i class="fas fa-clipboard-list text-base"></i><span class="text-[10px] mt-0.5 font-bold">工單</span>
         </a>
-        <a @click="showMobileMore = !showMobileMore" :class="['ooc','stats','settings','equipment'].includes(currentTab) ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item relative">
+        <a @click="showMobileMore = !showMobileMore" :class="['ooc','stats','settings','equipment','feederMerge'].includes(currentTab) ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item relative">
             <i class="fas fa-ellipsis-h text-base"></i><span class="text-[10px] mt-0.5 font-bold">更多</span>
             <!-- Popup -->
             <div v-if="showMobileMore" class="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl py-2 w-40 animate-fade-in">
                 <a @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
                 <a @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
+                <a @click="currentTab='feederMerge'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='feederMerge' ? 'text-cyan-600 bg-cyan-50' : 'text-gray-600'"><i class="fas fa-project-diagram w-5 mr-2"></i>料站</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
                 <a @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
             </div>
@@ -2144,6 +2192,125 @@ createApp({
         const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('nozzle_models').insert({ brand: b, model: m }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
         const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; const { error } = await _supabase.from(table).delete().eq('id', id); if (error) return toast('刪除失敗: ' + error.message, 'error'); await loadEqData(); toast('已刪除', 'info'); };
 
+        // --- Feeder Merge 料站整合 ---
+        const fmState = ref({ bomFile: null, feederFile: null, result: null });
+
+        const runFeederMerge = async () => {
+            if (!fmState.value.bomFile || !fmState.value.feederFile) return;
+            loading.value = true;
+            try {
+                // 讀 BOM Excel (最後一個 sheet)
+                const bomAb = await fmState.value.bomFile.arrayBuffer();
+                const bomWb = XLSX.read(bomAb);
+                const bomSheet = bomWb.Sheets[bomWb.SheetNames[bomWb.SheetNames.length - 1]];
+                const bomRaw = XLSX.utils.sheet_to_json(bomSheet, { header: 1 });
+                
+                // 找含「元件料號」的標題列
+                let bomHeaderIdx = -1;
+                for (let i = 0; i < Math.min(60, bomRaw.length); i++) {
+                    if (bomRaw[i].some(c => String(c).includes('元件料號'))) { bomHeaderIdx = i; break; }
+                }
+                if (bomHeaderIdx === -1) { toast('BOM 找不到「元件料號」欄位', 'error'); loading.value = false; return; }
+                
+                const bomHeaders = bomRaw[bomHeaderIdx].map(h => String(h).trim());
+                const bomData = bomRaw.slice(bomHeaderIdx + 1);
+                const colIdx = (name) => bomHeaders.indexOf(name);
+                
+                // BOM lookup: 元件料號 -> { 規格, 用量, 插件位置 }
+                const bomLookup = {};
+                bomData.forEach(row => {
+                    const pn = String(row[colIdx('元件料號')] || '').trim();
+                    if (pn) bomLookup[pn] = {
+                        spec: row[colIdx('規格')] || '',
+                        qty: row[colIdx('用量')] || '',
+                        loc: row[colIdx('插件位置')] || ''
+                    };
+                });
+
+                // 讀 Feeder CSV
+                const fdrAb = await fmState.value.feederFile.arrayBuffer();
+                const fdrWb = XLSX.read(fdrAb);
+                const fdrSheet = fdrWb.Sheets[fdrWb.SheetNames[0]];
+                const fdrRaw = XLSX.utils.sheet_to_json(fdrSheet, { header: 1 });
+
+                // 找含「机器编号」的標題列
+                let fdrHeaderIdx = -1;
+                for (let i = 0; i < Math.min(60, fdrRaw.length); i++) {
+                    if (fdrRaw[i].some(c => String(c).includes('机器编号'))) { fdrHeaderIdx = i; break; }
+                }
+                if (fdrHeaderIdx === -1) { toast('Feeder CSV 找不到「机器编号」欄位', 'error'); loading.value = false; return; }
+
+                const fdrHeaders = fdrRaw[fdrHeaderIdx].map(h => String(h).trim());
+                const fdrData = fdrRaw.slice(fdrHeaderIdx + 1);
+                const fi = (name) => { const i = fdrHeaders.indexOf(name); return i >= 0 ? i : fdrHeaders.findIndex(h => h.includes(name)); };
+                const iWorkTable = fi('工作台') >= 0 ? fi('工作台') : 2;
+                const iSlot = fi('插槽') >= 0 ? fi('插槽') : 3;
+                const iSubSlot = fi('子插槽') >= 0 ? fi('子插槽') : 4;
+                const iComponent = fi('元件') >= 0 ? fi('元件') : 5;
+                const iSupply = fi('供应') >= 0 ? fi('供应') : 6;
+
+                const feederCounters = {};
+                const result = [];
+                let rangeNum = 0;
+
+                fdrData.forEach(row => {
+                    const comp = String(row[iComponent] || '').trim();
+                    if (!comp) return;
+                    rangeNum++;
+
+                    const wt = String(row[iWorkTable] || '').trim();
+                    const slot = String(row[iSlot] || '').trim();
+                    const subSlot = String(row[iSubSlot] || '').trim();
+                    const supply = String(row[iSupply] || '').trim();
+
+                    // 棧位
+                    const prefix = wt.startsWith('1') ? 'F' : wt.startsWith('2') ? 'R' : '';
+                    const slotSuffix = slot.length >= 2 ? slot.slice(-2) : slot.padStart(2, '0');
+                    const finalSub = (subSlot && subSlot !== 'nan' && subSlot !== 'undefined') ? subSlot : 'L';
+                    const colC = `${prefix}${slotSuffix}${finalSub}`;
+
+                    // FeederType
+                    let feederType = '';
+                    if (supply.length >= 3) {
+                        const code = supply.substring(1, 3);
+                        if (/^\d+$/.test(code)) {
+                            const wk = `${parseInt(code)}mm`;
+                            if (!feederCounters[wk]) feederCounters[wk] = 1;
+                            feederType = `feeder${wk}-${String(feederCounters[wk]).padStart(2, '0')}`;
+                            feederCounters[wk]++;
+                        }
+                    }
+
+                    // SPEC2
+                    let spec2 = '';
+                    if (supply.length >= 5) {
+                        const wp = supply.substring(3, 5);
+                        spec2 = (/^\d+$/.test(wp) ? String(parseInt(wp)) : wp.replace(/^0+/, '') || '0') + 'mm';
+                    }
+
+                    // BOM lookup
+                    const bom = bomLookup[comp] || {};
+
+                    result.push({
+                        機台代碼: 'P01', RANGE: rangeNum, 棧位: colC, 料號: comp,
+                        SPEC1: bom.spec || '', FeedrType: feederType, SPEC2: spec2,
+                        數量: bom.qty || '', 位置: bom.loc || ''
+                    });
+                });
+
+                fmState.value.result = result;
+                toast(`整合完成，共 ${result.length} 筆`);
+            } catch (err) { toast('整合失敗: ' + err.message, 'error'); } finally { loading.value = false; }
+        };
+
+        const downloadFmResult = () => {
+            if (!fmState.value.result) return;
+            const ws = XLSX.utils.json_to_sheet(fmState.value.result);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Result');
+            XLSX.writeFile(wb, `整合結果_${new Date().toISOString().slice(0,10)}.csv`, { bookType: 'csv' });
+        };
+
         // --- Settings (PRESERVED) ---
         const settingConfig = ref({ 
             models: { title: '機種清單', colorClass: 'text-indigo-600', btnColor: 'bg-indigo-600', input: '', placeholder: '新機種名稱', field: 'name' }, 
@@ -2331,7 +2498,8 @@ createApp({
             showNozzleLogModal, nozzleLogForm, openNozzleLogModal, saveNozzleLog, deleteNozzleLog,
             selectedNozzleModelId, selectedNozzleModelName, selectNozzleModel, filteredNozzleLogs,
             eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel,
-            renderParetoChart, initDashboardCharts
+            renderParetoChart, initDashboardCharts,
+            fmState, runFeederMerge, downloadFmResult
         };
     }
 }).mount('#app');

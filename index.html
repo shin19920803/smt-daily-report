@@ -1164,7 +1164,7 @@
         <div v-if="currentTab === 'feederMerge'" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-4 text-gray-800"><i class="fas fa-project-diagram mr-2 text-cyan-500"></i>料站整合</h2>
             <div class="section-card p-4 md:p-6 mb-4">
-                <p class="text-sm text-gray-500 mb-4">上傳 <b>BOM Excel</b>（含「元件料號」欄）+ <b>Feeder CSV</b>（含「机器编号」欄），系統自動整合後下載結果。</p>
+                <p class="text-sm text-gray-500 mb-4">上傳 <b>BOM Excel</b>（含「元件料號」欄）+ <b>Feeder CSV</b>，系統自動整合後下載結果。</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label class="block text-xs font-bold text-gray-400 mb-1">BOM 檔案 (Excel)</label>
@@ -2227,18 +2227,27 @@ createApp({
                     };
                 });
 
-                // 讀 Feeder CSV
+                // 讀 Feeder CSV (多編碼嘗試，與 Python 邏輯一致)
                 const fdrAb = await fmState.value.feederFile.arrayBuffer();
-                const fdrWb = XLSX.read(fdrAb);
+                let csvText = '';
+                for (const enc of ['utf-8', 'big5', 'gbk', 'shift-jis']) {
+                    try {
+                        const decoded = new TextDecoder(enc).decode(fdrAb);
+                        if (decoded.includes('工作台') || decoded.includes('插槽') || decoded.includes('元件') || decoded.includes('机器')) { csvText = decoded; break; }
+                        if (!csvText) csvText = decoded; // fallback 用第一個
+                    } catch(e) { continue; }
+                }
+                if (!csvText) csvText = new TextDecoder('utf-8').decode(fdrAb);
+                const fdrWb = XLSX.read(csvText, { type: 'string' });
                 const fdrSheet = fdrWb.Sheets[fdrWb.SheetNames[0]];
                 const fdrRaw = XLSX.utils.sheet_to_json(fdrSheet, { header: 1 });
 
-                // 找含「机器编号」的標題列
-                let fdrHeaderIdx = -1;
-                for (let i = 0; i < Math.min(60, fdrRaw.length); i++) {
-                    if (fdrRaw[i].some(c => String(c).includes('机器编号'))) { fdrHeaderIdx = i; break; }
+                // 找標題列：搜尋含「工作台」或「机器」或「插槽」的行，找不到就用第0行
+                let fdrHeaderIdx = 0;
+                for (let i = 0; i < Math.min(30, fdrRaw.length); i++) {
+                    const rowStr = fdrRaw[i].map(c => String(c)).join('');
+                    if (rowStr.includes('工作台') || rowStr.includes('机器') || rowStr.includes('插槽') || rowStr.includes('元件')) { fdrHeaderIdx = i; break; }
                 }
-                if (fdrHeaderIdx === -1) { toast('Feeder CSV 找不到「机器编号」欄位', 'error'); loading.value = false; return; }
 
                 const fdrHeaders = fdrRaw[fdrHeaderIdx].map(h => String(h).trim());
                 const fdrData = fdrRaw.slice(fdrHeaderIdx + 1);

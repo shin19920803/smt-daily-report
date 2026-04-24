@@ -301,6 +301,28 @@
                         近 14 日每日投入量
                     </div>
                     <div id="dashInputChart" style="width:100%;height:220px;"></div>
+                    <div class="text-center text-[10px] text-gray-300 mt-1">點擊長條查看當日機種明細</div>
+                </div>
+            </div>
+
+            <!-- Day detail modal -->
+            <div v-if="dashDayDetail.show" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="dashDayDetail.show = false">
+                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-96 animate-fade-in">
+                    <h3 class="text-lg font-black mb-4 text-center border-b pb-2">{{ dashDayDetail.date }} 投產明細</h3>
+                    <div class="space-y-2 max-h-64 overflow-y-auto">
+                        <div v-for="(d, i) in dashDayDetail.list" :key="i" class="flex items-center justify-between p-2 rounded-lg" :class="d.model?.includes('TOP') ? 'bg-blue-50' : 'bg-indigo-50'">
+                            <div>
+                                <div class="font-mono text-xs font-bold text-blue-700">{{ d.wo }}</div>
+                                <div class="text-xs text-gray-500">{{ d.model }}</div>
+                            </div>
+                            <div class="font-mono font-black text-gray-800">{{ d.qty }}</div>
+                        </div>
+                        <div class="border-t pt-2 flex justify-between font-bold text-sm">
+                            <span>合計</span>
+                            <span class="font-mono">{{ dashDayDetail.list.reduce((s, d) => s + d.qty, 0) }}</span>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-center"><button @click="dashDayDetail.show = false" class="btn-ghost">關閉</button></div>
                 </div>
             </div>
 
@@ -2386,6 +2408,9 @@ createApp({
         let dashInputChartInst = null;
         let paretoChartInst = null;
 
+        // Dashboard day detail modal
+        const dashDayDetail = ref({ show: false, date: '', list: [] });
+
         const initDashboardCharts = async () => {
             const today = new Date();
             const days = [];
@@ -2395,19 +2420,30 @@ createApp({
             }
             const { data: prods } = await _supabase
                 .from('daily_production')
-                .select('production_date, input_quantity, defect_logs(quantity)')
+                .select('production_date, input_quantity, wo_id, work_orders(wo_number, models(name)), defect_logs(quantity)')
                 .gte('production_date', days[0]).lte('production_date', days[days.length-1]);
+            
             const dayMap = {};
-            days.forEach(d => { dayMap[d] = { input: 0, defects: 0 }; });
+            days.forEach(d => { dayMap[d] = { input: 0, defects: 0, top: 0, bot: 0, details: [] }; });
             (prods || []).forEach(p => {
                 if (dayMap[p.production_date]) {
                     dayMap[p.production_date].input += p.input_quantity;
                     dayMap[p.production_date].defects += (p.defect_logs||[]).reduce((s,d)=>s+d.quantity,0);
+                    const modelName = p.work_orders?.models?.name || '';
+                    if (/_TOP$/i.test(modelName)) dayMap[p.production_date].top += p.input_quantity;
+                    else if (/_BOT$/i.test(modelName)) dayMap[p.production_date].bot += p.input_quantity;
+                    else dayMap[p.production_date].bot += p.input_quantity; // 無後綴歸 BOT
+                    dayMap[p.production_date].details.push({ wo: p.work_orders?.wo_number, model: modelName, qty: p.input_quantity });
                 }
             });
+            // Store for click handler
+            window._dashDayMap = dayMap;
+
             const labels = days.map(d => d.slice(5));
             const yields = days.map(d => { const {input,defects}=dayMap[d]; return input>0?parseFloat(((input-defects)/input*100).toFixed(2)):null; });
-            const inputs = days.map(d => dayMap[d].input);
+            const topData = days.map(d => dayMap[d].top);
+            const botData = days.map(d => dayMap[d].bot);
+            
             await Vue.nextTick();
             const yieldEl = document.getElementById('dashYieldChart');
             if (yieldEl) {
@@ -2424,11 +2460,23 @@ createApp({
             if (inputEl) {
                 if (!dashInputChartInst) dashInputChartInst = echarts.init(inputEl);
                 dashInputChartInst.setOption({
-                    grid:{top:28,right:20,bottom:36,left:48},
-                    tooltip:{trigger:'axis',formatter:p=>p[0].name+'<br/><b>'+p[0].value+' pcs</b>'},
+                    grid:{top:36,right:20,bottom:36,left:48},
+                    tooltip:{trigger:'axis',formatter:p=>{let s=p[0].name;p.forEach(v=>{s+='<br/>'+v.marker+v.seriesName+': <b>'+v.value+'</b>';});const total=p.reduce((a,v)=>a+v.value,0);s+='<br/>合計: <b>'+total+'</b>';return s;}},
+                    legend:{data:['BOT','TOP'],top:4,right:10,textStyle:{fontSize:10}},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
                     yAxis:{type:'value',axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
-                    series:[{type:'bar',data:inputs,barMaxWidth:28,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#2563eb'},{offset:1,color:'#93c5fd'}]},borderRadius:[4,4,0,0]},emphasis:{itemStyle:{color:'#1d4ed8'}}}]
+                    series:[
+                        {name:'BOT',type:'bar',stack:'total',data:botData,barMaxWidth:28,itemStyle:{color:'#3b82f6',borderRadius:[0,0,0,0]},emphasis:{itemStyle:{color:'#1d4ed8'}}},
+                        {name:'TOP',type:'bar',stack:'total',data:topData,barMaxWidth:28,itemStyle:{color:'#93c5fd',borderRadius:[4,4,0,0]},emphasis:{itemStyle:{color:'#60a5fa'}}}
+                    ]
+                });
+                dashInputChartInst.off('click');
+                dashInputChartInst.on('click', (params) => {
+                    const dateStr = days[params.dataIndex];
+                    const info = window._dashDayMap[dateStr];
+                    if (info && info.details.length > 0) {
+                        dashDayDetail.value = { show: true, date: dateStr, list: info.details };
+                    }
                 });
             }
         };
@@ -2507,7 +2555,7 @@ createApp({
             showNozzleLogModal, nozzleLogForm, openNozzleLogModal, saveNozzleLog, deleteNozzleLog,
             selectedNozzleModelId, selectedNozzleModelName, selectNozzleModel, filteredNozzleLogs,
             eqSettingForm, addFeederModel, addNozzleModel, deleteEqModel,
-            renderParetoChart, initDashboardCharts,
+            renderParetoChart, initDashboardCharts, dashDayDetail,
             fmState, runFeederMerge, downloadFmResult
         };
     }

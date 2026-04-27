@@ -1968,7 +1968,13 @@ createApp({
                 const wsFpy = XLSX.utils.aoa_to_sheet(fpyExcelData);
                 XLSX.utils.book_append_sheet(wb, wsFpy, "直通率報告");
 
-                XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+                // 計算週數檔名
+                const getWeek = (ds) => { if (!ds) return null; const d = new Date(ds); const oneJan = new Date(d.getFullYear(), 0, 1); return Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7); };
+                const y1 = statsFilter.value.start ? new Date(statsFilter.value.start).getFullYear() : new Date().getFullYear();
+                const w1 = statsFilter.value.start ? getWeek(statsFilter.value.start) : getWeek(new Date().toISOString().split('T')[0]);
+                const w2 = statsFilter.value.end ? getWeek(statsFilter.value.end) : w1;
+                const weekStr = w1 === w2 ? `${y1}_W${w1}` : `${y1}_W${w1}-W${w2}`;
+                XLSX.writeFile(wb, `${weekStr}_SMT良率&直通率報表.xlsx`);
                 toast("完整報表已導出");
             } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
         };

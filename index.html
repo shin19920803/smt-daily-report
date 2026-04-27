@@ -504,9 +504,11 @@
 
         <!-- ==================== FPY ==================== -->
         <div v-if="currentTab === 'fpy'" class="space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
-                <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理</h2>
-                <button @click="openFpyModal()" class="btn-purple text-sm flex-shrink-0"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
+            <div class="sticky top-0 z-20 bg-gray-50 pb-2 pt-1" style="background:#f0f2f5;">
+                <div class="flex flex-wrap justify-between items-center gap-2">
+                    <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理</h2>
+                    <button @click="openFpyModal()" class="btn-purple text-sm flex-shrink-0"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
+                </div>
             </div>
             <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">
                 <table class="w-full text-left border-collapse relative min-w-[600px]">

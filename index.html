@@ -508,7 +508,7 @@
                 <div class="flex flex-wrap justify-between items-center gap-2">
                     <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理</h2>
                     <div class="flex gap-2 flex-shrink-0">
-                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white cursor-pointer transition" style="background:#16a34a;"><i class="fas fa-file-upload mr-1"></i>上傳檔案<input type="file" accept=".csv,.xlsx,.xls" @change="importFpyFile" class="hidden"></label>
+                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white cursor-pointer transition" style="background:#16a34a;"><i class="fas fa-file-upload mr-1"></i>上傳檔案<input type="file" accept=".csv,.xlsx,.xls" multiple @change="importFpyFile" class="hidden"></label>
                         <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 手動輸入</button>
                     </div>
                 </div>
@@ -1620,20 +1620,17 @@ createApp({
             } catch(e) { toast("儲存失敗: " + e.message, "error"); } finally { loading.value = false; } 
         };
 
-        const importFpyFile = async (e) => {
-            const file = e.target.files[0]; if (!file) return;
-            loading.value = true;
-            try {
+        const importSingleFpyFile = async (file) => {
                 const ab = await file.arrayBuffer();
                 const wb = XLSX.read(ab, { type: 'array', cellDates: false });
                 const ws = wb.Sheets[wb.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-                if (rows.length < 2) { toast('檔案無資料', 'warning'); loading.value=false; e.target.value=''; return; }
+                if (rows.length < 2) return { success: 0, skip: 0, errs: [`${file.name} 檔案無資料`] };
 
                 const headers = rows[0].map(h => String(h).trim());
                 const find = (...keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
                 const iDate = find('日期'), iWo = find('工單'), iModel = find('機種'), iSpi = find('SPI'), iAoi = find('AOI');
-                if (iDate < 0 || iWo < 0) { toast('缺少日期或工單號碼欄位', 'error'); loading.value=false; e.target.value=''; return; }
+                if (iDate < 0 || iWo < 0) return { success: 0, skip: 0, errs: [`${file.name} 缺少日期或工單號碼欄位`] };
 
                 let success = 0, skip = 0, errs = [];
                 for (let i = 1; i < rows.length; i++) {
@@ -1671,11 +1668,27 @@ createApp({
                     else await _supabase.from('daily_fpy').insert(payload);
                     success++;
                 }
+                return { success, skip, errs };
+        };
+
+        const importFpyFile = async (e) => {
+            const files = Array.from(e.target.files || []);
+            if (files.length === 0) return;
+            loading.value = true;
+            try {
+                let totalSuccess = 0, totalSkip = 0, allErrs = [];
+                for (const file of files) {
+                    const result = await importSingleFpyFile(file);
+                    totalSuccess += result.success;
+                    totalSkip += result.skip;
+                    allErrs.push(...result.errs);
+                }
                 await loadFpyHistory();
-                let msg = `匯入完成：成功 ${success} 筆`;
-                if (skip > 0) msg += `，跳過 ${skip} 筆`;
-                toast(msg, success > 0 ? 'success' : 'warning');
-                if (errs.length > 0) console.warn('FPY 匯入問題:', errs);
+                let msg = files.length > 1 ? `匯入完成：${files.length} 個檔案，成功 ${totalSuccess} 筆` : `匯入完成：成功 ${totalSuccess} 筆`;
+                if (totalSkip > 0) msg += `，跳過 ${totalSkip} 筆`;
+                if (allErrs.length > 0) msg += `，問題 ${allErrs.length} 筆`;
+                toast(msg, totalSuccess > 0 ? 'success' : 'warning');
+                if (allErrs.length > 0) console.warn('FPY 匯入問題:', allErrs);
             } catch(err) { toast('匯入失敗: ' + err.message, 'error'); }
             finally { loading.value = false; e.target.value = ''; }
         };

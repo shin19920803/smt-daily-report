@@ -1719,16 +1719,16 @@ createApp({
                             if (m) dateStr = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
                         }
 
-                        const woNum = String(r[iWo]).trim();
-                        const modelName = iModel >= 0 ? String(r[iModel]).trim() : '';
+                        const woNum = String(r[iWo]).trim().toUpperCase();
+                        const modelName = iModel >= 0 ? String(r[iModel]).trim().toUpperCase() : '';
                         const parseRate = (v) => { if (v === '' || v == null) return null; const n = parseFloat(String(v).replace('%','').trim()); return isNaN(n) ? null : n; };
                         const spi = iSpi >= 0 ? parseRate(r[iSpi]) : null;
                         const aoi = iAoi >= 0 ? parseRate(r[iAoi]) : null;
                         if (spi === null && aoi === null) { totalSkip++; continue; }
 
-                        const candidates = data.value.workOrders.filter(w => w.wo_number === woNum);
+                        const candidates = data.value.workOrders.filter(w => (w.wo_number || '').toUpperCase() === woNum);
                         if (candidates.length === 0) { allErrs.push(`${woNum} 找不到工單`); totalSkip++; continue; }
-                        let wo = modelName ? (candidates.find(w => w.models?.name === modelName) || candidates.find(w => w.models?.name?.includes(modelName) || modelName.includes(w.models?.name||''))) : null;
+                        let wo = modelName ? (candidates.find(w => (w.models?.name || '').toUpperCase() === modelName) || candidates.find(w => (w.models?.name || '').toUpperCase().includes(modelName) || modelName.includes((w.models?.name||'').toUpperCase()))) : null;
                         if (!wo) wo = candidates[0];
 
                         const { data: existing } = await _supabase.from('daily_fpy').select('*').eq('wo_id', wo.id).eq('production_date', dateStr).maybeSingle();

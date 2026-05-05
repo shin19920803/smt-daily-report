@@ -507,7 +507,10 @@
             <div class="sticky top-0 z-20 bg-gray-50 pb-2 pt-1" style="background:#f0f2f5;">
                 <div class="flex flex-wrap justify-between items-center gap-2">
                     <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理</h2>
-                    <button @click="openFpyModal()" class="btn-purple text-sm flex-shrink-0"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
+                    <div class="flex gap-2 flex-shrink-0">
+                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white cursor-pointer transition" style="background:#16a34a;"><i class="fas fa-file-upload mr-1"></i>上傳檔案<input type="file" accept=".csv,.xlsx,.xls" multiple @change="importFpyFile" class="hidden"></label>
+                        <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 手動輸入</button>
+                    </div>
                 </div>
             </div>
             <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">

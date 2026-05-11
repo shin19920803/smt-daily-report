@@ -425,6 +425,9 @@
                             <div class="w-full md:w-32"><label class="text-xs font-bold text-gray-400">數量</label><input type="number" v-model="defectForm.qty" class="w-full border border-gray-200 p-2 rounded-lg" min="1" value="1"></div>
                             <button @click="addDefect" class="btn-danger w-full md:w-auto"><i class="fas fa-plus mr-1"></i> 新增</button>
                         </div>
+                        <div class="flex justify-end mb-3">
+                            <label class="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-green-600 hover:bg-green-700 cursor-pointer transition"><i class="fas fa-file-csv mr-1"></i>匯入 CSV<input type="file" accept=".csv" @change="importDefectCsv" class="hidden"></label>
+                        </div>
                         <div class="overflow-x-auto rounded-lg border">
                             <table class="w-full text-left text-sm">
                                 <thead class="bg-gray-50"><tr><th class="p-3 border-b font-bold text-gray-500">不良現象</th><th class="p-3 border-b font-bold text-gray-500">位置</th><th class="p-3 border-b text-right font-bold text-gray-500">數量</th><th class="p-3 border-b text-center font-bold text-gray-500">操作</th></tr></thead>
@@ -503,9 +506,14 @@
 
         <!-- ==================== FPY ==================== -->
         <div v-if="currentTab === 'fpy'" class="space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex justify-between items-center mb-2">
-                <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理 (FPY)</h2>
-                <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
+            <div class="sticky top-0 z-20 pb-2 pt-1" style="background:#f0f2f5;">
+                <div class="flex flex-wrap justify-between items-center gap-2">
+                    <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理</h2>
+                    <div class="flex gap-2 flex-shrink-0">
+                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white cursor-pointer transition" style="background:#16a34a;"><i class="fas fa-file-upload mr-1"></i>上傳檔案<input type="file" accept=".csv,.xlsx,.xls" multiple @change="importFpyFile" class="hidden"></label>
+                        <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 手動輸入</button>
+                    </div>
+                </div>
             </div>
             <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">
                 <table class="w-full text-left border-collapse relative min-w-[600px]">
@@ -1506,6 +1514,50 @@ createApp({
         const addDefect = async () => { if (!report.value.currentId) return toast("請先儲存投入數", "warning"); if (!defectForm.value.typeId || !defectForm.value.locationId) return toast("請選擇不良與位置", "warning"); loading.value = true; try { await _supabase.from('defect_logs').insert({ production_id: report.value.currentId, defect_type_id: defectForm.value.typeId, location_id: defectForm.value.locationId, quantity: defectForm.value.qty }); await fetchDailyRecord(); await loadHistory(); defectForm.value.qty = 1; toast("不良紀錄已新增"); } catch (e) { toast("新增失敗", "error"); } finally { loading.value = false; } };
         const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); toast("已刪除", "info"); };
 
+        const importDefectCsv = async (e) => {
+            const file = e.target.files[0]; if (!file || !report.value.currentId) return toast('請先建立投入數', 'warning');
+            loading.value = true;
+            try {
+                const ab = await file.arrayBuffer();
+                const wb = XLSX.read(ab); const ws = wb.Sheets[wb.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                if (rows.length < 2) { toast('CSV 無資料', 'warning'); loading.value = false; return; }
+                const locCodes = rows[0].slice(1).map(c => String(c).trim());
+                let addedTypes = 0, addedLocs = 0;
+                for (const code of locCodes) {
+                    if (!code) continue;
+                    if (!data.value.defectLocations.find(l => l.code === code)) {
+                        const { error } = await _supabase.from('defect_locations').insert({ code });
+                        if (!error) addedLocs++;
+                    }
+                }
+                for (let i = 1; i < rows.length; i++) {
+                    const typeName = String(rows[i][0] || '').trim();
+                    if (!typeName) continue;
+                    if (!data.value.defectTypes.find(t => t.name === typeName)) {
+                        const { error } = await _supabase.from('defect_types').insert({ name: typeName });
+                        if (!error) addedTypes++;
+                    }
+                }
+                if (addedTypes > 0 || addedLocs > 0) await loadBaseData();
+                for (let i = 1; i < rows.length; i++) {
+                    const typeName = String(rows[i][0] || '').trim(); if (!typeName) continue;
+                    const typeObj = data.value.defectTypes.find(t => t.name === typeName); if (!typeObj) continue;
+                    for (let j = 1; j < rows[i].length; j++) {
+                        const qty = parseInt(rows[i][j]); if (!qty || qty <= 0) continue;
+                        const locCode = locCodes[j - 1]; if (!locCode) continue;
+                        const locObj = data.value.defectLocations.find(l => l.code === locCode); if (!locObj) continue;
+                        await _supabase.from('defect_logs').insert({ production_id: report.value.currentId, defect_type_id: typeObj.id, location_id: locObj.id, quantity: qty });
+                    }
+                }
+                await fetchDailyRecord(); await loadHistory();
+                let msg = '匯入成功';
+                if (addedTypes > 0) msg += `，新增 ${addedTypes} 個不良項目`;
+                if (addedLocs > 0) msg += `，新增 ${addedLocs} 個位置代碼`;
+                toast(msg);
+            } catch(err) { toast('匯入失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
+        };
+
         const editingDefect = ref(null);
         const startEditDefect = (log) => {
             const typeObj = data.value.defectTypes.find(t => t.name === log.defect_types?.name);
@@ -1581,6 +1633,54 @@ createApp({
                 else await _supabase.from('daily_fpy').insert(payload); 
                 await loadFpyHistory(); showFpyModal.value = false; toast("儲存成功"); 
             } catch(e) { toast("儲存失敗: " + e.message, "error"); } finally { loading.value = false; } 
+        };
+
+        const importFpyFile = async (e) => {
+            const files = Array.from(e.target.files || []);
+            if (files.length === 0) return;
+            loading.value = true;
+            try {
+                let totalSuccess = 0, totalSkip = 0, allErrs = [];
+                for (const file of files) {
+                    const ab = await file.arrayBuffer();
+                    const wb = XLSX.read(ab, { type: 'array', cellDates: false });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+                    if (rows.length < 2) { allErrs.push(`${file.name} 無資料`); continue; }
+                    const headers = rows[0].map(h => String(h).trim());
+                    const find = (...keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
+                    const iDate = find('日期'), iWo = find('工單'), iModel = find('機種'), iSpi = find('SPI'), iAoi = find('AOI');
+                    if (iDate < 0 || iWo < 0) { allErrs.push(`${file.name} 缺少日期或工單欄位`); continue; }
+                    for (let i = 1; i < rows.length; i++) {
+                        const r = rows[i]; if (!r || !r[iDate] || !r[iWo]) continue;
+                        let dateStr = String(r[iDate]).trim();
+                        if (/^\d+(\.\d+)?$/.test(dateStr)) { const d = XLSX.SSF.parse_date_code(parseFloat(dateStr)); if (d) dateStr = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`; }
+                        else { const m = dateStr.replace(/[\/\.]/g,'-').match(/(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) dateStr = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; }
+                        // 大小寫統一
+                        const woNum = String(r[iWo]).trim().toUpperCase();
+                        const modelName = iModel >= 0 ? String(r[iModel]).trim().toUpperCase() : '';
+                        const parseRate = (v) => { if (v === '' || v == null) return null; const n = parseFloat(String(v).replace('%','').trim()); return isNaN(n) ? null : n; };
+                        const spi = iSpi >= 0 ? parseRate(r[iSpi]) : null;
+                        const aoi = iAoi >= 0 ? parseRate(r[iAoi]) : null;
+                        if (spi === null && aoi === null) { totalSkip++; continue; }
+                        const candidates = data.value.workOrders.filter(w => (w.wo_number||'').toUpperCase() === woNum);
+                        if (candidates.length === 0) { allErrs.push(`${woNum} 找不到工單`); totalSkip++; continue; }
+                        let wo = modelName ? (candidates.find(w => (w.models?.name||'').toUpperCase() === modelName) || candidates.find(w => (w.models?.name||'').toUpperCase().includes(modelName) || modelName.includes((w.models?.name||'').toUpperCase()))) : null;
+                        if (!wo) wo = candidates[0];
+                        const { data: existing } = await _supabase.from('daily_fpy').select('*').eq('wo_id', wo.id).eq('production_date', dateStr).maybeSingle();
+                        const payload = { wo_id: wo.id, production_date: dateStr, spi_rate: spi !== null ? spi : (existing?.spi_rate ?? null), aoi_rate: aoi !== null ? aoi : (existing?.aoi_rate ?? null) };
+                        if (existing) await _supabase.from('daily_fpy').update(payload).eq('id', existing.id);
+                        else await _supabase.from('daily_fpy').insert(payload);
+                        totalSuccess++;
+                    }
+                }
+                await loadFpyHistory();
+                let msg = `匯入完成：成功 ${totalSuccess} 筆`;
+                if (totalSkip > 0) msg += `，跳過 ${totalSkip} 筆`;
+                if (allErrs.length > 0) { msg += `，問題 ${allErrs.length} 筆`; console.warn('FPY 匯入問題:', allErrs); }
+                toast(msg, totalSuccess > 0 ? 'success' : 'warning');
+            } catch(err) { toast('匯入失敗: ' + err.message, 'error'); }
+            finally { loading.value = false; e.target.value = ''; }
         };
 
         const loadFpyHistory = async () => { const { data: list } = await _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').order('production_date', {ascending:false}).limit(200); if (list) fpyHistory.value = list; };
@@ -2278,11 +2378,11 @@ createApp({
             currentTab, loading, showWoModal, showMobileMore, data, toasts,
             getWoColor, fpyTargets, saveFpyTargets, isFpyBelowTarget, todayStr,
             dashboard, dashboardRecentProds, dashboardRecentOoc, refreshDashboard, dashDate, changeDashDate,
-            report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, editingDefect, startEditDefect, saveEditDefect, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory, onDateChange, cancelEdit, selectReportWo, backToWoList,
+            report, defectForm, fetchDailyRecord, saveDailyInput, addDefect, deleteDefect, editingDefect, startEditDefect, saveEditDefect, importDefectCsv, historyList, loadRecordForEdit, deleteDailyRecord, loadHistory, onDateChange, cancelEdit, selectReportWo, backToWoList,
             woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, markWoComplete, onWoNumberChange,
             statsFilter, statsResult, calculateStats, exportToExcel, trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints, selectedDefectType, typeLocBreakdown, typeLocTotal, selectedLocCode, openLocDetail, locWoBreakdown, locWoTotal,
             rawExportFilter, exportRawData,
-            fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
+            fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, importFpyFile, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
             oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 
             oocDayModal, openOocDayDetail, 
             activeWoNumbers, uniqueWoNumbers, reportWoList, availableModelsForSelectedWo,

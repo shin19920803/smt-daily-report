@@ -505,7 +505,10 @@
         <div v-if="currentTab === 'fpy'" class="space-y-4 md:space-y-6 animate-fade-in">
             <div class="flex justify-between items-center mb-2">
                 <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理 (FPY)</h2>
-                <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
+                <div class="flex gap-2">
+                    <button @click="showFpyExportModal = true" class="btn-ghost text-sm"><i class="fas fa-file-excel mr-1 text-green-600"></i> 導出報表</button>
+                    <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 輸入直通率</button>
+                </div>
             </div>
             <div class="section-card overflow-x-auto max-h-[300px] overflow-y-auto">
                 <table class="w-full text-left border-collapse relative min-w-[600px]">
@@ -570,6 +573,32 @@
                         <div v-if="fpyDayModal.list.length === 0" class="empty-state py-4"><i class="fas fa-calendar-times" style="font-size:1.5rem"></i><div class="hint">無數據</div></div>
                     </div>
                     <div class="mt-4 text-center"><button @click="fpyDayModal.show = false" class="btn-ghost">關閉</button></div>
+                </div>
+            </div>
+            <!-- FPY Export Modal -->
+            <div v-if="showFpyExportModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showFpyExportModal = false">
+                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[480px] animate-fade-in">
+                    <h3 class="text-xl font-black mb-4 border-b pb-2 text-green-700"><i class="fas fa-file-excel mr-2"></i>導出 / 匯入 FPY 報表</h3>
+                    <!-- 導出區 -->
+                    <div class="mb-5">
+                        <p class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">導出範圍</p>
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">開始日期</label><input type="date" v-model="fpyFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
+                            <div><label class="block text-xs font-bold mb-1 text-gray-400">結束日期</label><input type="date" v-model="fpyFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
+                        </div>
+                        <button @click="exportFpyData(); showFpyExportModal = false" class="w-full btn-success text-sm"><i class="fas fa-download mr-1"></i> 下載 Excel 報表</button>
+                    </div>
+                    <!-- 匯入區 -->
+                    <div class="border-t pt-4">
+                        <p class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">批量匯入（上傳 Excel）</p>
+                        <p class="text-xs text-gray-400 mb-3">格式：日期、工單號碼、機種、SPI 直通率、AOI 直通率（與導出格式相同）</p>
+                        <label class="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-300 mb-1"></i>
+                            <span class="text-xs text-gray-400">點擊選擇 .xlsx 檔案</span>
+                            <input type="file" accept=".xlsx,.xls" class="hidden" @change="importFpyFromExcel($event)">
+                        </label>
+                    </div>
+                    <div class="mt-4 flex justify-end"><button @click="showFpyExportModal = false" class="btn-ghost text-sm">關閉</button></div>
                 </div>
             </div>
         </div>
@@ -1587,6 +1616,47 @@ createApp({
         const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); toast("已刪除", "info"); };
         const exportFpyData = async () => { loading.value = true; try { let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))'); if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start); if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end); const { data: rows } = await query; rows.sort((a, b) => { const woA = a.work_orders.wo_number; const woB = b.work_orders.wo_number; if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB); return new Date(a.production_date) - new Date(b.production_date); }); const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]]; rows.forEach(r => { excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']); }); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report"); XLSX.writeFile(wb, `SMT_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`); toast("FPY 報表已導出"); } catch(e) { toast("導出失敗", "error"); } finally { loading.value = false; } };
 
+        const importFpyFromExcel = async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            loading.value = true;
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const wb = XLSX.read(arrayBuffer, { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                const dataRows = rows.slice(1).filter(r => r.length >= 4 && r[0] && r[1]);
+                let successCount = 0, errorCount = 0;
+                for (const row of dataRows) {
+                    const [dateRaw, woNumber, , spiRaw, aoiRaw] = row;
+                    let date = dateRaw;
+                    if (typeof dateRaw === 'number') {
+                        const d = XLSX.SSF.parse_date_code(dateRaw);
+                        date = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+                    }
+                    const spi = parseFloat(String(spiRaw).replace('%','')) || null;
+                    const aoi = parseFloat(String(aoiRaw).replace('%','')) || null;
+                    const wo = data.value.workOrders.find(w => w.wo_number === String(woNumber).trim());
+                    if (!wo) { errorCount++; continue; }
+                    try {
+                        await _supabase.from('daily_fpy').upsert(
+                            { wo_id: wo.id, production_date: date, spi_rate: spi, aoi_rate: aoi },
+                            { onConflict: 'wo_id,production_date' }
+                        );
+                        successCount++;
+                    } catch(e) { errorCount++; }
+                }
+                await loadFpyHistory();
+                showFpyExportModal.value = false;
+                toast(`匯入完成：${successCount} 筆成功${errorCount > 0 ? '，' + errorCount + ' 筆失敗（工單不存在）' : ''}`, errorCount > 0 ? 'warning' : 'success');
+            } catch(e) {
+                toast('匯入失敗：' + e.message, 'error');
+            } finally {
+                loading.value = false;
+                event.target.value = '';
+            }
+        };
+
         // --- OOC Logic (PRESERVED + notes field) ---
         const oocForm = ref({ id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' });
         const oocHistory = ref([]);
@@ -2282,7 +2352,7 @@ createApp({
             woForm, isEditingWo, openWoModal, saveWorkOrder, deleteWorkOrder, markWoComplete, onWoNumberChange,
             statsFilter, statsResult, calculateStats, exportToExcel, trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints, selectedDefectType, typeLocBreakdown, typeLocTotal, selectedLocCode, openLocDetail, locWoBreakdown, locWoTotal,
             rawExportFilter, exportRawData,
-            fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
+            fpyForm, fpyHistory, fpyFilter, availableModelsForFpy, fetchFpyRecord, saveFpy, loadFpyHistory, deleteFpy, exportFpyData, importFpyFromExcel, showFpyModal, showFpyExportModal, openFpyModal, selectedFpyId, fpyCalendarDays, fpyDayModal, openFpyDayDetail, fpyWoList, 
             oocForm, oocHistory, showOocModal, openOocModal, saveOoc, deleteOoc, selectedOocId, oocCalendarDays, availableModelsForOoc, 
             oocDayModal, openOocDayDetail, 
             activeWoNumbers, uniqueWoNumbers, reportWoList, availableModelsForSelectedWo,

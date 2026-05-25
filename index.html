@@ -718,7 +718,7 @@
                 </div>
             </div>
             <!-- WO Modal -->
-            <div v-if="showWoModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="showWoModal = false">
+            <div v-if="showWoModal" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50">
                 <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[500px] max-h-[90vh] overflow-y-auto animate-fade-in">
                     <h3 class="text-xl font-black mb-4 border-b pb-2">{{ isEditingWo ? '編輯單一工單' : '開立新工單' }}</h3>
                     <div class="space-y-4">
@@ -1361,6 +1361,20 @@ createApp({
             return [...list];
         });
         const todayStr = new Date().toISOString().split('T')[0];
+        const formatLocalDate = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+        const getPreviousWorkday = () => {
+            const d = new Date();
+            const day = d.getDay(); // 0=Sun, 1=Mon...6=Sat
+            if (day === 1) d.setDate(d.getDate() - 3); // Mon -> Fri
+            else if (day === 0) d.setDate(d.getDate() - 2); // Sun -> Fri
+            else d.setDate(d.getDate() - 1); // others -> yesterday
+            return formatLocalDate(d);
+        };
 
         // --- Dashboard ---
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
@@ -1405,7 +1419,7 @@ createApp({
         };
 
         // --- Report Logic (PRESERVED) ---
-        const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
+        const report = ref({ date: getPreviousWorkday(), wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
         const rawExportFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
@@ -1442,7 +1456,7 @@ createApp({
             report.value.currentId = null;
             report.value.logs = [];
             report.value.inputQty = 0;
-            report.value.date = new Date().toISOString().split('T')[0];
+            report.value.date = getPreviousWorkday();
             report.value.wo_id = null;
             report.value.selectedWoNumber = null;
         };
@@ -1599,15 +1613,6 @@ createApp({
                 days.push({ dayNum: i, dateStr: dStr, items: dailyItems });
             } return days;
         });
-        const getPreviousWorkday = () => {
-            const d = new Date();
-            const day = d.getDay(); // 0=Sun, 1=Mon...6=Sat
-            if (day === 1) d.setDate(d.getDate() - 3); // Mon → Fri
-            else if (day === 0) d.setDate(d.getDate() - 2); // Sun → Fri
-            else d.setDate(d.getDate() - 1); // others → yesterday
-            return d.toISOString().split('T')[0];
-        };
-
         const openFpyModal = (rec = null) => { 
             if (rec) { isEditingFpy.value = true; fpyForm.value = { id: rec.id, date: rec.production_date, selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, spi: rec.spi_rate, aoi: rec.aoi_rate, showAllWo: true }; } 
             else { isEditingFpy.value = false; fpyForm.value = { id: null, date: getPreviousWorkday(), selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false }; } 

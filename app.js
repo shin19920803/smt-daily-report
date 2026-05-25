@@ -644,6 +644,16 @@ createApp({
             } catch (e) { toast("統計失敗: " + e.message, "error"); } finally { loading.value = false; } 
         };
         
+        const getStatsReportWeekNumber = () => {
+            const dateSource = statsFilter.value.start || statsFilter.value.end || formatLocalDate(new Date());
+            const [year, month, day] = dateSource.split('-').map(Number);
+            const date = new Date(Date.UTC(year, month - 1, day));
+            const weekDay = date.getUTCDay() || 7;
+            date.setUTCDate(date.getUTCDate() + 4 - weekDay);
+            const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+            return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+        };
+
         const exportToExcel = async () => {
             if (!statsResult.value) return toast("請先執行統計", "warning");
             loading.value = true;
@@ -676,7 +686,7 @@ createApp({
                 const wsFpy = XLSX.utils.aoa_to_sheet(fpyExcelData);
                 XLSX.utils.book_append_sheet(wb, wsFpy, "直通率報告");
 
-                XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+                XLSX.writeFile(wb, `SMT第${getStatsReportWeekNumber()}週良率報表.xlsx`);
                 toast("完整報表已導出");
             } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
         };

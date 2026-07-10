@@ -1961,8 +1961,8 @@ createApp({
                         const t = d.defect_types?.name || '?'; typeMap[t] = (typeMap[t] || 0) + (d.quantity || 0);
                         const l = d.defect_locations?.code || '?'; locMap[l] = (locMap[l] || 0) + (d.quantity || 0);
                     });
-                    const typeStr = Object.entries(typeMap).map(([k, v]) => `${k}x${v}`).join(', ');
-                    const locStr = Object.entries(locMap).map(([k, v]) => `${k}x${v}`).join(', ');
+                    const typeStr = Object.entries(typeMap).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}x${v}`).join(', ');
+                    const locStr = Object.entries(locMap).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}x${v}`).join(', ');
                     dailyData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models?.name || '', r.input_quantity, ng, yieldRate, typeStr || '-', locStr || '-']);
                 });
                 const wsDaily = XLSX.utils.aoa_to_sheet(dailyData);

@@ -6,6 +6,12 @@ SMT.dashboard = function (ctx) {
         const dashboardRecentOoc = ref([]);
         const dashDate = ref(new Date().toISOString().split('T')[0]);
 
+        // 良率一律無條件捨去至小數 2 位：只要有不良就不會被進位成 100%
+        const calcYield = (input, defects) => {
+            if (!input) return '100.00';
+            return (Math.floor((input - defects) / input * 10000) / 100).toFixed(2);
+        };
+
         const changeDashDate = (delta) => {
             const d = new Date(dashDate.value);
             d.setDate(d.getDate() + delta);
@@ -22,7 +28,7 @@ SMT.dashboard = function (ctx) {
             (todayProds || []).forEach(p => { tInput += p.input_quantity; p.defect_logs.forEach(d => { tDefects += d.quantity; }); });
             dashboard.value.todayInput = tInput;
             dashboard.value.todayDefects = tDefects;
-            dashboard.value.todayYield = tInput ? ((tInput - tDefects) / tInput * 100).toFixed(1) : '100.0';
+            dashboard.value.todayYield = calcYield(tInput, tDefects);
 
             const monthStart = targetDate.slice(0, 7) + '-01';
             const { data: oocMonth, count: oocCount } = await _supabase.from('ooc_records').select('id', { count: 'exact' }).gte('production_date', monthStart).lte('production_date', targetDate);
@@ -33,7 +39,7 @@ SMT.dashboard = function (ctx) {
             const { data: weekProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').gte('production_date', weekStr).lte('production_date', targetDate);
             let wInput = 0, wDefects = 0;
             (weekProds || []).forEach(p => { wInput += p.input_quantity; p.defect_logs.forEach(d => { wDefects += d.quantity; }); });
-            dashboard.value.weekAvgYield = wInput ? ((wInput - wDefects) / wInput * 100).toFixed(1) : '100.0';
+            dashboard.value.weekAvgYield = calcYield(wInput, wDefects);
 
             const { data: recentProds } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(quantity)').eq('production_date', targetDate).order('production_date', { ascending: false }).limit(20);
             dashboardRecentProds.value = (recentProds || []).map(item => ({ ...item, defect_count: item.defect_logs.reduce((s, d) => s + (d.quantity || 0), 0) }));
@@ -63,7 +69,7 @@ SMT.dashboard = function (ctx) {
                 }
             });
             const labels = days.map(d => d.slice(5));
-            const yields = days.map(d => { const {input,defects}=dayMap[d]; return input>0?parseFloat(((input-defects)/input*100).toFixed(2)):null; });
+            const yields = days.map(d => { const {input,defects}=dayMap[d]; return input>0?parseFloat(calcYield(input,defects)):null; });
             const inputs = days.map(d => dayMap[d].input);
             await Vue.nextTick();
             const yieldEl = document.getElementById('dashYieldChart');
@@ -85,10 +91,20 @@ SMT.dashboard = function (ctx) {
                     tooltip:{trigger:'axis',formatter:p=>p[0].name+'<br/><b>'+p[0].value+' pcs</b>'},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
                     yAxis:{type:'value',axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
-                    series:[{type:'bar',data:inputs,barMaxWidth:28,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#2563eb'},{offset:1,color:'#93c5fd'}]},borderRadius:[4,4,0,0]},emphasis:{itemStyle:{color:'#1d4ed8'}}}]
+                    series:[{type:'bar',data:inputs,barMaxWidth:28,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#1E40AF'},{offset:1,color:'#93C5FD'}]},borderRadius:[4,4,0,0]},emphasis:{itemStyle:{color:'#17318A'}}}]
                 });
             }
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                if (dashYieldChartInst) dashYieldChartInst.resize();
+                if (dashInputChartInst) dashInputChartInst.resize();
+            }));
         };
+        // 容器剛插入 DOM 時寬度可能為 0，ECharts 會以預設寬度初始化 → 渲染後強制 resize
+        const resizeDashboardCharts = () => {
+            [dashYieldChartInst, dashInputChartInst].forEach(inst => { if (inst) inst.resize(); });
+        };
+        window.addEventListener('resize', () => { if (currentTab.value === 'dashboard') resizeDashboardCharts(); });
+
         watch(currentTab, async (tab) => { if (tab === 'dashboard') { await initDashboardCharts(); } });
         return {
             dashboard, dashboardRecentProds, dashboardRecentOoc, dashDate,

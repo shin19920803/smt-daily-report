@@ -4,14 +4,6 @@ SMT.stats = function (ctx) {
 
         const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
-        const selectedDefectType = ref(null);
-        const selectedLocCode = ref(null);
-        const selectedModelName = ref(null);
-        const selectedWoNumber = ref(null);
-        const openLocDetail = (code) => { selectedLocCode.value = code; };
-        const openTypeDetail = (name) => { selectedDefectType.value = selectedDefectType.value === name ? null : name; };
-        const openModelDetail = (name) => { selectedModelName.value = selectedModelName.value === name ? null : name; };
-        const openWoDetail = (wo) => { selectedWoNumber.value = selectedWoNumber.value === wo ? null : wo; };
 
         // --- 通用：map -> 排序清單(含比例) ---
         const mapToList = (map) => {
@@ -20,48 +12,88 @@ SMT.stats = function (ctx) {
             return list.map(x => ({ ...x, ratio: total ? (x.qty / total * 100).toFixed(1) : '0.0' }));
         };
 
-        // --- 下鑽面板 ---
-        const typeDrill = computed(() => {
-            const t = selectedDefectType.value, r = statsResult.value;
-            if (!t || !r) return null;
-            return {
-                name: t,
-                total: (r.byType.find(x => x.name === t) || {}).qty || 0,
-                locs: mapToList(r.typeLocMap[t]),
-                models: mapToList(r.typeModelMap[t]),
-                wos: mapToList(r.typeWoMap[t])
-            };
+        // --- 下鑽彈窗：單一 modal + 麵包屑堆疊，任一維度可互跳 ---
+        const drillStack = ref([]);
+        const pushDrill = (kind, key) => {
+            if (!key || !statsResult.value) return;
+            const top = drillStack.value[drillStack.value.length - 1];
+            if (top && top.kind === kind && top.key === key) return;
+            drillStack.value.push({ kind, key });
+        };
+        const popDrill = () => { drillStack.value.pop(); };
+        const closeDrill = () => { drillStack.value = []; };
+        const openTypeDetail = (name) => pushDrill('type', name);
+        const openLocDetail = (code) => pushDrill('loc', code);
+        const openModelDetail = (name) => pushDrill('model', name);
+        const openWoDetail = (wo) => pushDrill('wo', wo);
+        const isDrill = (kind, key) => {
+            const top = drillStack.value[drillStack.value.length - 1];
+            return !!top && top.kind === kind && top.key === key;
+        };
+
+        // Esc：先返回上一層，最後一層才關閉
+        window.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape' || drillStack.value.length === 0) return;
+            drillStack.value.length > 1 ? popDrill() : closeDrill();
         });
-        const locDrill = computed(() => {
-            const l = selectedLocCode.value, r = statsResult.value;
-            if (!l || !r) return null;
-            return {
-                code: l,
-                total: (r.byLocation.find(x => x.code === l) || {}).qty || 0,
-                wos: mapToList(r.locWoMap[l]),
-                models: mapToList(r.locModelMap[l]),
-                types: mapToList(r.locTypeMap[l])
-            };
-        });
-        const modelDrill = computed(() => {
-            const m = selectedModelName.value, r = statsResult.value;
-            if (!m || !r || !r.modelAgg[m]) return null;
-            const agg = r.modelAgg[m];
-            return {
-                name: m, input: agg.input, defects: agg.defects,
-                rate: agg.input ? (agg.defects / agg.input * 100).toFixed(2) : '0.00',
-                types: mapToList(agg.byType), locs: mapToList(agg.byLoc), wos: mapToList(agg.byWo)
-            };
-        });
-        const woDrill = computed(() => {
-            const w = selectedWoNumber.value, r = statsResult.value;
-            if (!w || !r || !r.woAgg[w]) return null;
-            const agg = r.woAgg[w];
-            return {
-                wo: w, model: [...agg.models].join(' / '), input: agg.input, defects: agg.defects,
-                rate: agg.input ? (agg.defects / agg.input * 100).toFixed(2) : '0.00',
-                types: mapToList(agg.byType), locs: mapToList(agg.byLoc)
-            };
+
+        const DRILL_META = {
+            type:  { label: '不良現象', icon: 'fa-bug',            accent: 'red' },
+            loc:   { label: '不良位置', icon: 'fa-map-marker-alt', accent: 'amber' },
+            model: { label: '機種',     icon: 'fa-microchip',      accent: 'indigo' },
+            wo:    { label: '工單',     icon: 'fa-file-alt',       accent: 'blue' }
+        };
+
+        const drillView = computed(() => {
+            const cur = drillStack.value[drillStack.value.length - 1];
+            const r = statsResult.value;
+            if (!cur || !r) return null;
+            const meta = DRILL_META[cur.kind];
+            const base = { kind: cur.kind, key: cur.key, meta, depth: drillStack.value.length };
+
+            if (cur.kind === 'type') {
+                const qty = (r.byType.find(x => x.name === cur.key) || {}).qty || 0;
+                return { ...base, subtitle: `佔全區間不良 ${r.totalDefects ? (qty / r.totalDefects * 100).toFixed(1) : '0.0'}%`,
+                    metrics: [{ label: '不良總數', value: qty, tone: 'red' }],
+                    groups: [
+                        { label: '不良位置分佈', icon: 'fa-map-marker-alt', pick: 'loc',   items: mapToList(r.typeLocMap[cur.key]) },
+                        { label: '機種分佈',     icon: 'fa-microchip',      pick: 'model', items: mapToList(r.typeModelMap[cur.key]) },
+                        { label: '工單分佈',     icon: 'fa-file-alt',       pick: 'wo',    items: mapToList(r.typeWoMap[cur.key]) }
+                    ] };
+            }
+            if (cur.kind === 'loc') {
+                const qty = (r.byLocation.find(x => x.code === cur.key) || {}).qty || 0;
+                return { ...base, subtitle: `佔全區間不良 ${r.totalDefects ? (qty / r.totalDefects * 100).toFixed(1) : '0.0'}%`,
+                    metrics: [{ label: '不良總數', value: qty, tone: 'red' }],
+                    groups: [
+                        { label: '不良現象分佈', icon: 'fa-bug',       pick: 'type',  items: mapToList(r.locTypeMap[cur.key]) },
+                        { label: '機種分佈',     icon: 'fa-microchip', pick: 'model', items: mapToList(r.locModelMap[cur.key]) },
+                        { label: '工單分佈',     icon: 'fa-file-alt',  pick: 'wo',    items: mapToList(r.locWoMap[cur.key]) }
+                    ] };
+            }
+            if (cur.kind === 'model') {
+                const agg = r.modelAgg[cur.key]; if (!agg) return null;
+                return { ...base, subtitle: `不良率 ${agg.input ? (agg.defects / agg.input * 100).toFixed(2) : '0.00'}%`,
+                    metrics: [
+                        { label: '投入數', value: agg.input, tone: 'slate' },
+                        { label: '不良數', value: agg.defects, tone: 'red' }
+                    ],
+                    groups: [
+                        { label: '不良現象分佈', icon: 'fa-bug',              pick: 'type', items: mapToList(agg.byType) },
+                        { label: '不良位置分佈', icon: 'fa-map-marker-alt',   pick: 'loc',  items: mapToList(agg.byLoc) },
+                        { label: '工單分佈',     icon: 'fa-file-alt',         pick: 'wo',   items: mapToList(agg.byWo) }
+                    ] };
+            }
+            const agg = r.woAgg[cur.key]; if (!agg) return null;
+            return { ...base, subtitle: `${[...agg.models].join(' / ')} · 不良率 ${agg.input ? (agg.defects / agg.input * 100).toFixed(2) : '0.00'}%`,
+                metrics: [
+                    { label: '投入數', value: agg.input, tone: 'slate' },
+                    { label: '不良數', value: agg.defects, tone: 'red' }
+                ],
+                groups: [
+                    { label: '不良現象分佈', icon: 'fa-bug',            pick: 'type', items: mapToList(agg.byType) },
+                    { label: '不良位置分佈', icon: 'fa-map-marker-alt', pick: 'loc',  items: mapToList(agg.byLoc) }
+                ] };
         });
 
         // --- 趨勢圖著色與座標 (原邏輯保留) ---
@@ -240,8 +272,7 @@ SMT.stats = function (ctx) {
                     fpyTrend = Object.keys(fpyDayMap).sort().map(d => ({ date: d, spi: avg(fpyDayMap[d].spi), aoi: avg(fpyDayMap[d].aoi) }));
                 } catch (e) { console.error('FPY 趨勢載入失敗', e); }
 
-                selectedDefectType.value = null; selectedLocCode.value = null;
-                selectedModelName.value = null; selectedWoNumber.value = null;
+                closeDrill();
                 statsResult.value = {
                     totalInput, totalDefects,
                     yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100,
@@ -364,13 +395,22 @@ SMT.stats = function (ctx) {
                     tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
                     legend:{data:['不良數量','累積佔比'],top:4,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
                     grid:{top:40,right:60,bottom:60,left:50},
-                    xAxis:{type:'category',data:names,axisLabel:{fontSize:10,color:'#374151',rotate:names.some(n=>n.length>4)?20:0},axisLine:{lineStyle:{color:'#e5e7eb'}}},
+                    xAxis:{type:'category',data:names,triggerEvent:true,axisLabel:{fontSize:10,color:'#374151',rotate:names.some(n=>n.length>4)?20:0},axisLine:{lineStyle:{color:'#e5e7eb'}}},
                     yAxis:[{type:'value',name:'數量',nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'累積%',min:0,max:100,nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
                     series:[
                         {name:'不良數量',type:'bar',data:qtys,barMaxWidth:40,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#dc2626'},{offset:1,color:'#fca5a5'}]},borderRadius:[4,4,0,0]},label:{show:true,position:'top',fontSize:10,color:'#374151',formatter:'{c}'}},
                         {name:'累積佔比',type:'line',yAxisIndex:1,data:cumPct,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#2563eb',width:2},itemStyle:{color:'#2563eb'},label:{show:true,position:'top',fontSize:9,color:'#2563eb',formatter:'{c}%'},markLine:{silent:true,lineStyle:{color:'#d97706',type:'dashed',width:1.5},data:[{yAxis:80,label:{formatter:'80%',position:'start',fontSize:10,color:'#d97706'}}]}}
                     ]
                 });
+                // 點擊柱狀 / X 軸標籤即開啟該不良現象的交叉分析彈窗
+                paretoChartInst.off('click');
+                paretoChartInst.on('click', p => {
+                    const name = p.componentType === 'xAxis' ? p.value : p.name;
+                    if (!name) return;
+                    paretoChartInst.dispatchAction({ type: 'hideTip' });
+                    openTypeDetail(name);
+                });
+                el.style.cursor = 'pointer';
             });
         };
 
@@ -395,6 +435,15 @@ SMT.stats = function (ctx) {
                     visualMap:{min:0,max:Math.max(1,maxV),calculable:false,orient:'horizontal',left:'center',bottom:0,inRange:{color:['#fff5f5','#fca5a5','#dc2626','#7f1d1d']},textStyle:{fontSize:10,color:'#6b7280'}},
                     series:[{type:'heatmap',data:dataArr,label:{show:true,fontSize:9,color:'#111'},emphasis:{itemStyle:{shadowBlur:6,shadowColor:'rgba(0,0,0,0.3)'}}}]
                 });
+                // 點擊格子 → 開啟該位置的交叉分析
+                heatmapChartInst.off('click');
+                heatmapChartInst.on('click', p => {
+                    const code = locs[p.value[0]];
+                    if (!code) return;
+                    heatmapChartInst.dispatchAction({ type: 'hideTip' });
+                    openLocDetail(code);
+                });
+                el.style.cursor = 'pointer';
             });
         };
 
@@ -419,16 +468,24 @@ SMT.stats = function (ctx) {
             });
         };
 
-        const renderStatsCharts = () => { renderParetoChart(); renderHeatmap(); renderFpyTrendChart(); };
+        // 容器剛插入 DOM 時寬度可能尚未完成 layout，ECharts 會以預設寬度初始化；
+        // 因此每次渲染後於下一動畫影格強制 resize 一次。
+        const resizeStatsCharts = () => {
+            [paretoChartInst, heatmapChartInst, fpyTrendChartInst].forEach(inst => { if (inst) inst.resize(); });
+        };
+        const renderStatsCharts = () => {
+            renderParetoChart(); renderHeatmap(); renderFpyTrendChart();
+            requestAnimationFrame(() => requestAnimationFrame(resizeStatsCharts));
+        };
+        window.addEventListener('resize', () => { if (currentTab.value === 'stats') resizeStatsCharts(); });
 
         watch(() => statsResult.value, (val) => { if (val && currentTab.value === 'stats') renderStatsCharts(); });
         watch(currentTab, (tab) => { if (tab === 'stats' && statsResult.value) renderStatsCharts(); });
 
         return {
             statsFilter, statsResult, calculateStats, exportToExcel,
-            selectedDefectType, selectedLocCode, selectedModelName, selectedWoNumber,
+            drillView, drillStack, pushDrill, popDrill, closeDrill, isDrill,
             openTypeDetail, openLocDetail, openModelDetail, openWoDetail,
-            typeDrill, locDrill, modelDrill, woDrill,
             trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints,
             renderParetoChart, renderStatsCharts
         };

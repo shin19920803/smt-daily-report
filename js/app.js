@@ -29,19 +29,20 @@ const app = createApp({
 
 // 共用排行清單元件：items = [{ key, qty, ratio }]
 app.component('break-list', {
-    props: { items: { type: Array, default: () => [] }, clickable: Boolean, keyWidth: { type: String, default: '90px' } },
+    props: { items: { type: Array, default: () => [] }, clickable: Boolean, keyWidth: { type: String, default: '96px' } },
     emits: ['pick'],
     template: `
-    <div class="space-y-1.5">
-        <div v-for="(it, idx) in items" :key="it.key" @click="clickable && $emit('pick', it.key)"
-             class="flex items-center gap-2 p-1.5 rounded-lg transition" :class="clickable ? 'cursor-pointer hover:bg-red-50' : ''">
-            <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0"
-                 :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'">{{ idx + 1 }}</div>
-            <div class="font-mono text-xs font-bold text-gray-700 truncate shrink-0" :style="{width: keyWidth}" :title="it.key">{{ it.key }}</div>
-            <div class="flex-1 min-w-[40px]"><div class="w-full bg-gray-100 rounded-full h-1.5"><div class="h-1.5 rounded-full bg-red-400 transition-all" :style="{width: (it.qty / items[0].qty * 100) + '%'}"></div></div></div>
-            <div class="font-mono text-xs font-bold text-red-600 text-right whitespace-nowrap shrink-0">{{ it.qty }} <span class="text-gray-400 font-normal">({{ it.ratio }}%)</span></div>
-        </div>
-        <div v-if="!items || items.length === 0" class="text-center text-gray-300 text-xs py-3"><i class="fas fa-inbox mr-1"></i>無資料</div>
+    <div class="space-y-0.5">
+        <component :is="clickable ? 'button' : 'div'" v-for="(it, idx) in items" :key="it.key"
+             @click="clickable && $emit('pick', it.key)"
+             class="break-row" :class="{ 'is-clickable': clickable, 'is-top': idx < 3 }"
+             :title="clickable ? it.key + ' — 點擊繼續鑽取' : it.key">
+            <span class="break-rank">{{ idx + 1 }}</span>
+            <span class="break-key" :style="{minWidth: keyWidth}">{{ it.key }}</span>
+            <span class="flex-1 min-w-[24px]"><span class="meter"><span class="meter-fill bg-red" :style="{width: (it.qty / items[0].qty * 100) + '%'}"></span></span></span>
+            <span class="break-qty">{{ it.qty }} <span>({{ it.ratio }}%)</span></span>
+        </component>
+        <div v-if="!items || items.length === 0" class="empty-state" style="padding:16px 8px"><i class="fas fa-inbox"></i><div class="hint">無資料</div></div>
     </div>`
 });
 

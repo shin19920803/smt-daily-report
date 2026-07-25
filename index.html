@@ -11,7 +11,7 @@
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Fira+Code:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="css/main.css">
 </head>
@@ -637,113 +637,95 @@
                 </div>
             </div>
 
-            <!-- Pareto Chart Panel -->
-            <div v-if="statsResult" class="section-card mb-6 animate-fade-in">
-                <div class="card-header">
-                    <div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-sort-amount-down text-xs"></i></div>
-                    不良現象 Pareto 圖分析
-                    <span class="ml-auto text-xs text-gray-400 font-normal">柱狀=數量，折線=累積佔比</span>
+            <!-- 空狀態 -->
+            <div v-if="!statsResult" class="section-card">
+                <div class="empty-state py-16">
+                    <i class="fas fa-chart-column"></i>
+                    <div class="title">尚未執行統計</div>
+                    <div class="hint">設定上方篩選條件後點擊「執行統計」</div>
                 </div>
-                <div id="paretoChart" style="width:100%;height:320px;"></div>
             </div>
-            <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
-                <div class="section-card p-4"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">總合統計</h3><div class="grid grid-cols-2 gap-4"><div class="p-3 bg-gray-50 rounded-lg"><div class="text-xs text-gray-400">總投入數</div><div class="text-xl font-black font-mono">{{ statsResult.totalInput }}</div></div><div class="p-3 bg-red-50 rounded-lg"><div class="text-xs text-red-400">總不良數</div><div class="text-xl font-black text-red-600 font-mono">{{ statsResult.totalDefects }}</div></div><div class="col-span-2 p-4 rounded-lg text-center" :class="statsResult.yieldRate >= 98 ? 'bg-green-50' : statsResult.yieldRate >= 95 ? 'bg-yellow-50' : 'bg-red-50'"><div class="text-xs text-gray-500 mb-1">良率 (Yield Rate)</div><div class="text-3xl font-black font-mono" :class="statsResult.yieldRate >= 98 ? 'text-green-600' : statsResult.yieldRate >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ statsResult.yieldRate }}%</div></div></div></div>
-                <div class="section-card p-4"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">不良現象統計 <span class="text-xs font-normal text-gray-400">(點擊查看 位置 × 機種 × 工單 分佈)</span></h3>
-                    <ul class="space-y-2 max-h-60 overflow-y-auto">
-                        <li v-for="item in statsResult.byType" :key="item.name" @click="selectedDefectType = selectedDefectType === item.name ? null : item.name" class="text-sm p-2 border-b border-dashed cursor-pointer rounded transition" :class="selectedDefectType === item.name ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-gray-50'">
-                            <div class="flex justify-between mb-1"><span class="font-bold text-gray-700">{{ item.name }} <i v-if="selectedDefectType === item.name" class="fas fa-check-circle text-red-500 ml-1 text-xs"></i></span><span class="font-bold font-mono">{{ item.qty }} <span class="text-gray-400">({{ item.ratio }}%)</span></span></div>
-                            <div class="w-full bg-gray-100 rounded-full h-1.5"><div class="bg-red-400 h-1.5 rounded-full transition-all" :style="{width: item.ratio + '%'}"></div></div>
-                        </li>
-                    </ul>
-                </div>
-                <div class="section-card p-4 col-span-1 md:col-span-2"><h3 class="font-bold border-b pb-2 mb-4 text-gray-700">位置異常統計 <span class="text-xs font-normal text-gray-400">(點擊查看 工單 × 機種 × 現象 分佈)</span></h3><div class="flex flex-wrap gap-2"><span v-for="loc in statsResult.byLocation" @click="openLocDetail(loc.code)" class="px-3 py-1.5 bg-gray-50 rounded-lg text-sm border font-mono cursor-pointer hover:bg-red-100 hover:border-red-300 transition">{{ loc.code }}: <span class="font-bold text-red-600">{{ loc.qty }}</span> <span class="text-xs text-gray-400">({{ loc.ratio }}%)</span></span></div></div>
 
-                <!-- 現象下鑽：位置 × 機種 × 工單 -->
-                <div v-if="typeDrill" class="section-card p-4 col-span-1 md:col-span-2 border-l-4 border-red-500 animate-fade-in">
-                    <div class="flex justify-between items-center border-b pb-2 mb-4">
-                        <h3 class="font-bold text-red-700"><i class="fas fa-search-location mr-1"></i>「{{ typeDrill.name }}」交叉分析 <span class="text-xs font-normal text-gray-400 ml-2">總數 {{ typeDrill.total }}</span></h3>
-                        <button @click="selectedDefectType = null" class="text-gray-400 hover:text-red-500 text-xs"><i class="fas fa-times mr-1"></i>關閉</button>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><div class="text-xs font-bold text-gray-500 mb-2"><i class="fas fa-map-marker-alt mr-1 text-red-400"></i>位置分佈</div><break-list :items="typeDrill.locs" clickable @pick="openLocDetail"></break-list></div>
-                        <div><div class="text-xs font-bold text-gray-500 mb-2"><i class="fas fa-microchip mr-1 text-indigo-400"></i>機種分佈</div><break-list :items="typeDrill.models" clickable @pick="openModelDetail"></break-list></div>
-                        <div><div class="text-xs font-bold text-gray-500 mb-2"><i class="fas fa-file-alt mr-1 text-blue-400"></i>工單分佈</div><break-list :items="typeDrill.wos" clickable @pick="openWoDetail"></break-list></div>
+            <!-- 統計摘要 KPI -->
+            <div v-if="statsResult" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5 animate-fade-in">
+                <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ statsResult.totalInput.toLocaleString() }}</div><div class="kpi-label">總投入數</div></div>
+                <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-times-circle"></i></div><div class="kpi-value text-danger">{{ statsResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">總不良數</div></div>
+                <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-chart-pie"></i></div><div class="kpi-value" :class="statsResult.yieldRate >= 98 ? 'text-success' : statsResult.yieldRate >= 95 ? 'text-warning' : 'text-danger'">{{ statsResult.yieldRate }}%</div><div class="kpi-label">良率 Yield</div></div>
+                <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ statsResult.totalDays }}</div><div class="kpi-label">統計天數</div></div>
+            </div>
+
+            <!-- Pareto Chart Panel -->
+            <div v-if="statsResult" class="section-card mb-5 animate-fade-in">
+                <div class="card-header">
+                    <div class="card-header-icon" style="background:var(--danger-soft);color:var(--danger)"><i class="fas fa-sort-amount-down text-xs"></i></div>
+                    不良現象 Pareto 圖分析
+                    <span class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 位置 × 機種 × 工單 分佈</span>
+                </div>
+                <div id="paretoChart" style="width:100%;height:340px;"></div>
+            </div>
+
+            <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-5 animate-fade-in">
+                <div class="section-card p-4 col-span-1 md:col-span-2">
+                    <h3 class="card-title">位置異常統計 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊查看 工單 × 機種 × 現象 分佈</span></h3>
+                    <div class="flex flex-wrap gap-2">
+                        <button v-for="loc in statsResult.byLocation" :key="loc.code" @click="openLocDetail(loc.code)" class="data-chip">
+                            <span class="font-mono font-bold">{{ loc.code }}</span>
+                            <span class="data-chip-value">{{ loc.qty }}</span>
+                            <span class="data-chip-ratio">{{ loc.ratio }}%</span>
+                        </button>
                     </div>
                 </div>
 
                 <!-- 機種分析 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-microchip mr-1 text-indigo-500"></i>機種不良分析 <span class="text-xs font-normal text-gray-400">(點擊查看該機種 現象×位置×工單)</span></h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm min-w-[560px]">
-                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase"><tr><th class="p-2 text-left border-b">機種</th><th class="p-2 text-right border-b">投入</th><th class="p-2 text-right border-b">不良數</th><th class="p-2 text-right border-b">不良率</th><th class="p-2 text-right border-b">佔總不良比</th><th class="p-2 border-b w-1/3">佔比</th></tr></thead>
+                    <h3 class="card-title"><i class="fas fa-microchip text-indigo-600"></i>機種不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該機種 現象 × 位置 × 工單</span></h3>
+                    <div class="table-wrap">
+                        <table class="data-table min-w-[560px]">
+                            <thead><tr><th class="text-left">機種</th><th class="text-right">投入</th><th class="text-right">不良數</th><th class="text-right">不良率</th><th class="text-right">佔總不良比</th><th class="w-1/3">佔比</th></tr></thead>
                             <tbody>
-                                <tr v-for="m in statsResult.byModel" :key="m.name" @click="openModelDetail(m.name)" class="border-b cursor-pointer transition" :class="selectedModelName === m.name ? 'bg-indigo-50' : 'hover:bg-gray-50'">
-                                    <td class="p-2 font-bold text-indigo-700">{{ m.name }} <i v-if="selectedModelName === m.name" class="fas fa-check-circle text-indigo-500 ml-1 text-xs"></i></td>
-                                    <td class="p-2 text-right font-mono">{{ m.input }}</td>
-                                    <td class="p-2 text-right font-mono text-red-600 font-bold">{{ m.defects }}</td>
-                                    <td class="p-2 text-right font-mono font-bold" :class="parseFloat(m.rate) > 2 ? 'text-red-600' : parseFloat(m.rate) > 1 ? 'text-yellow-600' : 'text-green-600'">{{ m.rate }}%</td>
-                                    <td class="p-2 text-right font-mono">{{ m.ratio }}%</td>
-                                    <td class="p-2"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full bg-indigo-400 transition-all" :style="{width: m.ratio + '%'}"></div></div></td>
+                                <tr v-for="m in statsResult.byModel" :key="m.name" @click="openModelDetail(m.name)" class="row-clickable" :class="{ 'row-active': isDrill('model', m.name) }" tabindex="0" @keydown.enter="openModelDetail(m.name)">
+                                    <td class="font-bold text-indigo-700">{{ m.name }}</td>
+                                    <td class="text-right font-mono">{{ m.input.toLocaleString() }}</td>
+                                    <td class="text-right font-mono text-danger font-bold">{{ m.defects }}</td>
+                                    <td class="text-right font-mono font-bold" :class="parseFloat(m.rate) > 2 ? 'text-danger' : parseFloat(m.rate) > 1 ? 'text-warning' : 'text-success'">{{ m.rate }}%</td>
+                                    <td class="text-right font-mono">{{ m.ratio }}%</td>
+                                    <td><div class="meter"><div class="meter-fill bg-indigo" :style="{width: m.ratio + '%'}"></div></div></td>
                                 </tr>
                             </tbody>
                         </table>
-                    </div>
-                    <!-- 機種下鑽 -->
-                    <div v-if="modelDrill" class="mt-4 p-4 bg-indigo-50/50 rounded-xl border border-indigo-200 animate-fade-in">
-                        <div class="flex justify-between items-center mb-3">
-                            <h4 class="font-bold text-indigo-700 text-sm"><i class="fas fa-microchip mr-1"></i>「{{ modelDrill.name }}」交叉分析 <span class="text-xs font-normal text-gray-400 ml-2">投入 {{ modelDrill.input }} · 不良 {{ modelDrill.defects }} · 不良率 {{ modelDrill.rate }}%</span></h4>
-                            <button @click="selectedModelName = null" class="text-gray-400 hover:text-red-500 text-xs"><i class="fas fa-times mr-1"></i>關閉</button>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div><div class="text-xs font-bold text-gray-500 mb-2">不良現象分佈</div><break-list :items="modelDrill.types" clickable @pick="openTypeDetail"></break-list></div>
-                            <div><div class="text-xs font-bold text-gray-500 mb-2">不良位置分佈</div><break-list :items="modelDrill.locs" clickable @pick="openLocDetail"></break-list></div>
-                            <div><div class="text-xs font-bold text-gray-500 mb-2">工單分佈</div><break-list :items="modelDrill.wos" clickable @pick="openWoDetail"></break-list></div>
-                        </div>
                     </div>
                 </div>
 
                 <!-- 工單分析 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-file-alt mr-1 text-blue-500"></i>工單不良分析 <span class="text-xs font-normal text-gray-400">(點擊查看該工單 現象×位置)</span></h3>
-                    <div class="overflow-x-auto max-h-80 overflow-y-auto">
-                        <table class="w-full text-sm min-w-[560px]">
-                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase sticky top-0"><tr><th class="p-2 text-left border-b">工單號碼</th><th class="p-2 text-left border-b">機種</th><th class="p-2 text-right border-b">投入</th><th class="p-2 text-right border-b">不良數</th><th class="p-2 text-right border-b">不良率</th><th class="p-2 text-right border-b">佔總不良比</th><th class="p-2 border-b w-1/4">佔比</th></tr></thead>
+                    <h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該工單 現象 × 位置</span></h3>
+                    <div class="table-wrap max-h-80">
+                        <table class="data-table min-w-[560px]">
+                            <thead><tr><th class="text-left">工單號碼</th><th class="text-left">機種</th><th class="text-right">投入</th><th class="text-right">不良數</th><th class="text-right">不良率</th><th class="text-right">佔總不良比</th><th class="w-1/4">佔比</th></tr></thead>
                             <tbody>
-                                <tr v-for="w in statsResult.byWo" :key="w.wo" @click="openWoDetail(w.wo)" class="border-b cursor-pointer transition" :class="selectedWoNumber === w.wo ? 'bg-blue-50' : 'hover:bg-gray-50'">
-                                    <td class="p-2 font-mono font-bold text-blue-700">{{ w.wo }} <i v-if="selectedWoNumber === w.wo" class="fas fa-check-circle text-blue-500 ml-1 text-xs"></i></td>
-                                    <td class="p-2 text-xs text-gray-600">{{ w.model }}</td>
-                                    <td class="p-2 text-right font-mono">{{ w.input }}</td>
-                                    <td class="p-2 text-right font-mono text-red-600 font-bold">{{ w.defects }}</td>
-                                    <td class="p-2 text-right font-mono font-bold" :class="parseFloat(w.rate) > 2 ? 'text-red-600' : parseFloat(w.rate) > 1 ? 'text-yellow-600' : 'text-green-600'">{{ w.rate }}%</td>
-                                    <td class="p-2 text-right font-mono">{{ w.ratio }}%</td>
-                                    <td class="p-2"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full bg-blue-400 transition-all" :style="{width: w.ratio + '%'}"></div></div></td>
+                                <tr v-for="w in statsResult.byWo" :key="w.wo" @click="openWoDetail(w.wo)" class="row-clickable" :class="{ 'row-active': isDrill('wo', w.wo) }" tabindex="0" @keydown.enter="openWoDetail(w.wo)">
+                                    <td class="font-mono font-bold text-blue-700">{{ w.wo }}</td>
+                                    <td class="text-xs text-muted">{{ w.model }}</td>
+                                    <td class="text-right font-mono">{{ w.input.toLocaleString() }}</td>
+                                    <td class="text-right font-mono text-danger font-bold">{{ w.defects }}</td>
+                                    <td class="text-right font-mono font-bold" :class="parseFloat(w.rate) > 2 ? 'text-danger' : parseFloat(w.rate) > 1 ? 'text-warning' : 'text-success'">{{ w.rate }}%</td>
+                                    <td class="text-right font-mono">{{ w.ratio }}%</td>
+                                    <td><div class="meter"><div class="meter-fill bg-blue" :style="{width: w.ratio + '%'}"></div></div></td>
                                 </tr>
                             </tbody>
                         </table>
-                    </div>
-                    <!-- 工單下鑽 -->
-                    <div v-if="woDrill" class="mt-4 p-4 bg-blue-50/50 rounded-xl border border-blue-200 animate-fade-in">
-                        <div class="flex justify-between items-center mb-3">
-                            <h4 class="font-bold text-blue-700 text-sm"><i class="fas fa-file-alt mr-1"></i>「{{ woDrill.wo }}」({{ woDrill.model }}) 交叉分析 <span class="text-xs font-normal text-gray-400 ml-2">投入 {{ woDrill.input }} · 不良 {{ woDrill.defects }} · 不良率 {{ woDrill.rate }}%</span></h4>
-                            <button @click="selectedWoNumber = null" class="text-gray-400 hover:text-red-500 text-xs"><i class="fas fa-times mr-1"></i>關閉</button>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><div class="text-xs font-bold text-gray-500 mb-2">不良現象分佈</div><break-list :items="woDrill.types" clickable @pick="openTypeDetail"></break-list></div>
-                            <div><div class="text-xs font-bold text-gray-500 mb-2">不良位置分佈</div><break-list :items="woDrill.locs" clickable @pick="openLocDetail"></break-list></div>
-                        </div>
                     </div>
                 </div>
 
                 <!-- 現象 × 位置 熱力圖 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-th mr-1 text-red-500"></i>現象 × 位置 熱力圖 <span class="text-xs font-normal text-gray-400">(Top 8 現象 × Top 12 位置，顏色越深越集中)</span></h3>
+                    <h3 class="card-title"><i class="fas fa-table-cells text-red-600"></i>現象 × 位置 熱力圖 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>Top 8 現象 × Top 12 位置，點擊格子查看該位置分佈</span></h3>
                     <div id="typeLocHeatmap" style="width:100%;height:340px;"></div>
                 </div>
 
                 <!-- Top 10 Pareto: 位號柏拉圖 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-exclamation-triangle mr-1 text-orange-500"></i>Top 10 位號柏拉圖 <span class="text-xs font-normal text-gray-400">(≥50% 天數出現 = 系統性問題)</span></h3>
+                    <h3 class="card-title"><i class="fas fa-exclamation-triangle text-amber-600"></i>Top 10 位號柏拉圖 <span class="badge-hint">≥50% 天數出現 = 系統性問題</span></h3>
                     <div class="space-y-2" v-if="statsResult.topLocations.length > 0">
                         <div v-for="(loc, idx) in statsResult.topLocations" :key="loc.code" @click="openLocDetail(loc.code)" class="flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:opacity-80 transition" :class="loc.isSystemic ? 'bg-red-50 border border-red-200' : 'bg-gray-50'">
                             <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-300 text-gray-600'">{{ idx + 1 }}</div>
@@ -851,19 +833,46 @@
                 </div>
             </div>
 
-            <!-- 位置下鑽 Modal：工單 × 機種 × 現象 -->
-            <div v-if="locDrill" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50" @click.self="selectedLocCode = null">
-                <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-[860px] max-h-[85vh] overflow-y-auto animate-fade-in">
-                    <div class="flex justify-between items-center border-b pb-2 mb-4">
-                        <h3 class="font-black text-red-700"><i class="fas fa-map-marker-alt mr-2"></i>位置「<span class="font-mono">{{ locDrill.code }}</span>」交叉分析 <span class="text-xs font-normal text-gray-400 ml-2">總數 {{ locDrill.total }}</span></h3>
-                        <button @click="selectedLocCode = null" class="text-gray-400 hover:text-red-500"><i class="fas fa-times"></i></button>
+            <!-- 統一交叉分析彈窗：現象 / 位置 / 機種 / 工單 皆用此視窗，可互相鑽取並返回 -->
+            <div v-if="drillView" class="drill-overlay" @click.self="closeDrill" @keydown.esc="closeDrill">
+                <div class="drill-panel animate-scale-in" role="dialog" aria-modal="true" :aria-label="drillView.meta.label + ' ' + drillView.key + ' 交叉分析'">
+                    <header class="drill-header" :data-accent="drillView.meta.accent">
+                        <button v-if="drillView.depth > 1" @click="popDrill" class="drill-back" title="返回上一層"><i class="fas fa-arrow-left"></i></button>
+                        <div class="drill-icon"><i class="fas" :class="drillView.meta.icon"></i></div>
+                        <div class="min-w-0 flex-1">
+                            <div class="drill-eyebrow">{{ drillView.meta.label }} 交叉分析</div>
+                            <h3 class="drill-title font-mono">{{ drillView.key }}</h3>
+                            <div class="drill-subtitle">{{ drillView.subtitle }}</div>
+                        </div>
+                        <div class="drill-metrics">
+                            <div v-for="mt in drillView.metrics" :key="mt.label" class="drill-metric">
+                                <div class="drill-metric-value" :class="'tone-' + mt.tone">{{ mt.value.toLocaleString() }}</div>
+                                <div class="drill-metric-label">{{ mt.label }}</div>
+                            </div>
+                        </div>
+                        <button @click="closeDrill" class="drill-close" title="關閉 (Esc)"><i class="fas fa-times"></i></button>
+                    </header>
+
+                    <nav v-if="drillStack.length > 1" class="drill-breadcrumb">
+                        <template v-for="(step, i) in drillStack" :key="i">
+                            <span class="drill-crumb" :class="{ 'is-current': i === drillStack.length - 1 }">{{ step.key }}</span>
+                            <i v-if="i < drillStack.length - 1" class="fas fa-chevron-right drill-crumb-sep"></i>
+                        </template>
+                    </nav>
+
+                    <div class="drill-body">
+                        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                            <section v-for="g in drillView.groups" :key="g.label" class="drill-group">
+                                <h4 class="drill-group-title"><i class="fas" :class="g.icon"></i>{{ g.label }}<span class="drill-group-count">{{ g.items.length }}</span></h4>
+                                <break-list :items="g.items" clickable @pick="key => pushDrill(g.pick, key)"></break-list>
+                            </section>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><div class="text-xs font-bold text-gray-500 mb-2"><i class="fas fa-file-alt mr-1 text-blue-400"></i>工單分佈</div><break-list :items="locDrill.wos"></break-list></div>
-                        <div><div class="text-xs font-bold text-gray-500 mb-2"><i class="fas fa-microchip mr-1 text-indigo-400"></i>機種分佈</div><break-list :items="locDrill.models"></break-list></div>
-                        <div><div class="text-xs font-bold text-gray-500 mb-2"><i class="fas fa-bug mr-1 text-red-400"></i>現象分佈</div><break-list :items="locDrill.types"></break-list></div>
-                    </div>
-                    <div class="mt-4 text-center border-t pt-3"><button @click="selectedLocCode = null" class="btn-ghost">關閉</button></div>
+
+                    <footer class="drill-footer">
+                        <span class="text-xs text-muted"><i class="fas fa-hand-pointer mr-1"></i>點擊任一項目可繼續往下鑽取</span>
+                        <button @click="closeDrill" class="btn-ghost">關閉</button>
+                    </footer>
                 </div>
             </div>
         </div>

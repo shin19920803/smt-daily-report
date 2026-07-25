@@ -1,0 +1,435 @@
+window.SMT = window.SMT || {};
+SMT.stats = function (ctx) {
+        const { toast, loading, currentTab, fpyTargets } = ctx;
+
+        const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
+        const statsResult = ref(null);
+        const selectedDefectType = ref(null);
+        const selectedLocCode = ref(null);
+        const selectedModelName = ref(null);
+        const selectedWoNumber = ref(null);
+        const openLocDetail = (code) => { selectedLocCode.value = code; };
+        const openTypeDetail = (name) => { selectedDefectType.value = selectedDefectType.value === name ? null : name; };
+        const openModelDetail = (name) => { selectedModelName.value = selectedModelName.value === name ? null : name; };
+        const openWoDetail = (wo) => { selectedWoNumber.value = selectedWoNumber.value === wo ? null : wo; };
+
+        // --- 通用：map -> 排序清單(含比例) ---
+        const mapToList = (map) => {
+            const list = Object.entries(map || {}).map(([key, qty]) => ({ key, qty })).sort((a, b) => b.qty - a.qty);
+            const total = list.reduce((s, x) => s + x.qty, 0);
+            return list.map(x => ({ ...x, ratio: total ? (x.qty / total * 100).toFixed(1) : '0.0' }));
+        };
+
+        // --- 下鑽面板 ---
+        const typeDrill = computed(() => {
+            const t = selectedDefectType.value, r = statsResult.value;
+            if (!t || !r) return null;
+            return {
+                name: t,
+                total: (r.byType.find(x => x.name === t) || {}).qty || 0,
+                locs: mapToList(r.typeLocMap[t]),
+                models: mapToList(r.typeModelMap[t]),
+                wos: mapToList(r.typeWoMap[t])
+            };
+        });
+        const locDrill = computed(() => {
+            const l = selectedLocCode.value, r = statsResult.value;
+            if (!l || !r) return null;
+            return {
+                code: l,
+                total: (r.byLocation.find(x => x.code === l) || {}).qty || 0,
+                wos: mapToList(r.locWoMap[l]),
+                models: mapToList(r.locModelMap[l]),
+                types: mapToList(r.locTypeMap[l])
+            };
+        });
+        const modelDrill = computed(() => {
+            const m = selectedModelName.value, r = statsResult.value;
+            if (!m || !r || !r.modelAgg[m]) return null;
+            const agg = r.modelAgg[m];
+            return {
+                name: m, input: agg.input, defects: agg.defects,
+                rate: agg.input ? (agg.defects / agg.input * 100).toFixed(2) : '0.00',
+                types: mapToList(agg.byType), locs: mapToList(agg.byLoc), wos: mapToList(agg.byWo)
+            };
+        });
+        const woDrill = computed(() => {
+            const w = selectedWoNumber.value, r = statsResult.value;
+            if (!w || !r || !r.woAgg[w]) return null;
+            const agg = r.woAgg[w];
+            return {
+                wo: w, model: [...agg.models].join(' / '), input: agg.input, defects: agg.defects,
+                rate: agg.input ? (agg.defects / agg.input * 100).toFixed(2) : '0.00',
+                types: mapToList(agg.byType), locs: mapToList(agg.byLoc)
+            };
+        });
+
+        // --- 趨勢圖著色與座標 (原邏輯保留) ---
+        const trendColors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'];
+        const trendTypeColor = (typeName) => {
+            if (!statsResult.value || !statsResult.value.topTypeNames) return '#6b7280';
+            const idx = statsResult.value.topTypeNames.indexOf(typeName);
+            return idx >= 0 ? trendColors[idx % trendColors.length] : '#6b7280';
+        };
+        const chartMaxRate = computed(() => {
+            if (!statsResult.value?.trend) return 5;
+            const max = Math.max(...statsResult.value.trend.map(d => parseFloat(d.defectRate)));
+            return Math.max(1, Math.ceil(max * 1.2));
+        });
+        const chartMaxQty = computed(() => {
+            if (!statsResult.value?.trend || !statsResult.value?.topTypeNames) return 10;
+            let max = 0;
+            statsResult.value.trend.forEach(d => { statsResult.value.topTypeNames.forEach(t => { if ((d.byType[t] || 0) > max) max = d.byType[t]; }); });
+            return Math.max(5, Math.ceil(max * 1.2));
+        });
+        const trendY = (rate) => 40 + (1 - rate / chartMaxRate.value) * 160;
+        const trendYQty = (qty) => 40 + (1 - qty / chartMaxQty.value) * 160;
+        const trendLinePoints = (kind, typeName) => {
+            if (!statsResult.value?.trend) return '';
+            const trend = statsResult.value.trend;
+            const w = Math.max(600, trend.length * 80);
+            const step = (w - 100) / Math.max(1, trend.length - 1);
+            return trend.map((d, i) => {
+                const x = 80 + i * step;
+                const y = kind === 'rate' ? trendY(parseFloat(d.defectRate)) : trendYQty(d.byType[typeName] || 0);
+                return `${x},${y}`;
+            }).join(' ');
+        };
+
+        // --- 主統計 ---
+        const calculateStats = async () => {
+            loading.value = true;
+            try {
+                let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`);
+                if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start);
+                if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end);
+                const { data: rows } = await query;
+                let filtered = rows || [];
+                if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+
+                let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {};
+                const typeLocMap = {};   // { 現象: { 位置: qty } }
+                const typeModelMap = {}; // { 現象: { 機種: qty } }
+                const typeWoMap = {};    // { 現象: { 工單: qty } }
+                const locWoMap = {};     // { 位置: { 工單: qty } }
+                const locModelMap = {};  // { 位置: { 機種: qty } }
+                const locTypeMap = {};   // { 位置: { 現象: qty } }
+                const modelAgg = {};     // { 機種: { input, defects, byType, byLoc, byWo } }
+                const woAgg = {};        // { 工單: { models:Set, input, defects, byType, byLoc } }
+                const dayMap = {};
+                const locAppearance = {};
+                const locDayQty = {};
+
+                filtered.forEach(day => {
+                    const woNum = day.work_orders?.wo_number || 'Unknown';
+                    const modelName = day.work_orders?.models?.name || 'Unknown';
+                    totalInput += day.input_quantity;
+                    if (!dayMap[day.production_date]) dayMap[day.production_date] = { date: day.production_date, input: 0, defects: 0, byType: {} };
+                    dayMap[day.production_date].input += day.input_quantity;
+                    if (!modelAgg[modelName]) modelAgg[modelName] = { input: 0, defects: 0, byType: {}, byLoc: {}, byWo: {} };
+                    modelAgg[modelName].input += day.input_quantity;
+                    if (!woAgg[woNum]) woAgg[woNum] = { models: new Set(), input: 0, defects: 0, byType: {}, byLoc: {} };
+                    woAgg[woNum].models.add(modelName);
+                    woAgg[woNum].input += day.input_quantity;
+
+                    const dayLocQty = {};
+                    day.defect_logs.forEach(log => {
+                        const q = log.quantity;
+                        totalDefects += q;
+                        const tName = log.defect_types?.name || 'Unknown';
+                        typeMap[tName] = (typeMap[tName] || 0) + q;
+                        const lCode = log.defect_locations?.code || 'Unknown';
+                        locMap[lCode] = (locMap[lCode] || 0) + q;
+
+                        if (!typeLocMap[tName]) typeLocMap[tName] = {};
+                        typeLocMap[tName][lCode] = (typeLocMap[tName][lCode] || 0) + q;
+                        if (!typeModelMap[tName]) typeModelMap[tName] = {};
+                        typeModelMap[tName][modelName] = (typeModelMap[tName][modelName] || 0) + q;
+                        if (!typeWoMap[tName]) typeWoMap[tName] = {};
+                        typeWoMap[tName][woNum] = (typeWoMap[tName][woNum] || 0) + q;
+
+                        if (!locWoMap[lCode]) locWoMap[lCode] = {};
+                        locWoMap[lCode][woNum] = (locWoMap[lCode][woNum] || 0) + q;
+                        if (!locModelMap[lCode]) locModelMap[lCode] = {};
+                        locModelMap[lCode][modelName] = (locModelMap[lCode][modelName] || 0) + q;
+                        if (!locTypeMap[lCode]) locTypeMap[lCode] = {};
+                        locTypeMap[lCode][tName] = (locTypeMap[lCode][tName] || 0) + q;
+
+                        modelAgg[modelName].defects += q;
+                        modelAgg[modelName].byType[tName] = (modelAgg[modelName].byType[tName] || 0) + q;
+                        modelAgg[modelName].byLoc[lCode] = (modelAgg[modelName].byLoc[lCode] || 0) + q;
+                        modelAgg[modelName].byWo[woNum] = (modelAgg[modelName].byWo[woNum] || 0) + q;
+                        woAgg[woNum].defects += q;
+                        woAgg[woNum].byType[tName] = (woAgg[woNum].byType[tName] || 0) + q;
+                        woAgg[woNum].byLoc[lCode] = (woAgg[woNum].byLoc[lCode] || 0) + q;
+
+                        dayMap[day.production_date].defects += q;
+                        dayMap[day.production_date].byType[tName] = (dayMap[day.production_date].byType[tName] || 0) + q;
+
+                        if (!locAppearance[lCode]) locAppearance[lCode] = new Set();
+                        locAppearance[lCode].add(day.production_date);
+                        dayLocQty[lCode] = (dayLocQty[lCode] || 0) + q;
+                    });
+                    Object.entries(dayLocQty).forEach(([code, qty]) => {
+                        if (!locDayQty[code]) locDayQty[code] = [];
+                        locDayQty[code].push(qty);
+                    });
+                });
+
+                const byType = Object.entries(typeMap).map(([name, qty]) => ({ name, qty, ratio: totalDefects ? (qty / totalDefects * 100).toFixed(1) : 0 })).sort((a, b) => b.qty - a.qty);
+                const byLocation = Object.entries(locMap).map(([code, qty]) => ({ code, qty, ratio: totalDefects ? (qty / totalDefects * 100).toFixed(1) : 0 })).sort((a, b) => b.qty - a.qty);
+                const byModel = Object.entries(modelAgg).map(([name, m]) => ({
+                    name, input: m.input, defects: m.defects,
+                    rate: m.input ? (m.defects / m.input * 100).toFixed(2) : '0.00',
+                    ratio: totalDefects ? (m.defects / totalDefects * 100).toFixed(1) : '0.0'
+                })).sort((a, b) => b.defects - a.defects);
+                const byWo = Object.entries(woAgg).map(([wo, w]) => ({
+                    wo, model: [...w.models].join(' / '), input: w.input, defects: w.defects,
+                    rate: w.input ? (w.defects / w.input * 100).toFixed(2) : '0.00',
+                    ratio: totalDefects ? (w.defects / totalDefects * 100).toFixed(1) : '0.0'
+                })).sort((a, b) => b.defects - a.defects);
+
+                const totalDays = Object.keys(dayMap).length;
+                const topLocations = byLocation.slice(0, 10).map(l => ({
+                    ...l,
+                    appearDays: locAppearance[l.code] ? locAppearance[l.code].size : 0,
+                    totalDays,
+                    isSystemic: locAppearance[l.code] && totalDays > 0 && (locAppearance[l.code].size / totalDays) >= 0.5
+                }));
+
+                const trend = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({
+                    date: d.date, input: d.input, defects: d.defects,
+                    defectRate: d.input ? ((d.defects / d.input) * 100).toFixed(2) : '0.00',
+                    byType: d.byType
+                }));
+                const topTypeNames = byType.slice(0, 5).map(t => t.name);
+
+                const anomalies = [];
+                Object.entries(locDayQty).forEach(([code, qtyList]) => {
+                    if (qtyList.length < 3) return;
+                    const past = qtyList.slice(0, -1);
+                    const latest = qtyList[qtyList.length - 1];
+                    const mean = past.reduce((a, b) => a + b, 0) / past.length;
+                    const variance = past.reduce((sum, x) => sum + Math.pow(x - mean, 2), 0) / past.length;
+                    const std = Math.sqrt(variance);
+                    const threshold = mean + 2 * std;
+                    if (latest > threshold && latest > mean) {
+                        anomalies.push({ code, latest, baseline: mean.toFixed(1), threshold: threshold.toFixed(1), sigma: std.toFixed(2) });
+                    }
+                });
+                anomalies.sort((a, b) => b.latest - a.latest);
+
+                // --- FPY 趨勢 (每日平均 SPI/AOI) ---
+                let fpyTrend = [];
+                try {
+                    let fq = _supabase.from('daily_fpy').select('production_date, spi_rate, aoi_rate, work_orders!inner(wo_number, model_id)');
+                    if (statsFilter.value.start) fq = fq.gte('production_date', statsFilter.value.start);
+                    if (statsFilter.value.end) fq = fq.lte('production_date', statsFilter.value.end);
+                    const { data: fpyRows } = await fq;
+                    let ff = fpyRows || [];
+                    if (statsFilter.value.modelId !== 'all') ff = ff.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                    if (statsFilter.value.woId !== 'all') ff = ff.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                    const fpyDayMap = {};
+                    ff.forEach(r => {
+                        if (!fpyDayMap[r.production_date]) fpyDayMap[r.production_date] = { spi: [], aoi: [] };
+                        if (r.spi_rate !== null && r.spi_rate !== undefined) fpyDayMap[r.production_date].spi.push(Number(r.spi_rate));
+                        if (r.aoi_rate !== null && r.aoi_rate !== undefined) fpyDayMap[r.production_date].aoi.push(Number(r.aoi_rate));
+                    });
+                    const avg = (arr) => arr.length ? parseFloat((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)) : null;
+                    fpyTrend = Object.keys(fpyDayMap).sort().map(d => ({ date: d, spi: avg(fpyDayMap[d].spi), aoi: avg(fpyDayMap[d].aoi) }));
+                } catch (e) { console.error('FPY 趨勢載入失敗', e); }
+
+                selectedDefectType.value = null; selectedLocCode.value = null;
+                selectedModelName.value = null; selectedWoNumber.value = null;
+                statsResult.value = {
+                    totalInput, totalDefects,
+                    yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100,
+                    byType, byLocation, byModel, byWo,
+                    typeLocMap, typeModelMap, typeWoMap, locWoMap, locModelMap, locTypeMap,
+                    modelAgg, woAgg,
+                    topLocations, trend, topTypeNames, anomalies, totalDays, fpyTrend
+                };
+                toast("統計完成");
+            } catch (e) { toast("統計失敗: " + e.message, "error"); } finally { loading.value = false; }
+        };
+
+        // --- Excel 導出 (原三分頁格式完全保留，僅新增「交叉分析」分頁) ---
+        const exportToExcel = async () => {
+            if (!statsResult.value) return toast("請先執行統計", "warning");
+            loading.value = true;
+            try {
+                const combinedData = [["=== 總結報告 ==="], ["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], ["總投入數", statsResult.value.totalInput], ["總不良數", statsResult.value.totalDefects], ["良率", `${statsResult.value.yieldRate}%`], [], ["=== 不良現象分析 ==="], ["不良現象", "數量", "佔比"], ...statsResult.value.byType.map(d => [d.name, d.qty, `${d.ratio}%`]), [], ["=== 位置異常分析 ==="], ["位置", "數量"], ...statsResult.value.byLocation.map(d => [d.code, d.qty])];
+                const wb = XLSX.utils.book_new();
+                const wsYield = XLSX.utils.aoa_to_sheet(combinedData);
+                XLSX.utils.book_append_sheet(wb, wsYield, "良率報告");
+
+                // === 每日明細分頁 ===
+                let dailyQuery = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`);
+                if (statsFilter.value.start) dailyQuery = dailyQuery.gte('production_date', statsFilter.value.start);
+                if (statsFilter.value.end) dailyQuery = dailyQuery.lte('production_date', statsFilter.value.end);
+                const { data: dailyRows } = await dailyQuery;
+                let filteredDaily = dailyRows || [];
+                if (statsFilter.value.modelId !== 'all') filteredDaily = filteredDaily.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                if (statsFilter.value.woId !== 'all') filteredDaily = filteredDaily.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                filteredDaily.sort((a, b) => a.production_date.localeCompare(b.production_date) || a.work_orders.wo_number.localeCompare(b.work_orders.wo_number));
+                const dailyData = [["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], [], ["日期", "工單號碼", "機種", "投入量", "NG 數", "良率", "NG 項目明細", "NG 位置明細"]];
+                filteredDaily.forEach(r => {
+                    const ng = (r.defect_logs || []).reduce((s, d) => s + (d.quantity || 0), 0);
+                    const yieldRate = r.input_quantity > 0 ? (((r.input_quantity - ng) / r.input_quantity) * 100).toFixed(2) + '%' : '-';
+                    const typeMap = {}, locMap = {};
+                    (r.defect_logs || []).forEach(d => {
+                        const t = d.defect_types?.name || '?'; typeMap[t] = (typeMap[t] || 0) + (d.quantity || 0);
+                        const l = d.defect_locations?.code || '?'; locMap[l] = (locMap[l] || 0) + (d.quantity || 0);
+                    });
+                    const typeStr = Object.entries(typeMap).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}x${v}`).join(', ');
+                    const locStr = Object.entries(locMap).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}x${v}`).join(', ');
+                    dailyData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models?.name || '', r.input_quantity, ng, yieldRate, typeStr || '-', locStr || '-']);
+                });
+                const wsDaily = XLSX.utils.aoa_to_sheet(dailyData);
+                XLSX.utils.book_append_sheet(wb, wsDaily, "每日明細");
+
+                let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))');
+                if (statsFilter.value.start) fpyQuery = fpyQuery.gte('production_date', statsFilter.value.start);
+                if (statsFilter.value.end) fpyQuery = fpyQuery.lte('production_date', statsFilter.value.end);
+                const { data: fpyRows } = await fpyQuery;
+
+                let filteredFpy = fpyRows || [];
+                if (statsFilter.value.modelId !== 'all') filteredFpy = filteredFpy.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+
+                filteredFpy.sort((a, b) => {
+                    const woA = a.work_orders.wo_number;
+                    const woB = b.work_orders.wo_number;
+                    if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB);
+                    return new Date(a.production_date) - new Date(b.production_date);
+                });
+
+                const fpyExcelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]];
+                filteredFpy.forEach(r => {
+                    fpyExcelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']);
+                });
+
+                const wsFpy = XLSX.utils.aoa_to_sheet(fpyExcelData);
+                XLSX.utils.book_append_sheet(wb, wsFpy, "直通率報告");
+
+                // === 新增：交叉分析分頁 ===
+                const r = statsResult.value;
+                const flattenCross = (map) => {
+                    const rows = [];
+                    Object.entries(map || {}).forEach(([a, sub]) => {
+                        const tot = Object.values(sub).reduce((s, v) => s + v, 0);
+                        Object.entries(sub).sort((x, y) => y[1] - x[1]).forEach(([b, q]) => rows.push([a, b, q, tot ? `${(q / tot * 100).toFixed(1)}%` : '0%']));
+                    });
+                    return rows;
+                };
+                const crossData = [
+                    ["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], [],
+                    ["=== 機種彙總 ==="], ["機種", "投入數", "不良數", "不良率", "佔總不良比"],
+                    ...r.byModel.map(m => [m.name, m.input, m.defects, `${m.rate}%`, `${m.ratio}%`]), [],
+                    ["=== 工單彙總 ==="], ["工單號碼", "機種", "投入數", "不良數", "不良率", "佔總不良比"],
+                    ...r.byWo.map(w => [w.wo, w.model, w.input, w.defects, `${w.rate}%`, `${w.ratio}%`]), [],
+                    ["=== 不良現象 × 機種 ==="], ["不良現象", "機種", "數量", "佔該現象比"],
+                    ...flattenCross(r.typeModelMap), [],
+                    ["=== 不良現象 × 位置 ==="], ["不良現象", "位置", "數量", "佔該現象比"],
+                    ...flattenCross(r.typeLocMap), [],
+                    ["=== 不良現象 × 工單 ==="], ["不良現象", "工單號碼", "數量", "佔該現象比"],
+                    ...flattenCross(r.typeWoMap), [],
+                    ["=== 位置 × 機種 ==="], ["位置", "機種", "數量", "佔該位置比"],
+                    ...flattenCross(r.locModelMap), [],
+                    ["=== 位置 × 工單 ==="], ["位置", "工單號碼", "數量", "佔該位置比"],
+                    ...flattenCross(r.locWoMap)
+                ];
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(crossData), "交叉分析");
+
+                XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+                toast("完整報表已導出");
+            } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
+        };
+
+        // ==================== ECHARTS ====================
+        let paretoChartInst = null;
+        let heatmapChartInst = null;
+        let fpyTrendChartInst = null;
+
+        const renderParetoChart = () => {
+            Vue.nextTick(() => {
+                const el = document.getElementById('paretoChart');
+                if (!el || !statsResult.value || !statsResult.value.byType || statsResult.value.byType.length===0) return;
+                if (!paretoChartInst) paretoChartInst = echarts.init(el);
+                const sorted = [...statsResult.value.byType].sort((a,b)=>b.qty-a.qty);
+                const names = sorted.map(x=>x.name); const qtys = sorted.map(x=>x.qty);
+                const total = qtys.reduce((s,v)=>s+v,0);
+                let cum=0; const cumPct=qtys.map(q=>{cum+=q;return parseFloat((cum/total*100).toFixed(1));});
+                paretoChartInst.setOption({
+                    tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+                    legend:{data:['不良數量','累積佔比'],top:4,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
+                    grid:{top:40,right:60,bottom:60,left:50},
+                    xAxis:{type:'category',data:names,axisLabel:{fontSize:10,color:'#374151',rotate:names.some(n=>n.length>4)?20:0},axisLine:{lineStyle:{color:'#e5e7eb'}}},
+                    yAxis:[{type:'value',name:'數量',nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'累積%',min:0,max:100,nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
+                    series:[
+                        {name:'不良數量',type:'bar',data:qtys,barMaxWidth:40,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#dc2626'},{offset:1,color:'#fca5a5'}]},borderRadius:[4,4,0,0]},label:{show:true,position:'top',fontSize:10,color:'#374151',formatter:'{c}'}},
+                        {name:'累積佔比',type:'line',yAxisIndex:1,data:cumPct,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#2563eb',width:2},itemStyle:{color:'#2563eb'},label:{show:true,position:'top',fontSize:9,color:'#2563eb',formatter:'{c}%'},markLine:{silent:true,lineStyle:{color:'#d97706',type:'dashed',width:1.5},data:[{yAxis:80,label:{formatter:'80%',position:'start',fontSize:10,color:'#d97706'}}]}}
+                    ]
+                });
+            });
+        };
+
+        const renderHeatmap = () => {
+            Vue.nextTick(() => {
+                const el = document.getElementById('typeLocHeatmap');
+                const r = statsResult.value;
+                if (!el || !r || !r.byType.length || !r.byLocation.length) return;
+                if (!heatmapChartInst) heatmapChartInst = echarts.init(el);
+                const types = r.byType.slice(0, 8).map(t => t.name);
+                const locs = r.byLocation.slice(0, 12).map(l => l.code);
+                const dataArr = []; let maxV = 0;
+                types.forEach((t, ti) => locs.forEach((l, li) => {
+                    const v = (r.typeLocMap[t] || {})[l] || 0;
+                    if (v > 0) { dataArr.push([li, ti, v]); if (v > maxV) maxV = v; }
+                }));
+                heatmapChartInst.setOption({
+                    tooltip:{position:'top',formatter:p=>`${types[p.value[1]]} × ${locs[p.value[0]]}<br/><b>${p.value[2]} pcs</b>`},
+                    grid:{top:10,right:20,bottom:70,left:90},
+                    xAxis:{type:'category',data:locs,axisLabel:{fontSize:10,color:'#374151',rotate:30},splitArea:{show:true}},
+                    yAxis:{type:'category',data:types,axisLabel:{fontSize:10,color:'#374151'},splitArea:{show:true}},
+                    visualMap:{min:0,max:Math.max(1,maxV),calculable:false,orient:'horizontal',left:'center',bottom:0,inRange:{color:['#fff5f5','#fca5a5','#dc2626','#7f1d1d']},textStyle:{fontSize:10,color:'#6b7280'}},
+                    series:[{type:'heatmap',data:dataArr,label:{show:true,fontSize:9,color:'#111'},emphasis:{itemStyle:{shadowBlur:6,shadowColor:'rgba(0,0,0,0.3)'}}}]
+                });
+            });
+        };
+
+        const renderFpyTrendChart = () => {
+            Vue.nextTick(() => {
+                const el = document.getElementById('statsFpyTrend');
+                const r = statsResult.value;
+                if (!el || !r || !r.fpyTrend || r.fpyTrend.length === 0) return;
+                if (!fpyTrendChartInst) fpyTrendChartInst = echarts.init(el);
+                const dates = r.fpyTrend.map(d => d.date.slice(5));
+                fpyTrendChartInst.setOption({
+                    tooltip:{trigger:'axis',formatter:p=>{let s=p[0].name;p.forEach(v=>{s+=`<br/>${v.marker}${v.seriesName}: <b>${v.value!==null&&v.value!==undefined?v.value+'%':'無資料'}</b>`;});return s;}},
+                    legend:{data:['SPI 直通率','AOI 直通率'],top:4,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
+                    grid:{top:36,right:20,bottom:40,left:50},
+                    xAxis:{type:'category',data:dates,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}}},
+                    yAxis:{type:'value',min:v=>Math.floor(Math.min(v.min-0.5, (fpyTargets.value.aoi||98)-1)),max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
+                    series:[
+                        {name:'SPI 直通率',type:'line',data:r.fpyTrend.map(d=>d.spi),smooth:true,connectNulls:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#0d9488',width:2.5},itemStyle:{color:'#0d9488'},markLine:{silent:true,lineStyle:{color:'#0d9488',type:'dashed',width:1},data:[{yAxis:fpyTargets.value.spi,label:{formatter:`SPI目標${fpyTargets.value.spi}%`,position:'insideEndTop',fontSize:9,color:'#0d9488'}}]}},
+                        {name:'AOI 直通率',type:'line',data:r.fpyTrend.map(d=>d.aoi),smooth:true,connectNulls:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#7c3aed',width:2.5},itemStyle:{color:'#7c3aed'},markLine:{silent:true,lineStyle:{color:'#7c3aed',type:'dashed',width:1},data:[{yAxis:fpyTargets.value.aoi,label:{formatter:`AOI目標${fpyTargets.value.aoi}%`,position:'insideEndBottom',fontSize:9,color:'#7c3aed'}}]}}
+                    ]
+                });
+            });
+        };
+
+        const renderStatsCharts = () => { renderParetoChart(); renderHeatmap(); renderFpyTrendChart(); };
+
+        watch(() => statsResult.value, (val) => { if (val && currentTab.value === 'stats') renderStatsCharts(); });
+        watch(currentTab, (tab) => { if (tab === 'stats' && statsResult.value) renderStatsCharts(); });
+
+        return {
+            statsFilter, statsResult, calculateStats, exportToExcel,
+            selectedDefectType, selectedLocCode, selectedModelName, selectedWoNumber,
+            openTypeDetail, openLocDetail, openModelDetail, openWoDetail,
+            typeDrill, locDrill, modelDrill, woDrill,
+            trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints,
+            renderParetoChart, renderStatsCharts
+        };
+};

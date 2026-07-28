@@ -5,6 +5,84 @@ SMT.stats = function (ctx) {
         const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
 
+        // 本區間是否真的有不良資料（決定圖表要不要顯示，避免殘留上一次查詢結果）
+        const hasDefects = computed(() => !!statsResult.value && statsResult.value.byType.length > 0);
+
+        // ================= 快捷區間：日 / 週(日–六) / 月 =================
+        const quickMode = ref(null);     // 'day' | 'week' | 'month' | null(自訂)
+        const quickOffset = ref(0);      // 0=本期，-1=上一期
+        let applyingQuick = false;
+
+        // 用本地時間格式化，避免 toISOString() 的 UTC 位移導致跨日
+        const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        const quickRange = (mode, offset) => {
+            const now = new Date(); now.setHours(0, 0, 0, 0);
+            if (mode === 'day') {
+                const d = new Date(now); d.setDate(d.getDate() + offset);
+                return { start: d, end: d };
+            }
+            if (mode === 'week') {
+                // 週日為一週起點
+                const s = new Date(now);
+                s.setDate(s.getDate() - s.getDay() + offset * 7);
+                const e = new Date(s); e.setDate(e.getDate() + 6);
+                return { start: s, end: e };
+            }
+            // month：當月 1 號 ~ 當月最後一天
+            const s = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+            const e = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+            return { start: s, end: e };
+        };
+
+        const WEEKDAY_TW = ['日', '一', '二', '三', '四', '五', '六'];
+        const quickLabel = computed(() => {
+            if (!quickMode.value) return '';
+            const { start, end } = quickRange(quickMode.value, quickOffset.value);
+            if (quickMode.value === 'day') return `${fmtLocal(start)} (週${WEEKDAY_TW[start.getDay()]})`;
+            if (quickMode.value === 'week') {
+                const same = start.getFullYear() === end.getFullYear();
+                return `${fmtLocal(start)} ~ ${same ? fmtLocal(end).slice(5) : fmtLocal(end)}`;
+            }
+            return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`;
+        });
+        // 相對描述：本日 / 昨日 / 本週 / 上週 / 本月 / 上月 …
+        const quickRelative = computed(() => {
+            if (!quickMode.value) return '';
+            const o = quickOffset.value;
+            const unit = { day: '日', week: '週', month: '月' }[quickMode.value];
+            if (o === 0) return `本${unit}`;
+            if (o === -1) return `上一${unit}`;
+            if (o === 1) return `下一${unit}`;
+            return o < 0 ? `${-o} ${unit}前` : `${o} ${unit}後`;
+        });
+
+        const applyQuick = async () => {
+            const { start, end } = quickRange(quickMode.value, quickOffset.value);
+            applyingQuick = true;
+            statsFilter.value.start = fmtLocal(start);
+            statsFilter.value.end = fmtLocal(end);
+            await Vue.nextTick();
+            applyingQuick = false;
+            await calculateStats();
+        };
+        // 日→今天；週→上一週（本週尚未結束）；月→上個月（同理）
+        const DEFAULT_OFFSET = { day: 0, week: -1, month: -1 };
+        const setQuickMode = (mode) => {
+            quickMode.value = mode;
+            quickOffset.value = DEFAULT_OFFSET[mode];
+            applyQuick();
+        };
+        const shiftQuick = (delta) => {
+            if (!quickMode.value) return;
+            quickOffset.value += delta;
+            applyQuick();
+        };
+        // 手動改日期即脫離快捷模式，避免高亮標示與實際區間不符
+        watch(() => [statsFilter.value.start, statsFilter.value.end], () => {
+            if (!applyingQuick) quickMode.value = null;
+        });
+
         // --- 通用：map -> 排序清單(含比例) ---
         const mapToList = (map) => {
             const list = Object.entries(map || {}).map(([key, qty]) => ({ key, qty })).sort((a, b) => b.qty - a.qty);
@@ -382,11 +460,18 @@ SMT.stats = function (ctx) {
         let heatmapChartInst = null;
         let fpyTrendChartInst = null;
 
+        // 無資料時必須銷毀實例：否則舊圖表會殘留在畫面上，
+        // 且容器被 v-if 移除後實例仍指向已卸離的 DOM，下次有資料時會渲染不出來。
+        const disposePareto = () => { if (paretoChartInst) { paretoChartInst.dispose(); paretoChartInst = null; } };
+        const disposeHeatmap = () => { if (heatmapChartInst) { heatmapChartInst.dispose(); heatmapChartInst = null; } };
+        const disposeFpyTrend = () => { if (fpyTrendChartInst) { fpyTrendChartInst.dispose(); fpyTrendChartInst = null; } };
+
         const renderParetoChart = () => {
             Vue.nextTick(() => {
                 const el = document.getElementById('paretoChart');
-                if (!el || !statsResult.value || !statsResult.value.byType || statsResult.value.byType.length===0) return;
-                if (!paretoChartInst) paretoChartInst = echarts.init(el);
+                if (!statsResult.value || !statsResult.value.byType || statsResult.value.byType.length === 0) { disposePareto(); return; }
+                if (!el) return;
+                if (!paretoChartInst || paretoChartInst.getDom() !== el) { disposePareto(); paretoChartInst = echarts.init(el); }
                 const sorted = [...statsResult.value.byType].sort((a,b)=>b.qty-a.qty);
                 const names = sorted.map(x=>x.name); const qtys = sorted.map(x=>x.qty);
                 const total = qtys.reduce((s,v)=>s+v,0);
@@ -418,8 +503,9 @@ SMT.stats = function (ctx) {
             Vue.nextTick(() => {
                 const el = document.getElementById('typeLocHeatmap');
                 const r = statsResult.value;
-                if (!el || !r || !r.byType.length || !r.byLocation.length) return;
-                if (!heatmapChartInst) heatmapChartInst = echarts.init(el);
+                if (!r || !r.byType.length || !r.byLocation.length) { disposeHeatmap(); return; }
+                if (!el) return;
+                if (!heatmapChartInst || heatmapChartInst.getDom() !== el) { disposeHeatmap(); heatmapChartInst = echarts.init(el); }
                 const types = r.byType.slice(0, 8).map(t => t.name);
                 const locs = r.byLocation.slice(0, 12).map(l => l.code);
                 const dataArr = []; let maxV = 0;
@@ -451,8 +537,9 @@ SMT.stats = function (ctx) {
             Vue.nextTick(() => {
                 const el = document.getElementById('statsFpyTrend');
                 const r = statsResult.value;
-                if (!el || !r || !r.fpyTrend || r.fpyTrend.length === 0) return;
-                if (!fpyTrendChartInst) fpyTrendChartInst = echarts.init(el);
+                if (!r || !r.fpyTrend || r.fpyTrend.length === 0) { disposeFpyTrend(); return; }
+                if (!el) return;
+                if (!fpyTrendChartInst || fpyTrendChartInst.getDom() !== el) { disposeFpyTrend(); fpyTrendChartInst = echarts.init(el); }
                 const dates = r.fpyTrend.map(d => d.date.slice(5));
                 fpyTrendChartInst.setOption({
                     tooltip:{trigger:'axis',formatter:p=>{let s=p[0].name;p.forEach(v=>{s+=`<br/>${v.marker}${v.seriesName}: <b>${v.value!==null&&v.value!==undefined?v.value+'%':'無資料'}</b>`;});return s;}},
@@ -483,7 +570,8 @@ SMT.stats = function (ctx) {
         watch(currentTab, (tab) => { if (tab === 'stats' && statsResult.value) renderStatsCharts(); });
 
         return {
-            statsFilter, statsResult, calculateStats, exportToExcel,
+            statsFilter, statsResult, calculateStats, exportToExcel, hasDefects,
+            quickMode, quickOffset, quickLabel, quickRelative, setQuickMode, shiftQuick,
             drillView, drillStack, pushDrill, popDrill, closeDrill, isDrill,
             openTypeDetail, openLocDetail, openModelDetail, openWoDetail,
             trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints,

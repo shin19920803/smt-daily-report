@@ -627,7 +627,26 @@
                     <h2 class="text-xl font-black text-gray-900">統計與導出</h2>
                 </div>
             </div>
-            <div class="section-card p-4 mb-6">
+            <div class="section-card p-4 mb-5">
+                <!-- 快捷區間：日 / 週(日–六) / 月，左右鍵快速切換上下一期 -->
+                <div class="quick-bar">
+                    <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
+                    <div class="quick-seg" role="group" aria-label="快捷統計區間">
+                        <button @click="setQuickMode('day')"   :class="{ 'is-active': quickMode === 'day' }"   :aria-pressed="quickMode === 'day'">日</button>
+                        <button @click="setQuickMode('week')"  :class="{ 'is-active': quickMode === 'week' }"  :aria-pressed="quickMode === 'week'">週</button>
+                        <button @click="setQuickMode('month')" :class="{ 'is-active': quickMode === 'month' }" :aria-pressed="quickMode === 'month'">月</button>
+                    </div>
+                    <div v-if="quickMode" class="quick-nav">
+                        <button @click="shiftQuick(-1)" class="quick-arrow" :title="'上一' + (quickMode === 'day' ? '日' : quickMode === 'week' ? '週' : '月')" aria-label="上一期"><i class="fas fa-chevron-left"></i></button>
+                        <div class="quick-range">
+                            <span class="quick-range-text font-mono">{{ quickLabel }}</span>
+                            <span class="quick-range-rel">{{ quickRelative }}</span>
+                        </div>
+                        <button @click="shiftQuick(1)" class="quick-arrow" :title="'下一' + (quickMode === 'day' ? '日' : quickMode === 'week' ? '週' : '月')" aria-label="下一期"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                    <span v-else class="quick-hint">選擇後可用 <i class="fas fa-chevron-left mx-0.5"></i><i class="fas fa-chevron-right mx-0.5"></i> 快速切換期間</span>
+                </div>
+
                 <div class="flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end">
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="statsFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                     <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="statsFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
@@ -659,13 +678,18 @@
                 <div class="card-header">
                     <div class="card-header-icon" style="background:var(--danger-soft);color:var(--danger)"><i class="fas fa-sort-amount-down text-xs"></i></div>
                     不良現象 Pareto 圖分析
-                    <span class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 位置 × 機種 × 工單 分佈</span>
+                    <span v-if="hasDefects" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 位置 × 機種 × 工單 分佈</span>
                 </div>
-                <div id="paretoChart" style="width:100%;height:340px;"></div>
+                <div v-if="hasDefects" id="paretoChart" style="width:100%;height:340px;"></div>
+                <div v-else class="empty-state" style="padding:48px 20px">
+                    <i class="fas fa-circle-check" style="color:var(--success);opacity:0.35"></i>
+                    <div class="title">此區間無不良紀錄</div>
+                    <div class="hint">投入 {{ statsResult.totalInput.toLocaleString() }} pcs · 良率 {{ statsResult.yieldRate }}%</div>
+                </div>
             </div>
 
             <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-5 animate-fade-in">
-                <div class="section-card p-4 col-span-1 md:col-span-2">
+                <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
                     <h3 class="card-title">位置異常統計 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊查看 工單 × 機種 × 現象 分佈</span></h3>
                     <div class="flex flex-wrap gap-2">
                         <button v-for="loc in statsResult.byLocation" :key="loc.code" @click="openLocDetail(loc.code)" class="data-chip">
@@ -677,7 +701,7 @@
                 </div>
 
                 <!-- 機種分析 -->
-                <div class="section-card p-4 col-span-1 md:col-span-2">
+                <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
                     <h3 class="card-title"><i class="fas fa-microchip text-indigo-600"></i>機種不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該機種 現象 × 位置 × 工單</span></h3>
                     <div class="table-wrap">
                         <table class="data-table min-w-[560px]">
@@ -697,7 +721,7 @@
                 </div>
 
                 <!-- 工單分析 -->
-                <div class="section-card p-4 col-span-1 md:col-span-2">
+                <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
                     <h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該工單 現象 × 位置</span></h3>
                     <div class="table-wrap max-h-80">
                         <table class="data-table min-w-[560px]">
@@ -718,13 +742,13 @@
                 </div>
 
                 <!-- 現象 × 位置 熱力圖 -->
-                <div class="section-card p-4 col-span-1 md:col-span-2">
+                <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
                     <h3 class="card-title"><i class="fas fa-table-cells text-red-600"></i>現象 × 位置 熱力圖 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>Top 8 現象 × Top 12 位置，點擊格子查看該位置分佈</span></h3>
                     <div id="typeLocHeatmap" style="width:100%;height:340px;"></div>
                 </div>
 
                 <!-- Top 10 Pareto: 位號柏拉圖 -->
-                <div class="section-card p-4 col-span-1 md:col-span-2">
+                <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
                     <h3 class="card-title"><i class="fas fa-exclamation-triangle text-amber-600"></i>Top 10 位號柏拉圖 <span class="badge-hint">≥50% 天數出現 = 系統性問題</span></h3>
                     <div class="space-y-2" v-if="statsResult.topLocations.length > 0">
                         <div v-for="(loc, idx) in statsResult.topLocations" :key="loc.code" @click="openLocDetail(loc.code)" class="flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:opacity-80 transition" :class="loc.isSystemic ? 'bg-red-50 border border-red-200' : 'bg-gray-50'">

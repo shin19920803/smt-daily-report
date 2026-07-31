@@ -702,12 +702,19 @@
 
                 <!-- 機種分析 -->
                 <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
-                    <h3 class="card-title"><i class="fas fa-microchip text-indigo-600"></i>機種不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該機種 現象 × 位置 × 工單</span></h3>
+                    <h3 class="card-title"><i class="fas fa-microchip text-indigo-600"></i>機種不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該機種 現象 × 位置 × 工單</span><span class="badge-hint"><i class="fas fa-sort"></i>點擊標題可排序</span></h3>
                     <div class="table-wrap">
                         <table class="data-table min-w-[560px]">
-                            <thead><tr><th class="text-left">機種</th><th class="text-right">投入</th><th class="text-right">不良數</th><th class="text-right">不良率</th><th class="text-right">佔總不良比</th><th class="w-1/3">佔比</th></tr></thead>
+                            <thead><tr>
+                                <th class="th-sort text-left"  :aria-sort="ariaSort(modelSort,'name')"    @click="toggleSort(modelSort,'name')">機種<i class="fas" :class="sortIcon(modelSort,'name')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(modelSort,'input')"   @click="toggleSort(modelSort,'input')">投入<i class="fas" :class="sortIcon(modelSort,'input')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(modelSort,'defects')" @click="toggleSort(modelSort,'defects')">不良數<i class="fas" :class="sortIcon(modelSort,'defects')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(modelSort,'rate')"    @click="toggleSort(modelSort,'rate')">不良率<i class="fas" :class="sortIcon(modelSort,'rate')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(modelSort,'ratio')"   @click="toggleSort(modelSort,'ratio')">佔總不良比<i class="fas" :class="sortIcon(modelSort,'ratio')"></i></th>
+                                <th class="w-1/3">佔比</th>
+                            </tr></thead>
                             <tbody>
-                                <tr v-for="m in statsResult.byModel" :key="m.name" @click="openModelDetail(m.name)" class="row-clickable" :class="{ 'row-active': isDrill('model', m.name) }" tabindex="0" @keydown.enter="openModelDetail(m.name)">
+                                <tr v-for="m in sortedByModel" :key="m.name" @click="openModelDetail(m.name)" class="row-clickable" :class="{ 'row-active': isDrill('model', m.name) }" tabindex="0" @keydown.enter="openModelDetail(m.name)">
                                     <td class="font-bold text-indigo-700">{{ m.name }}</td>
                                     <td class="text-right font-mono">{{ m.input.toLocaleString() }}</td>
                                     <td class="text-right font-mono text-danger font-bold">{{ m.defects }}</td>
@@ -722,12 +729,20 @@
 
                 <!-- 工單分析 -->
                 <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
-                    <h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該工單 現象 × 位置</span></h3>
+                    <h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單不良分析 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊列查看該工單 現象 × 位置</span><span class="badge-hint"><i class="fas fa-sort"></i>點擊標題可排序</span></h3>
                     <div class="table-wrap max-h-80">
                         <table class="data-table min-w-[560px]">
-                            <thead><tr><th class="text-left">工單號碼</th><th class="text-left">機種</th><th class="text-right">投入</th><th class="text-right">不良數</th><th class="text-right">不良率</th><th class="text-right">佔總不良比</th><th class="w-1/4">佔比</th></tr></thead>
+                            <thead><tr>
+                                <th class="th-sort text-left"  :aria-sort="ariaSort(woSort,'wo')"      @click="toggleSort(woSort,'wo')">工單號碼<i class="fas" :class="sortIcon(woSort,'wo')"></i></th>
+                                <th class="th-sort text-left"  :aria-sort="ariaSort(woSort,'model')"   @click="toggleSort(woSort,'model')">機種<i class="fas" :class="sortIcon(woSort,'model')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(woSort,'input')"   @click="toggleSort(woSort,'input')">投入<i class="fas" :class="sortIcon(woSort,'input')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(woSort,'defects')" @click="toggleSort(woSort,'defects')">不良數<i class="fas" :class="sortIcon(woSort,'defects')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(woSort,'rate')"    @click="toggleSort(woSort,'rate')">不良率<i class="fas" :class="sortIcon(woSort,'rate')"></i></th>
+                                <th class="th-sort text-right" :aria-sort="ariaSort(woSort,'ratio')"   @click="toggleSort(woSort,'ratio')">佔總不良比<i class="fas" :class="sortIcon(woSort,'ratio')"></i></th>
+                                <th class="w-1/4">佔比</th>
+                            </tr></thead>
                             <tbody>
-                                <tr v-for="w in statsResult.byWo" :key="w.wo" @click="openWoDetail(w.wo)" class="row-clickable" :class="{ 'row-active': isDrill('wo', w.wo) }" tabindex="0" @keydown.enter="openWoDetail(w.wo)">
+                                <tr v-for="w in sortedByWo" :key="w.wo" @click="openWoDetail(w.wo)" class="row-clickable" :class="{ 'row-active': isDrill('wo', w.wo) }" tabindex="0" @keydown.enter="openWoDetail(w.wo)">
                                     <td class="font-mono font-bold text-blue-700">{{ w.wo }}</td>
                                     <td class="text-xs text-muted">{{ w.model }}</td>
                                     <td class="text-right font-mono">{{ w.input.toLocaleString() }}</td>
@@ -784,7 +799,7 @@
 
                 <!-- Defect Trend Chart -->
                 <div class="section-card p-4 col-span-1 md:col-span-2" v-if="statsResult.trend && statsResult.trend.length > 0">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-chart-line mr-1 text-blue-500"></i>缺陷現象趨勢 <span class="text-xs font-normal text-gray-400">(依日期)</span></h3>
+                    <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>缺陷現象趨勢 <span class="badge-hint"><i class="fas fa-sort"></i>點擊表格標題可排序</span></h3>
                     
                     <!-- SVG Line Chart -->
                     <div class="mb-4 overflow-x-auto">
@@ -823,26 +838,26 @@
                         </div>
                     </div>
 
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm min-w-[600px]">
-                            <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                    <div class="table-wrap">
+                        <table class="data-table min-w-[600px]">
+                            <thead>
                                 <tr>
-                                    <th class="p-2 text-left border-b">日期</th>
-                                    <th class="p-2 text-right border-b">投入</th>
-                                    <th class="p-2 text-right border-b">不良</th>
-                                    <th class="p-2 text-right border-b">不良率</th>
-                                    <th v-for="t in statsResult.topTypeNames" :key="t" class="p-2 text-center border-b" :style="{color: trendTypeColor(t)}">{{ t }}</th>
+                                    <th class="th-sort text-left"   :aria-sort="ariaSort(trendSort,'date')"       @click="toggleSort(trendSort,'date')">日期<i class="fas" :class="sortIcon(trendSort,'date')"></i></th>
+                                    <th class="th-sort text-right"  :aria-sort="ariaSort(trendSort,'input')"      @click="toggleSort(trendSort,'input')">投入<i class="fas" :class="sortIcon(trendSort,'input')"></i></th>
+                                    <th class="th-sort text-right"  :aria-sort="ariaSort(trendSort,'defects')"    @click="toggleSort(trendSort,'defects')">不良<i class="fas" :class="sortIcon(trendSort,'defects')"></i></th>
+                                    <th class="th-sort text-right"  :aria-sort="ariaSort(trendSort,'defectRate')" @click="toggleSort(trendSort,'defectRate')">不良率<i class="fas" :class="sortIcon(trendSort,'defectRate')"></i></th>
+                                    <th v-for="t in statsResult.topTypeNames" :key="t" class="th-sort text-center" :style="{color: trendTypeColor(t)}" :aria-sort="ariaSort(trendSort,'type:'+t)" @click="toggleSort(trendSort,'type:'+t)">{{ t }}<i class="fas" :class="sortIcon(trendSort,'type:'+t)"></i></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="d in statsResult.trend" :key="d.date" class="border-b hover:bg-gray-50">
-                                    <td class="p-2 font-bold">{{ d.date }}</td>
-                                    <td class="p-2 text-right font-mono">{{ d.input }}</td>
-                                    <td class="p-2 text-right font-mono text-red-600 font-bold">{{ d.defects }}</td>
-                                    <td class="p-2 text-right font-mono font-bold" :class="parseFloat(d.defectRate) > 2 ? 'text-red-600' : parseFloat(d.defectRate) > 1 ? 'text-yellow-600' : 'text-green-600'">{{ d.defectRate }}%</td>
-                                    <td v-for="t in statsResult.topTypeNames" :key="t" class="p-2 text-center font-mono">
+                                <tr v-for="d in sortedTrend" :key="d.date">
+                                    <td class="font-bold font-mono">{{ d.date }}</td>
+                                    <td class="text-right font-mono">{{ d.input.toLocaleString() }}</td>
+                                    <td class="text-right font-mono text-danger font-bold">{{ d.defects }}</td>
+                                    <td class="text-right font-mono font-bold" :class="parseFloat(d.defectRate) > 2 ? 'text-danger' : parseFloat(d.defectRate) > 1 ? 'text-warning' : 'text-success'">{{ d.defectRate }}%</td>
+                                    <td v-for="t in statsResult.topTypeNames" :key="t" class="text-center font-mono">
                                         <span v-if="d.byType[t]" :style="{color: trendTypeColor(t)}" class="font-bold">{{ d.byType[t] }}</span>
-                                        <span v-else class="text-gray-200">-</span>
+                                        <span v-else class="text-gray-300">-</span>
                                     </td>
                                 </tr>
                             </tbody>

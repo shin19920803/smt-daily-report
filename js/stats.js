@@ -8,6 +8,54 @@ SMT.stats = function (ctx) {
         // 本區間是否真的有不良資料（決定圖表要不要顯示，避免殘留上一次查詢結果）
         const hasDefects = computed(() => !!statsResult.value && statsResult.value.byType.length > 0);
 
+        // ================= 表格排序 =================
+        // key 以 'type:<現象名>' 開頭者代表趨勢表的動態現象欄位
+        // 用 reactive 而非 ref：ref 在 template 中會被自動解包，
+        // 傳進 toggleSort/sortIcon 後就拿不到 .value 了。
+        const modelSort = reactive({ key: 'defects', dir: 'desc' });
+        const woSort    = reactive({ key: 'defects', dir: 'desc' });
+        const trendSort = reactive({ key: 'date',    dir: 'asc'  });
+
+        const NUMERIC_KEYS = ['input', 'defects', 'rate', 'ratio', 'defectRate'];
+        const isNumericKey = (key) => NUMERIC_KEYS.includes(key) || key.startsWith('type:');
+        const toggleSort = (s, key) => {
+            if (s.key === key) {
+                s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                // 數值欄位預設由大到小、文字欄位由小到大，符合閱讀直覺
+                s.key = key;
+                s.dir = isNumericKey(key) ? 'desc' : 'asc';
+            }
+        };
+        const sortIcon = (s, key) => {
+            if (s.key !== key) return 'fa-sort';
+            return s.dir === 'asc' ? 'fa-sort-up' : 'fa-sort-down';
+        };
+        const ariaSort = (s, key) => {
+            if (s.key !== key) return 'none';
+            return s.dir === 'asc' ? 'ascending' : 'descending';
+        };
+        const applySort = (list, s) => {
+            const { key, dir } = s;
+            if (!key || !list) return list || [];
+            const mult = dir === 'asc' ? 1 : -1;
+            const isType = key.startsWith('type:');
+            const isNum = isNumericKey(key);
+            const pick = (row) => isType ? (row.byType?.[key.slice(5)] || 0) : row[key];
+            return [...list].sort((a, b) => {
+                const va = pick(a), vb = pick(b);
+                if (isNum) {
+                    const d = (parseFloat(va) || 0) - (parseFloat(vb) || 0);
+                    return d !== 0 ? d * mult : 0;
+                }
+                return String(va ?? '').localeCompare(String(vb ?? ''), 'zh-Hant') * mult;
+            });
+        };
+
+        const sortedByModel = computed(() => applySort(statsResult.value?.byModel, modelSort));
+        const sortedByWo    = computed(() => applySort(statsResult.value?.byWo, woSort));
+        const sortedTrend   = computed(() => applySort(statsResult.value?.trend, trendSort));
+
         // ================= 快捷區間：日 / 週(日–六) / 月 =================
         const quickMode = ref(null);     // 'day' | 'week' | 'month' | null(自訂)
         const quickOffset = ref(0);      // 0=本期，-1=上一期
@@ -572,6 +620,8 @@ SMT.stats = function (ctx) {
         return {
             statsFilter, statsResult, calculateStats, exportToExcel, hasDefects,
             quickMode, quickOffset, quickLabel, quickRelative, setQuickMode, shiftQuick,
+            modelSort, woSort, trendSort, toggleSort, sortIcon, ariaSort,
+            sortedByModel, sortedByWo, sortedTrend,
             drillView, drillStack, pushDrill, popDrill, closeDrill, isDrill,
             openTypeDetail, openLocDetail, openModelDetail, openWoDetail,
             trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints,

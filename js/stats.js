@@ -14,17 +14,18 @@ SMT.stats = function (ctx) {
         // 傳進 toggleSort/sortIcon 後就拿不到 .value 了。
         const modelSort = reactive({ key: 'defects', dir: 'desc' });
         const woSort    = reactive({ key: 'defects', dir: 'desc' });
-        const trendSort = reactive({ key: 'date',    dir: 'asc'  });
+        const trendSort = reactive({ key: 'date',    dir: 'desc' });   // 日期預設由近到遠
 
         const NUMERIC_KEYS = ['input', 'defects', 'rate', 'ratio', 'defectRate'];
+        const DATE_KEYS = ['date'];
         const isNumericKey = (key) => NUMERIC_KEYS.includes(key) || key.startsWith('type:');
         const toggleSort = (s, key) => {
             if (s.key === key) {
                 s.dir = s.dir === 'asc' ? 'desc' : 'asc';
             } else {
-                // 數值欄位預設由大到小、文字欄位由小到大，符合閱讀直覺
+                // 數值與日期預設由大到小（最新/最嚴重在前），文字欄位由小到大
                 s.key = key;
-                s.dir = isNumericKey(key) ? 'desc' : 'asc';
+                s.dir = (isNumericKey(key) || DATE_KEYS.includes(key)) ? 'desc' : 'asc';
             }
         };
         const sortIcon = (s, key) => {
@@ -222,36 +223,12 @@ SMT.stats = function (ctx) {
                 ] };
         });
 
-        // --- 趨勢圖著色與座標 (原邏輯保留) ---
+        // --- 生產日明細表：Top 5 現象欄位的識別色 ---
         const trendColors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'];
         const trendTypeColor = (typeName) => {
             if (!statsResult.value || !statsResult.value.topTypeNames) return '#6b7280';
             const idx = statsResult.value.topTypeNames.indexOf(typeName);
             return idx >= 0 ? trendColors[idx % trendColors.length] : '#6b7280';
-        };
-        const chartMaxRate = computed(() => {
-            if (!statsResult.value?.trend) return 5;
-            const max = Math.max(...statsResult.value.trend.map(d => parseFloat(d.defectRate)));
-            return Math.max(1, Math.ceil(max * 1.2));
-        });
-        const chartMaxQty = computed(() => {
-            if (!statsResult.value?.trend || !statsResult.value?.topTypeNames) return 10;
-            let max = 0;
-            statsResult.value.trend.forEach(d => { statsResult.value.topTypeNames.forEach(t => { if ((d.byType[t] || 0) > max) max = d.byType[t]; }); });
-            return Math.max(5, Math.ceil(max * 1.2));
-        });
-        const trendY = (rate) => 40 + (1 - rate / chartMaxRate.value) * 160;
-        const trendYQty = (qty) => 40 + (1 - qty / chartMaxQty.value) * 160;
-        const trendLinePoints = (kind, typeName) => {
-            if (!statsResult.value?.trend) return '';
-            const trend = statsResult.value.trend;
-            const w = Math.max(600, trend.length * 80);
-            const step = (w - 100) / Math.max(1, trend.length - 1);
-            return trend.map((d, i) => {
-                const x = 80 + i * step;
-                const y = kind === 'rate' ? trendY(parseFloat(d.defectRate)) : trendYQty(d.byType[typeName] || 0);
-                return `${x},${y}`;
-            }).join(' ');
         };
 
         // --- 主統計 ---
@@ -277,7 +254,6 @@ SMT.stats = function (ctx) {
                 const woAgg = {};        // { 工單: { models:Set, input, defects, byType, byLoc } }
                 const dayMap = {};
                 const locAppearance = {};
-                const locDayQty = {};
 
                 filtered.forEach(day => {
                     const woNum = day.work_orders?.wo_number || 'Unknown';
@@ -291,7 +267,6 @@ SMT.stats = function (ctx) {
                     woAgg[woNum].models.add(modelName);
                     woAgg[woNum].input += day.input_quantity;
 
-                    const dayLocQty = {};
                     day.defect_logs.forEach(log => {
                         const q = log.quantity;
                         totalDefects += q;
@@ -327,11 +302,6 @@ SMT.stats = function (ctx) {
 
                         if (!locAppearance[lCode]) locAppearance[lCode] = new Set();
                         locAppearance[lCode].add(day.production_date);
-                        dayLocQty[lCode] = (dayLocQty[lCode] || 0) + q;
-                    });
-                    Object.entries(dayLocQty).forEach(([code, qty]) => {
-                        if (!locDayQty[code]) locDayQty[code] = [];
-                        locDayQty[code].push(qty);
                     });
                 });
 
@@ -363,21 +333,6 @@ SMT.stats = function (ctx) {
                 }));
                 const topTypeNames = byType.slice(0, 5).map(t => t.name);
 
-                const anomalies = [];
-                Object.entries(locDayQty).forEach(([code, qtyList]) => {
-                    if (qtyList.length < 3) return;
-                    const past = qtyList.slice(0, -1);
-                    const latest = qtyList[qtyList.length - 1];
-                    const mean = past.reduce((a, b) => a + b, 0) / past.length;
-                    const variance = past.reduce((sum, x) => sum + Math.pow(x - mean, 2), 0) / past.length;
-                    const std = Math.sqrt(variance);
-                    const threshold = mean + 2 * std;
-                    if (latest > threshold && latest > mean) {
-                        anomalies.push({ code, latest, baseline: mean.toFixed(1), threshold: threshold.toFixed(1), sigma: std.toFixed(2) });
-                    }
-                });
-                anomalies.sort((a, b) => b.latest - a.latest);
-
                 // --- FPY 趨勢 (每日平均 SPI/AOI) ---
                 let fpyTrend = [];
                 try {
@@ -405,7 +360,7 @@ SMT.stats = function (ctx) {
                     byType, byLocation, byModel, byWo,
                     typeLocMap, typeModelMap, typeWoMap, locWoMap, locModelMap, locTypeMap,
                     modelAgg, woAgg,
-                    topLocations, trend, topTypeNames, anomalies, totalDays, fpyTrend
+                    topLocations, trend, topTypeNames, totalDays, fpyTrend
                 };
                 toast("統計完成");
             } catch (e) { toast("統計失敗: " + e.message, "error"); } finally { loading.value = false; }
@@ -624,7 +579,7 @@ SMT.stats = function (ctx) {
             sortedByModel, sortedByWo, sortedTrend,
             drillView, drillStack, pushDrill, popDrill, closeDrill, isDrill,
             openTypeDetail, openLocDetail, openModelDetail, openWoDetail,
-            trendTypeColor, chartMaxRate, chartMaxQty, trendY, trendYQty, trendLinePoints,
+            trendTypeColor,
             renderParetoChart, renderStatsCharts
         };
 };

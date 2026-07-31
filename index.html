@@ -780,63 +780,9 @@
                     <div v-else class="text-center text-gray-300 py-4 text-sm">無位置不良數據</div>
                 </div>
 
-                <!-- Baseline Anomaly 異常警示 -->
-                <div v-if="statsResult.anomalies && statsResult.anomalies.length > 0" class="section-card p-4 col-span-1 md:col-span-2 border-l-4 border-red-500">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-red-700"><i class="fas fa-bell mr-1"></i>異常重複警示 <span class="text-xs font-normal text-gray-400">(最新日不良數超過基線 +2σ)</span></h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <div v-for="a in statsResult.anomalies" :key="a.code" class="p-3 bg-red-50 rounded-lg border border-red-200 flex items-center justify-between">
-                            <div>
-                                <div class="font-mono font-black text-red-700">{{ a.code }}</div>
-                                <div class="text-xs text-gray-500">基線 {{ a.baseline }} ±{{ a.sigma }} · 閾值 {{ a.threshold }}</div>
-                            </div>
-                            <div class="text-right">
-                                <div class="text-2xl font-black text-red-600 font-mono">{{ a.latest }}</div>
-                                <div class="text-[10px] text-gray-400">最新不良數</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Defect Trend Chart -->
+                <!-- 生產日明細表 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2" v-if="statsResult.trend && statsResult.trend.length > 0">
-                    <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>缺陷現象趨勢 <span class="badge-hint"><i class="fas fa-sort"></i>點擊表格標題可排序</span></h3>
-                    
-                    <!-- SVG Line Chart -->
-                    <div class="mb-4 overflow-x-auto">
-                        <svg :viewBox="`0 0 ${Math.max(600, statsResult.trend.length * 80)} 280`" class="w-full" style="min-width:600px; height:280px;">
-                            <!-- Grid lines -->
-                            <g stroke="#e5e7eb" stroke-width="1">
-                                <line v-for="i in 5" :key="'g'+i" x1="60" :y1="40 + (i-1)*40" :x2="Math.max(600, statsResult.trend.length * 80) - 20" :y2="40 + (i-1)*40"></line>
-                            </g>
-                            <!-- Y-axis labels (defect rate %) -->
-                            <g font-size="10" fill="#9ca3af" text-anchor="end">
-                                <text v-for="i in 5" :key="'y'+i" x="55" :y="44 + (i-1)*40">{{ (chartMaxRate * (5-i) / 4).toFixed(1) }}%</text>
-                            </g>
-                            <!-- X-axis date labels -->
-                            <g font-size="9" fill="#6b7280" text-anchor="middle">
-                                <text v-for="(d, i) in statsResult.trend" :key="'x'+i" :x="80 + i * ((Math.max(600, statsResult.trend.length * 80) - 100) / Math.max(1, statsResult.trend.length - 1))" y="260" transform="rotate(-30)" :transform-origin="`${80 + i * ((Math.max(600, statsResult.trend.length * 80) - 100) / Math.max(1, statsResult.trend.length - 1))} 260`">{{ d.date.slice(5) }}</text>
-                            </g>
-                            
-                            <!-- Defect Rate Line (purple, thick) -->
-                            <polyline fill="none" stroke="#8b5cf6" stroke-width="2.5" :points="trendLinePoints('rate')"></polyline>
-                            <g>
-                                <circle v-for="(d, i) in statsResult.trend" :key="'rp'+i" :cx="80 + i * ((Math.max(600, statsResult.trend.length * 80) - 100) / Math.max(1, statsResult.trend.length - 1))" :cy="trendY(parseFloat(d.defectRate))" r="4" fill="#8b5cf6"></circle>
-                                <text v-for="(d, i) in statsResult.trend" :key="'rt'+i" :x="80 + i * ((Math.max(600, statsResult.trend.length * 80) - 100) / Math.max(1, statsResult.trend.length - 1))" :y="trendY(parseFloat(d.defectRate)) - 8" font-size="10" fill="#8b5cf6" font-weight="bold" text-anchor="middle">{{ d.defectRate }}%</text>
-                            </g>
-                            
-                            <!-- Top 5 defect type lines -->
-                            <g v-for="(t, ti) in statsResult.topTypeNames" :key="'line'+t">
-                                <polyline fill="none" :stroke="trendTypeColor(t)" stroke-width="1.5" stroke-dasharray="4,2" :points="trendLinePoints('type', t)"></polyline>
-                                <circle v-for="(d, i) in statsResult.trend" :key="'tp'+ti+i" :cx="80 + i * ((Math.max(600, statsResult.trend.length * 80) - 100) / Math.max(1, statsResult.trend.length - 1))" :cy="trendYQty(d.byType[t] || 0)" r="3" :fill="trendTypeColor(t)"></circle>
-                            </g>
-                        </svg>
-                        
-                        <!-- Legend -->
-                        <div class="flex flex-wrap gap-3 mt-2 text-xs">
-                            <div class="flex items-center gap-1"><span class="w-4 h-0.5" style="background:#8b5cf6; height:3px"></span><span class="font-bold">不良率 (%)</span></div>
-                            <div v-for="t in statsResult.topTypeNames" :key="'lg'+t" class="flex items-center gap-1"><span class="w-4 h-0.5 border-dashed" :style="{borderTop: '2px dashed ' + trendTypeColor(t)}"></span><span>{{ t }} (數量)</span></div>
-                        </div>
-                    </div>
+                    <h3 class="card-title"><i class="fas fa-calendar-days text-blue-600"></i>生產日明細 <span class="badge-hint"><i class="fas fa-sort"></i>點擊表格標題可排序</span></h3>
 
                     <div class="table-wrap">
                         <table class="data-table min-w-[600px]">

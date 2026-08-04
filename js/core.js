@@ -21,6 +21,8 @@ SMT.core = function (ctx) {
         const validLine = (id) => SMT.LINES.some(l => l.id === id) ? id : 'SMT';
         const currentLine = ref(validLine((() => { try { return localStorage.getItem(SMT.LINE_KEY); } catch(e) { return null; } })()));
         const currentLineMeta = computed(() => SMT.LINES.find(l => l.id === currentLine.value) || SMT.LINES[0]);
+        // DAF／組裝測試先保留功能模組，但操作入口暫不顯示。
+        const hideLineTools = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -90,6 +92,9 @@ SMT.core = function (ctx) {
         const switchLine = async (lineId) => {
             const target = validLine(lineId);
             if (target === currentLine.value) return;
+            if (['DAF', 'ASSY'].includes(target) && ['fpy', 'ooc', 'equipment'].includes(currentTab.value)) {
+                currentTab.value = 'dashboard';
+            }
             currentLine.value = target;
             try { localStorage.setItem(SMT.LINE_KEY, target); } catch(e) {}
             loading.value = true;
@@ -121,6 +126,6 @@ SMT.core = function (ctx) {
             getWoColor, fpyTargets, saveFpyTargets, loadFpyTargets, isFpyBelowTarget, todayStr,
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
-            lines, currentLine, currentLineMeta, canImport, switchLine
+            lines, currentLine, currentLineMeta, hideLineTools, canImport, switchLine
         };
 };

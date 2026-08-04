@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.ooc = function (ctx) {
-        const { data, toast, loading, calendarYear, calendarMonth } = ctx;
+        const { data, toast, loading, calendarYear, calendarMonth, currentLine } = ctx;
         const oocForm = ref({ id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' });
         const oocHistory = ref([]);
         const showOocModal = ref(false);
@@ -28,11 +28,11 @@ SMT.ooc = function (ctx) {
             try {
                 const payload = { production_date: oocForm.value.date, occurrence_time: oocForm.value.time, wo_id: oocForm.value.wo_id, machine_id: oocForm.value.machine_id, cause_id: oocForm.value.cause_id, notes: oocForm.value.notes || null };
                 if (oocForm.value.id) await _supabase.from('ooc_records').update(payload).eq('id', oocForm.value.id);
-                else await _supabase.from('ooc_records').insert(payload);
+                else await _supabase.from('ooc_records').insert({ ...payload, line: currentLine.value });
                 await loadOocHistory(); showOocModal.value = false; toast("儲存成功");
             } catch(e) { toast("失敗: " + e.message + " (若無 notes 欄位請忽略此欄)", "error"); } finally { loading.value = false; }
         };
-        const loadOocHistory = async () => { const { data: list } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').order('production_date', {ascending:false}).limit(200); if(list) oocHistory.value = list; };
+        const loadOocHistory = async () => { const { data: list } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').eq('line', currentLine.value).order('production_date', {ascending:false}).limit(200); if(list) oocHistory.value = list; };
         const deleteOoc = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('ooc_records').delete().eq('id', id); loadOocHistory(); toast("已刪除", "info"); };
         const openOocDayDetail = (day) => { oocDayModal.value = { show: true, date: day.dateStr, list: day.items }; };
         return {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SMT 生產管理系統</title>
+    <title>科雅光電 生產管理系統</title>
     
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -13,7 +13,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Fira+Code:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/main.css?v=202608041323">
 </head>
 <body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
 
@@ -29,14 +29,22 @@
 
     <!-- Desktop Sidebar -->
     <aside class="hidden md:flex w-60 flex-col flex-shrink-0" style="background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);">
-        <div class="p-5 text-center border-b border-slate-700/50">
+        <div class="p-4 border-b border-slate-700/50">
             <div class="flex items-center justify-center gap-2 mb-1">
-                <div class="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center">
+                <div class="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-microchip text-white text-sm"></i>
                 </div>
-                <h1 class="text-xl font-black text-white tracking-wide">SMT</h1>
+                <h1 class="text-lg font-black text-white tracking-wide">科雅光電</h1>
             </div>
-            <p class="text-[10px] text-slate-500 font-mono">生產管理系統</p>
+            <p class="text-[10px] text-slate-500 font-mono text-center mb-3">生產管理系統</p>
+            <!-- 產線切換：各線資料完全獨立 -->
+            <div class="line-switch" role="group" aria-label="產線切換">
+                <button v-for="l in lines" :key="l.id" @click="switchLine(l.id)"
+                        :class="{ 'is-active': currentLine === l.id }"
+                        :aria-pressed="currentLine === l.id" :title="l.label">
+                    <i class="fas" :class="l.icon"></i><span>{{ l.label }}</span>
+                </button>
+            </div>
         </div>
         <nav class="flex-1 py-3 overflow-y-auto px-3 space-y-0.5">
             <a @click="currentTab = 'dashboard'" :class="{'active': currentTab === 'dashboard'}" class="sidebar-link rounded-lg">
@@ -69,7 +77,7 @@
                 <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">OP</div>
                 <div>
                     <div class="text-xs text-white font-bold">操作員</div>
-                    <div class="text-[10px] text-slate-500">SMT 產線</div>
+                    <div class="text-[10px] text-slate-500">{{ currentLineMeta.label }} 產線</div>
                 </div>
             </div>
         </div>
@@ -284,7 +292,9 @@
                             <button @click="addDefect" class="btn-danger w-full md:w-auto"><i class="fas fa-plus mr-1"></i> 新增</button>
                         </div>
                         <div class="flex justify-end mb-3">
-                            <label class="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-green-600 hover:bg-green-700 cursor-pointer transition"><i class="fas fa-file-csv mr-1"></i>匯入 CSV<input type="file" accept=".csv" @change="importDefectCsv" class="hidden"></label>
+                            <!-- 匯入格式依機台而異，DAF / 組裝測試的格式尚未定義 -->
+                            <label v-if="canImport" class="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-green-600 hover:bg-green-700 cursor-pointer transition"><i class="fas fa-file-csv mr-1"></i>匯入 CSV<input type="file" accept=".csv" @change="importDefectCsv" class="hidden"></label>
+                            <span v-else class="badge-hint"><i class="fas fa-hourglass-half"></i>{{ currentLineMeta.label }} 匯入格式待定，請先手動輸入</span>
                         </div>
                         <div class="overflow-x-auto rounded-lg border">
                             <table class="w-full text-left text-sm">
@@ -368,7 +378,9 @@
                 <div class="flex flex-wrap justify-between items-center gap-2">
                     <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-check-double mr-2 text-purple-500"></i>直通率管理</h2>
                     <div class="flex gap-2 flex-shrink-0">
-                        <label class="px-3 py-2 rounded-lg text-xs font-bold text-white cursor-pointer transition" style="background:#16a34a;"><i class="fas fa-file-upload mr-1"></i>上傳檔案<input type="file" accept=".csv,.xlsx,.xls" multiple @change="importFpyFile" class="hidden"></label>
+                        <!-- 匯入格式依機台而異，DAF / 組裝測試的格式尚未定義 -->
+                        <label v-if="canImport" class="px-3 py-2 rounded-lg text-xs font-bold text-white cursor-pointer transition" style="background:#16a34a;"><i class="fas fa-file-upload mr-1"></i>上傳檔案<input type="file" accept=".csv,.xlsx,.xls" multiple @change="importFpyFile" class="hidden"></label>
+                        <span v-else class="badge-hint"><i class="fas fa-hourglass-half"></i>{{ currentLineMeta.label }} 上傳格式待定</span>
                         <button @click="openFpyModal()" class="btn-purple text-sm"><i class="fas fa-plus mr-1"></i> 手動輸入</button>
                     </div>
                 </div>
@@ -1206,22 +1218,26 @@
                 <a @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
                 <a @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
+                <div class="border-t border-gray-100 mt-2 pt-2">
+                    <div class="px-4 pb-1 text-[10px] font-bold text-gray-400">切換產線</div>
+                    <a v-for="l in lines" :key="l.id" @click="switchLine(l.id); showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentLine===l.id ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas w-5 mr-2" :class="l.icon"></i>{{ l.label }}<i v-if="currentLine===l.id" class="fas fa-check ml-auto text-xs"></i></a>
+                </div>
             </div>
         </a>
     </nav>
 
 </div>
 
-<script src="js/supabase-client.js"></script>
-<script src="js/core.js"></script>
-<script src="js/orders.js"></script>
-<script src="js/report.js"></script>
-<script src="js/fpy.js"></script>
-<script src="js/ooc.js"></script>
-<script src="js/dashboard.js"></script>
-<script src="js/stats.js"></script>
-<script src="js/equipment.js"></script>
-<script src="js/settings.js"></script>
-<script src="js/app.js"></script>
+<script src="js/supabase-client.js?v=202608041323"></script>
+<script src="js/core.js?v=202608041323"></script>
+<script src="js/orders.js?v=202608041323"></script>
+<script src="js/report.js?v=202608041323"></script>
+<script src="js/fpy.js?v=202608041323"></script>
+<script src="js/ooc.js?v=202608041323"></script>
+<script src="js/dashboard.js?v=202608041323"></script>
+<script src="js/stats.js?v=202608041323"></script>
+<script src="js/equipment.js?v=202608041323"></script>
+<script src="js/settings.js?v=202608041323"></script>
+<script src="js/app.js?v=202608041323"></script>
 </body>
 </html>

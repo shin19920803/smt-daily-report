@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab } = ctx;
+        const { activeWoNumbers, currentTab, currentLine } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
@@ -23,7 +23,7 @@ SMT.dashboard = function (ctx) {
             dashboard.value.activeWoCount = activeWoNumbers.value.length;
 
             const targetDate = dashDate.value;
-            const { data: todayProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').eq('production_date', targetDate);
+            const { data: todayProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').eq('line', currentLine.value).eq('production_date', targetDate);
             let tInput = 0, tDefects = 0;
             (todayProds || []).forEach(p => { tInput += p.input_quantity; p.defect_logs.forEach(d => { tDefects += d.quantity; }); });
             dashboard.value.todayInput = tInput;
@@ -31,20 +31,20 @@ SMT.dashboard = function (ctx) {
             dashboard.value.todayYield = calcYield(tInput, tDefects);
 
             const monthStart = targetDate.slice(0, 7) + '-01';
-            const { data: oocMonth, count: oocCount } = await _supabase.from('ooc_records').select('id', { count: 'exact' }).gte('production_date', monthStart).lte('production_date', targetDate);
+            const { data: oocMonth, count: oocCount } = await _supabase.from('ooc_records').select('id', { count: 'exact' }).eq('line', currentLine.value).gte('production_date', monthStart).lte('production_date', targetDate);
             dashboard.value.monthOocCount = oocCount || 0;
 
             const weekAgo = new Date(targetDate); weekAgo.setDate(weekAgo.getDate() - 7);
             const weekStr = weekAgo.toISOString().split('T')[0];
-            const { data: weekProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').gte('production_date', weekStr).lte('production_date', targetDate);
+            const { data: weekProds } = await _supabase.from('daily_production').select('input_quantity, defect_logs(quantity)').eq('line', currentLine.value).gte('production_date', weekStr).lte('production_date', targetDate);
             let wInput = 0, wDefects = 0;
             (weekProds || []).forEach(p => { wInput += p.input_quantity; p.defect_logs.forEach(d => { wDefects += d.quantity; }); });
             dashboard.value.weekAvgYield = calcYield(wInput, wDefects);
 
-            const { data: recentProds } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(quantity)').eq('production_date', targetDate).order('production_date', { ascending: false }).limit(20);
+            const { data: recentProds } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(quantity)').eq('line', currentLine.value).eq('production_date', targetDate).order('production_date', { ascending: false }).limit(20);
             dashboardRecentProds.value = (recentProds || []).map(item => ({ ...item, defect_count: item.defect_logs.reduce((s, d) => s + (d.quantity || 0), 0) }));
 
-            const { data: recentOoc } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').eq('production_date', targetDate).order('production_date', {ascending:false}).limit(10);
+            const { data: recentOoc } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').eq('line', currentLine.value).eq('production_date', targetDate).order('production_date', {ascending:false}).limit(10);
             dashboardRecentOoc.value = recentOoc || [];
         };
         let dashYieldChartInst = null;
@@ -59,6 +59,7 @@ SMT.dashboard = function (ctx) {
             const { data: prods } = await _supabase
                 .from('daily_production')
                 .select('production_date, input_quantity, defect_logs(quantity)')
+                .eq('line', currentLine.value)
                 .gte('production_date', days[0]).lte('production_date', days[days.length-1]);
             const dayMap = {};
             days.forEach(d => { dayMap[d] = { input: 0, defects: 0 }; });

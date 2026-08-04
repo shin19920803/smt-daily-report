@@ -175,6 +175,27 @@ button:disabled, .btn-primary:disabled, .btn-success:disabled, .btn-danger:disab
 .sidebar-link:focus-visible { outline: 2px solid #93C5FD; outline-offset: -2px; }
 
 /* ============================================================
+   LINE SWITCH (產線切換：SMT / DAF / 組裝測試)
+   ============================================================ */
+.line-switch {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.09);
+    border-radius: var(--r-md); padding: 3px;
+}
+.line-switch button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    min-height: 44px; padding: 6px 2px; border-radius: var(--r-sm);
+    color: var(--sidebar-text); font-size: 0.68rem; font-weight: 700; line-height: 1.1;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.line-switch button i { font-size: 0.8rem; }
+.line-switch button span { white-space: nowrap; }
+.line-switch button:hover { background: rgba(255,255,255,0.09); color: #E2E8F0; }
+.line-switch button.is-active { background: var(--secondary); color: #fff; box-shadow: var(--shadow-sm); }
+.line-switch button.is-active:hover { background: #2563EB; color: #fff; }
+.line-switch button:focus-visible { outline: 2px solid #93C5FD; outline-offset: -2px; }
+
+/* ============================================================
    CARDS
    ============================================================ */
 .section-card {

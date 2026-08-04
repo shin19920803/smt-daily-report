@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.stats = function (ctx) {
-        const { toast, loading, currentTab, fpyTargets } = ctx;
+        const { toast, loading, currentTab, fpyTargets, currentLine, currentLineMeta } = ctx;
 
         const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
@@ -235,7 +235,7 @@ SMT.stats = function (ctx) {
         const calculateStats = async () => {
             loading.value = true;
             try {
-                let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`);
+                let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
                 if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start);
                 if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end);
                 const { data: rows } = await query;
@@ -336,7 +336,7 @@ SMT.stats = function (ctx) {
                 // --- FPY 趨勢 (每日平均 SPI/AOI) ---
                 let fpyTrend = [];
                 try {
-                    let fq = _supabase.from('daily_fpy').select('production_date, spi_rate, aoi_rate, work_orders!inner(wo_number, model_id)');
+                    let fq = _supabase.from('daily_fpy').select('production_date, spi_rate, aoi_rate, work_orders!inner(wo_number, model_id)').eq('line', currentLine.value);
                     if (statsFilter.value.start) fq = fq.gte('production_date', statsFilter.value.start);
                     if (statsFilter.value.end) fq = fq.lte('production_date', statsFilter.value.end);
                     const { data: fpyRows } = await fq;
@@ -377,7 +377,7 @@ SMT.stats = function (ctx) {
                 XLSX.utils.book_append_sheet(wb, wsYield, "良率報告");
 
                 // === 每日明細分頁 ===
-                let dailyQuery = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`);
+                let dailyQuery = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
                 if (statsFilter.value.start) dailyQuery = dailyQuery.gte('production_date', statsFilter.value.start);
                 if (statsFilter.value.end) dailyQuery = dailyQuery.lte('production_date', statsFilter.value.end);
                 const { data: dailyRows } = await dailyQuery;
@@ -401,7 +401,7 @@ SMT.stats = function (ctx) {
                 const wsDaily = XLSX.utils.aoa_to_sheet(dailyData);
                 XLSX.utils.book_append_sheet(wb, wsDaily, "每日明細");
 
-                let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))');
+                let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').eq('line', currentLine.value);
                 if (statsFilter.value.start) fpyQuery = fpyQuery.gte('production_date', statsFilter.value.start);
                 if (statsFilter.value.end) fpyQuery = fpyQuery.lte('production_date', statsFilter.value.end);
                 const { data: fpyRows } = await fpyQuery;
@@ -453,7 +453,7 @@ SMT.stats = function (ctx) {
                 ];
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(crossData), "交叉分析");
 
-                XLSX.writeFile(wb, `SMT_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+                XLSX.writeFile(wb, `KOYA_${currentLine.value}_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
                 toast("完整報表已導出");
             } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
         };

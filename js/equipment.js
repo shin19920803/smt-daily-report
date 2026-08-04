@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.equipment = function (ctx) {
-        const { toast, loading } = ctx;
+        const { toast, loading, currentLine } = ctx;
         const eqTab = ref('feeder');
         const eqData = ref({ feederModels: [], nozzleModels: [] });
         const feederList = ref([]);
@@ -70,19 +70,19 @@ SMT.equipment = function (ctx) {
 
         const loadEqData = async () => {
             const [fm, nm] = await Promise.all([
-                _supabase.from('feeder_models').select('*').order('brand'),
-                _supabase.from('nozzle_models').select('*').order('brand')
+                _supabase.from('feeder_models').select('*').eq('line', currentLine.value).order('brand'),
+                _supabase.from('nozzle_models').select('*').eq('line', currentLine.value).order('brand')
             ]);
             eqData.value.feederModels = fm.data || [];
             eqData.value.nozzleModels = nm.data || [];
         };
 
         const loadFeeders = async () => {
-            const { data: list, error } = await _supabase.from('feeders').select('*, feeder_models(brand, model)').order('slot_number');
+            const { data: list, error } = await _supabase.from('feeders').select('*, feeder_models(brand, model)').eq('line', currentLine.value).order('slot_number');
             if (error) { 
                 console.error('loadFeeders join error, trying without join:', error);
                 // Fallback: load without join, manually map model info
-                const { data: rawList } = await _supabase.from('feeders').select('*').order('slot_number');
+                const { data: rawList } = await _supabase.from('feeders').select('*').eq('line', currentLine.value).order('slot_number');
                 const mapped = (rawList || []).map(f => {
                     const fm = eqData.value.feederModels.find(m => m.id === f.feeder_model_id);
                     return { ...f, feeder_models: fm || { brand: '-', model: '-' } };
@@ -112,10 +112,10 @@ SMT.equipment = function (ctx) {
         };
 
         const loadNozzleLogs = async () => {
-            const { data: list, error } = await _supabase.from('nozzle_inventory_logs').select('*, nozzle_models(brand, model)').order('log_date', { ascending: false }).limit(200);
+            const { data: list, error } = await _supabase.from('nozzle_inventory_logs').select('*, nozzle_models(brand, model)').eq('line', currentLine.value).order('log_date', { ascending: false }).limit(200);
             if (error) {
                 console.error('loadNozzleLogs join error, trying without join:', error);
-                const { data: rawList } = await _supabase.from('nozzle_inventory_logs').select('*').order('log_date', { ascending: false }).limit(200);
+                const { data: rawList } = await _supabase.from('nozzle_inventory_logs').select('*').eq('line', currentLine.value).order('log_date', { ascending: false }).limit(200);
                 nozzleLogs.value = (rawList || []).map(log => {
                     const nm = eqData.value.nozzleModels.find(m => m.id === log.nozzle_model_id);
                     return { ...log, nozzle_models: nm || { brand: '-', model: '-' } };
@@ -199,7 +199,7 @@ SMT.equipment = function (ctx) {
                 const payload = { feeder_model_id: feederForm.value.feeder_model_id, slot_number: feederForm.value.slot_number, mes_code_left: mesL || null, mes_code_right: mesR || null, purchase_date: feederForm.value.purchase_date || null, status: feederForm.value.status };
                 let error;
                 if (editId) ({ error } = await _supabase.from('feeders').update(payload).eq('id', editId));
-                else ({ error } = await _supabase.from('feeders').insert(payload));
+                else ({ error } = await _supabase.from('feeders').insert({ ...payload, line: currentLine.value }));
                 if (error) throw error;
                 showFeederModal.value = false; await loadFeeders(); toast('Feeder 已儲存');
             } catch(e) { toast('儲存失敗: ' + e.message, 'error'); } finally { loading.value = false; }
@@ -230,7 +230,7 @@ SMT.equipment = function (ctx) {
             if (!nozzleLogForm.value.nozzle_model_id || !nozzleLogForm.value.quantity) return toast('請填寫完整', 'warning');
             loading.value = true;
             try {
-                const { error } = await _supabase.from('nozzle_inventory_logs').insert({ nozzle_model_id: nozzleLogForm.value.nozzle_model_id, change_type: nozzleLogForm.value.change_type, quantity: nozzleLogForm.value.quantity, log_date: nozzleLogForm.value.log_date, notes: nozzleLogForm.value.notes || null });
+                const { error } = await _supabase.from('nozzle_inventory_logs').insert({ nozzle_model_id: nozzleLogForm.value.nozzle_model_id, change_type: nozzleLogForm.value.change_type, quantity: nozzleLogForm.value.quantity, log_date: nozzleLogForm.value.log_date, notes: nozzleLogForm.value.notes || null, line: currentLine.value });
                 if (error) throw error;
                 showNozzleLogModal.value = false; await loadNozzleLogs(); toast('紀錄已新增');
             } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
@@ -239,8 +239,8 @@ SMT.equipment = function (ctx) {
         const deleteNozzleLog = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('nozzle_inventory_logs').delete().eq('id', id); await loadNozzleLogs(); toast('已刪除', 'info'); };
 
         // Equipment settings helpers
-        const addFeederModel = async () => { const b = eqSettingForm.value.feederBrand.trim(); const m = eqSettingForm.value.feederModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('feeder_models').insert({ brand: b, model: m }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.feederBrand = ''; eqSettingForm.value.feederModel = ''; await loadEqData(); toast('已新增'); };
-        const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('nozzle_models').insert({ brand: b, model: m }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
+        const addFeederModel = async () => { const b = eqSettingForm.value.feederBrand.trim(); const m = eqSettingForm.value.feederModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('feeder_models').insert({ brand: b, model: m, line: currentLine.value }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.feederBrand = ''; eqSettingForm.value.feederModel = ''; await loadEqData(); toast('已新增'); };
+        const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('nozzle_models').insert({ brand: b, model: m, line: currentLine.value }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
         const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; const { error } = await _supabase.from(table).delete().eq('id', id); if (error) return toast('刪除失敗: ' + error.message, 'error'); await loadEqData(); toast('已刪除', 'info'); };
         return {
             eqTab, eqData, feederList, nozzleLogs, nozzleStock,

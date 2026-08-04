@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 
 // 組裝測試機台 LOG：瀏覽器版的 Python LOG 自動統計工具
 SMT.assembly = function (ctx) {
-    const { toast, loading, currentLine, data, loadBaseData } = ctx;
+    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_assy_log_batches_v1';
     const today = () => new Date().toISOString().split('T')[0];
 
@@ -12,6 +12,32 @@ SMT.assembly = function (ctx) {
     const assemblyReportResult = ref(null);
     const assemblyStatsFilter = ref({ start: today(), end: today() });
     const assemblyStatsResult = ref(null);
+    const assemblyQuickMode = ref(null);
+    const assemblyQuickOffset = ref(0);
+    let applyingAssemblyQuick = false;
+
+    const WEEKDAY_TW = ['日', '一', '二', '三', '四', '五', '六'];
+    const fmtLocal = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const dateFromValue = (value) => new Date(`${value}T00:00:00`);
+    const dayOffset = (value, amount) => {
+        const date = dateFromValue(value);
+        date.setDate(date.getDate() + amount);
+        return fmtLocal(date);
+    };
+    const assemblyUploadDateLabel = computed(() => {
+        const date = dateFromValue(assemblyUploadDate.value);
+        return `${assemblyUploadDate.value} (週${WEEKDAY_TW[date.getDay()]})`;
+    });
+    const assemblyUploadDateRelative = computed(() => {
+        const diff = Math.round((dateFromValue(assemblyUploadDate.value) - dateFromValue(today())) / 86400000);
+        if (diff === 0) return '今天';
+        if (diff === -1) return '昨天';
+        if (diff === 1) return '明天';
+        return diff < 0 ? `${Math.abs(diff)} 天前` : `${diff} 天後`;
+    });
+    const shiftAssemblyUploadDate = (amount) => {
+        assemblyUploadDate.value = dayOffset(assemblyUploadDate.value, amount);
+    };
 
     const RULES = [
         { keywords: ['取图像成功', '取圖像成功'], category: '生產成功', type: 'SUCCESS' },
@@ -206,6 +232,7 @@ SMT.assembly = function (ctx) {
             ...day,
             total: day.success + day.ng,
             successRate: day.success + day.ng ? (day.success / (day.success + day.ng) * 100).toFixed(2) : '100.00',
+            downtimeRate: (100 - (day.success + day.ng ? day.success / (day.success + day.ng) * 100 : 100)).toFixed(2),
             ngRate: day.success + day.ng ? (day.ng / (day.success + day.ng) * 100).toFixed(2) : '0.00'
         }));
         const hourly = Array.from({ length: 24 }, (_, i) => {
@@ -215,15 +242,86 @@ SMT.assembly = function (ctx) {
             const total = production + hourlyNgCount;
             return {
                 hour, label: hour + ':00–' + hour + ':59', production, ng: hourlyNgCount, total,
-                successRate: total ? (production / total * 100).toFixed(2) : null
+                successRate: total ? (production / total * 100).toFixed(2) : '100.00',
+                downtimeRate: (100 - (total ? production / total * 100 : 100)).toFixed(2)
             };
         });
+        const successRate = totalRecords ? success / totalRecords * 100 : 100;
         return {
             totalInput: success, totalSuccess: success, totalDefects: ng, totalRecords,
-            yieldRate: totalRecords ? (success / totalRecords * 100).toFixed(2) : '100.00',
+            yieldRate: successRate.toFixed(2),
+            downtimeRate: (100 - successRate).toFixed(2),
             byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
             totalDays: daily.length, topCause: byTypeList[0] || null
         };
+    };
+
+    const assemblyBatchesForDate = computed(() => assemblyBatches.value.filter(batch => Object.prototype.hasOwnProperty.call(batch.buckets || {}, assemblyUploadDate.value)));
+    const deleteAssemblyBatch = (id) => {
+        const batch = assemblyBatches.value.find(item => item.id === id);
+        if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 LOG 統計？`)) return;
+        assemblyBatches.value = assemblyBatches.value.filter(item => item.id !== id);
+        persistStorage();
+        assemblyLastFile.value = assemblyBatches.value[0]?.fileName || '';
+        refreshAssemblyReport();
+        assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        toast('LOG 統計已刪除', 'info');
+    };
+
+    const assemblyQuickRange = (mode, offset) => {
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+        if (mode === 'day') {
+            const date = new Date(now); date.setDate(date.getDate() + offset);
+            return { start: date, end: date };
+        }
+        if (mode === 'week') {
+            const start = new Date(now);
+            start.setDate(start.getDate() - start.getDay() + offset * 7);
+            const end = new Date(start); end.setDate(end.getDate() + 6);
+            return { start, end };
+        }
+        const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+        return { start, end };
+    };
+    const assemblyQuickLabel = computed(() => {
+        if (!assemblyQuickMode.value) return '';
+        const { start, end } = assemblyQuickRange(assemblyQuickMode.value, assemblyQuickOffset.value);
+        if (assemblyQuickMode.value === 'day') return `${fmtLocal(start)} (週${WEEKDAY_TW[start.getDay()]})`;
+        if (assemblyQuickMode.value === 'week') {
+            const sameYear = start.getFullYear() === end.getFullYear();
+            return `${fmtLocal(start)} ~ ${sameYear ? fmtLocal(end).slice(5) : fmtLocal(end)}`;
+        }
+        return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`;
+    });
+    const assemblyQuickRelative = computed(() => {
+        if (!assemblyQuickMode.value) return '';
+        const offset = assemblyQuickOffset.value;
+        const unit = { day: '日', week: '週', month: '月' }[assemblyQuickMode.value];
+        if (offset === 0) return `本${unit}`;
+        if (offset === -1) return `上一${unit}`;
+        if (offset === 1) return `下一${unit}`;
+        return offset < 0 ? `${Math.abs(offset)} ${unit}前` : `${offset} ${unit}後`;
+    });
+    const applyAssemblyQuick = async () => {
+        if (!assemblyQuickMode.value) return;
+        const { start, end } = assemblyQuickRange(assemblyQuickMode.value, assemblyQuickOffset.value);
+        applyingAssemblyQuick = true;
+        assemblyStatsFilter.value.start = fmtLocal(start);
+        assemblyStatsFilter.value.end = fmtLocal(end);
+        await Vue.nextTick();
+        applyingAssemblyQuick = false;
+        calculateAssemblyStats();
+    };
+    const setAssemblyQuickMode = (mode) => {
+        assemblyQuickMode.value = mode;
+        assemblyQuickOffset.value = { day: 0, week: -1, month: -1 }[mode];
+        applyAssemblyQuick();
+    };
+    const shiftAssemblyQuick = (delta) => {
+        if (!assemblyQuickMode.value) return;
+        assemblyQuickOffset.value += delta;
+        applyAssemblyQuick();
     };
 
     const saveNewDefectTypes = async (names) => {
@@ -290,6 +388,9 @@ SMT.assembly = function (ctx) {
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
     };
+    watch(() => [assemblyStatsFilter.value.start, assemblyStatsFilter.value.end], () => {
+        if (!applyingAssemblyQuick) assemblyQuickMode.value = null;
+    });
 
     const exportAssemblyStats = () => {
         const result = assemblyStatsResult.value;
@@ -297,15 +398,15 @@ SMT.assembly = function (ctx) {
         const range = (assemblyStatsFilter.value.start || '不限') + ' ~ ' + (assemblyStatsFilter.value.end || '不限');
         const summary = [
             ['統計區間', range], ['產出成功', result.totalSuccess], ['NG / 停機不良', result.totalDefects],
-            ['成功率', result.yieldRate + '%'], ['LOG 總紀錄', result.totalRecords],
+            ['停機率', result.downtimeRate + '%'], ['LOG 總紀錄', result.totalRecords],
             ['忽略行數', result.ignored], ['未分類行數', result.unclassified], [],
             ['停機／不良原因', '次數', '佔 NG 比例'],
             ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])
         ];
-        const daily = [['日期', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '估算成功率'],
-            ...result.daily.map(row => [row.date, row.success, row.ng, row.total, row.successRate + '%'])];
-        const hourly = [['時段', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '估算成功率'],
-            ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.successRate === null ? '' : row.successRate + '%'])];
+        const daily = [['日期', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '停機率'],
+            ...result.daily.map(row => [row.date, row.success, row.ng, row.total, row.downtimeRate + '%'])];
+        const hourly = [['時段', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '停機率'],
+            ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
@@ -314,7 +415,7 @@ SMT.assembly = function (ctx) {
         toast('組裝測試 LOG 報表已導出');
     };
 
-    let reportChart = null, statsChart = null;
+    let reportChart = null, statsChart = null, reportPieChart = null, statsPieChart = null;
     const renderChart = (id, result, previous, setPrevious) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
@@ -340,13 +441,44 @@ SMT.assembly = function (ctx) {
         });
     };
     const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; });
-    const renderAssemblyStatsCharts = () => renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; });
+    const renderPieChart = (id, result, previous, setPrevious) => {
+        Vue.nextTick(() => {
+            const el = document.getElementById(id);
+            if (!result || !result.byType.length || !el) {
+                if (previous) previous.dispose();
+                setPrevious(null);
+                return;
+            }
+            if (!previous || previous.getDom() !== el) {
+                if (previous) previous.dispose();
+                previous = echarts.init(el);
+                setPrevious(previous);
+            }
+            previous.setOption({
+                tooltip: { trigger: 'item', formatter: '{b}<br/>數量：{c}<br/>比例：{d}%' },
+                legend: { type: 'scroll', orient: 'vertical', right: 0, top: 'middle', textStyle: { fontSize: 11 } },
+                series: [{ type: 'pie', radius: ['38%', '68%'], center: ['34%', '50%'], avoidLabelOverlap: true,
+                    itemStyle: { borderColor: '#fff', borderWidth: 2 },
+                    label: { formatter: '{b}\n{d}%', fontSize: 11 },
+                    data: result.byType.map(row => ({ name: row.name, value: row.qty }))
+                }]
+            });
+        });
+    };
+    const renderAssemblyStatsCharts = () => {
+        renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; });
+        renderPieChart('assemblyStatsPieChart', assemblyStatsResult.value, statsPieChart, value => { statsPieChart = value; });
+    };
 
     assemblyBatches.value = readStorage();
     refreshAssemblyReport();
     watch(assemblyUploadDate, refreshAssemblyReport);
     watch(assemblyReportResult, renderAssemblyReportChart);
     watch(assemblyStatsResult, renderAssemblyStatsCharts);
+    watch(currentTab, tab => {
+        if (tab === 'report' && currentLine.value === 'ASSY') renderAssemblyReportChart();
+        if (tab === 'stats' && currentLine.value === 'ASSY') renderAssemblyStatsCharts();
+    });
     watch(currentLine, line => {
         if (line === 'ASSY') {
             refreshAssemblyReport();
@@ -356,12 +488,16 @@ SMT.assembly = function (ctx) {
     window.addEventListener('resize', () => {
         if (reportChart) reportChart.resize();
         if (statsChart) statsChart.resize();
+        if (reportPieChart) reportPieChart.resize();
+        if (statsPieChart) statsPieChart.resize();
     });
 
     return {
-        assemblyUploadDate, assemblyBatches, assemblyLastFile, assemblyReportResult,
-        assemblyStatsFilter, assemblyStatsResult,
+        assemblyUploadDate, assemblyUploadDateLabel, assemblyUploadDateRelative, assemblyBatchesForDate,
+        assemblyBatches, assemblyLastFile, assemblyReportResult,
+        assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
-        calculateAssemblyStats, exportAssemblyStats, renderAssemblyReportChart, renderAssemblyStatsCharts
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate,
+        setAssemblyQuickMode, shiftAssemblyQuick, renderAssemblyReportChart, renderAssemblyStatsCharts
     };
 };

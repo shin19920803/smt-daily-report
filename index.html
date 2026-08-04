@@ -234,9 +234,17 @@
                         <span class="badge-hint"><i class="fas fa-database"></i>分析結果保存在本機瀏覽器</span>
                     </div>
                     <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
-                        <div class="w-full md:w-56">
+                        <div class="w-full md:w-80">
                             <label class="block text-xs font-bold text-gray-400 mb-1">報工日期</label>
-                            <input type="date" v-model="assemblyUploadDate" class="w-full border border-gray-200 p-2 rounded-lg">
+                            <div class="quick-nav w-full">
+                                <button @click="shiftAssemblyUploadDate(-1)" class="quick-arrow" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left"></i></button>
+                                <div class="quick-range flex-1">
+                                    <span class="quick-range-text font-mono">{{ assemblyUploadDateLabel }}</span>
+                                    <span class="quick-range-rel">{{ assemblyUploadDateRelative }}</span>
+                                </div>
+                                <button @click="shiftAssemblyUploadDate(1)" class="quick-arrow" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right"></i></button>
+                            </div>
+                            <input type="date" v-model="assemblyUploadDate" class="w-full border border-gray-200 p-2 rounded-lg mt-2">
                         </div>
                         <label class="btn-primary cursor-pointer text-center">
                             <i class="fas fa-upload mr-1"></i>選擇 LOG 檔案
@@ -245,13 +253,22 @@
                         <button @click="refreshAssemblyReport" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
                     </div>
                     <div v-if="assemblyLastFile" class="mt-3 text-xs text-gray-500"><i class="fas fa-file-lines mr-1 text-orange-500"></i>最近上傳：<b>{{ assemblyLastFile }}</b></div>
+                    <div v-if="assemblyBatchesForDate.length" class="mt-4 border-t border-orange-100 pt-3 space-y-2">
+                        <div class="text-xs font-bold text-gray-500"><i class="fas fa-clock-rotate-left mr-1 text-orange-500"></i>{{ assemblyUploadDateLabel }} 已上傳紀錄</div>
+                        <div v-for="batch in assemblyBatchesForDate" :key="batch.id" class="flex items-center gap-2 bg-orange-50/60 border border-orange-100 rounded-lg px-3 py-2 text-xs">
+                            <i class="fas fa-file-lines text-orange-500"></i>
+                            <span class="font-bold truncate flex-1">{{ batch.fileName }}</span>
+                            <span class="text-gray-500 whitespace-nowrap">成功 {{ batch.buckets[assemblyUploadDate].success }}／NG {{ batch.buckets[assemblyUploadDate].ng }}</span>
+                            <button @click="deleteAssemblyBatch(batch.id)" class="text-red-400 hover:text-red-600 px-1" title="刪除此上傳統計"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    </div>
                     <div class="mt-3 text-xs text-gray-400">LOG 內有日期時依 LOG 日期統計；沒有日期的行會歸到上方選定日期。</div>
                 </div>
 
                 <div v-if="assemblyReportResult" class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyReportResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
                     <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ assemblyReportResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">停機／不良</div></div>
-                    <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-success">{{ assemblyReportResult.yieldRate }}%</div><div class="kpi-label">估算成功率</div></div>
+                    <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ assemblyReportResult.downtimeRate }}%</div><div class="kpi-label">停機率</div></div>
                     <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-list-ol"></i></div><div class="kpi-value">{{ assemblyReportResult.totalRecords.toLocaleString() }}</div><div class="kpi-label">有效紀錄</div></div>
                 </div>
 
@@ -693,6 +710,20 @@
             </div>
             <div v-if="currentLine === 'ASSY'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4">
+                    <div class="quick-bar mb-4">
+                        <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
+                        <div class="quick-seg" role="group" aria-label="組裝測試快捷統計區間">
+                            <button @click="setAssemblyQuickMode('day')" :class="{ 'is-active': assemblyQuickMode === 'day' }" :aria-pressed="assemblyQuickMode === 'day'">日</button>
+                            <button @click="setAssemblyQuickMode('week')" :class="{ 'is-active': assemblyQuickMode === 'week' }" :aria-pressed="assemblyQuickMode === 'week'">週</button>
+                            <button @click="setAssemblyQuickMode('month')" :class="{ 'is-active': assemblyQuickMode === 'month' }" :aria-pressed="assemblyQuickMode === 'month'">月</button>
+                        </div>
+                        <div v-if="assemblyQuickMode" class="quick-nav">
+                            <button @click="shiftAssemblyQuick(-1)" class="quick-arrow" :title="'上一' + (assemblyQuickMode === 'day' ? '日' : assemblyQuickMode === 'week' ? '週' : '月')" aria-label="上一期"><i class="fas fa-chevron-left"></i></button>
+                            <div class="quick-range"><span class="quick-range-text font-mono">{{ assemblyQuickLabel }}</span><span class="quick-range-rel">{{ assemblyQuickRelative }}</span></div>
+                            <button @click="shiftAssemblyQuick(1)" class="quick-arrow" :title="'下一' + (assemblyQuickMode === 'day' ? '日' : assemblyQuickMode === 'week' ? '週' : '月')" aria-label="下一期"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                        <span v-else class="quick-hint">選擇後可用 <i class="fas fa-chevron-left mx-0.5"></i><i class="fas fa-chevron-right mx-0.5"></i> 快速切換期間</span>
+                    </div>
                     <div class="flex flex-col md:flex-row gap-4 items-stretch md:items-end">
                         <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="assemblyStatsFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                         <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="assemblyStatsFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
@@ -702,12 +733,11 @@
                 </div>
                 <div v-if="!assemblyStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行組裝測試統計</div><div class="hint">設定日期區間後點擊「執行統計」</div></div></div>
                 <template v-if="assemblyStatsResult">
-                    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                         <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyStatsResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
                         <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ assemblyStatsResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">停機／不良</div></div>
-                        <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-success">{{ assemblyStatsResult.yieldRate }}%</div><div class="kpi-label">估算成功率</div></div>
+                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ assemblyStatsResult.downtimeRate }}%</div><div class="kpi-label">停機率</div></div>
                         <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ assemblyStatsResult.totalDays }}</div><div class="kpi-label">統計天數</div></div>
-                        <div class="kpi-card"><div class="kpi-icon yellow"><i class="fas fa-ranking-star"></i></div><div class="kpi-value text-orange-600">{{ assemblyStatsResult.topCause ? assemblyStatsResult.topCause.ratio + '%' : '-' }}</div><div class="kpi-label">最高原因比例</div></div>
                     </div>
                     <div class="section-card p-4">
                         <h3 class="card-title"><i class="fas fa-chart-column text-red-600"></i>停機／不良原因 Pareto 圖</h3>
@@ -716,7 +746,8 @@
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4">
-                            <h3 class="card-title"><i class="fas fa-ranking-star text-orange-500"></i>原因比例排行</h3>
+                            <h3 class="card-title"><i class="fas fa-chart-pie text-orange-500"></i>原因比例排行</h3>
+                            <div v-if="assemblyStatsResult.byType.length" id="assemblyStatsPieChart" style="width:100%;height:300px;"></div>
                             <div v-if="assemblyStatsResult.byType.length" class="space-y-2">
                                 <div v-for="(row, idx) in assemblyStatsResult.byType" :key="row.name" class="flex items-center gap-2">
                                     <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'">{{ idx + 1 }}</span>
@@ -729,15 +760,15 @@
                         <div class="section-card p-4">
                             <h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>每小時統計</h3>
                             <div class="table-wrap max-h-80">
-                                <table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">成功率</th></tr></thead>
-                                    <tbody><tr v-for="row in assemblyStatsResult.hourly.filter(item => item.total > 0)" :key="row.hour"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right">{{ row.successRate }}%</td></tr><tr v-if="!assemblyStatsResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody>
+                                <table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead>
+                                    <tbody><tr v-for="row in assemblyStatsResult.hourly.filter(item => item.total > 0)" :key="row.hour"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyStatsResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody>
                                 </table>
                             </div>
                         </div>
                     </div>
                     <div class="section-card p-4" v-if="assemblyStatsResult.daily.length">
                         <h3 class="card-title"><i class="fas fa-calendar-days text-blue-600"></i>每日明細</h3>
-                        <div class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>日期</th><th class="text-right">生產成功</th><th class="text-right">NG</th><th class="text-right">總紀錄</th><th class="text-right">成功率</th></tr></thead><tbody><tr v-for="row in assemblyStatsResult.daily" :key="row.date"><td class="font-mono font-bold">{{ row.date }}</td><td class="text-right">{{ row.success }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right">{{ row.total }}</td><td class="text-right text-success">{{ row.successRate }}%</td></tr></tbody></table></div>
+                        <div class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>日期</th><th class="text-right">生產成功</th><th class="text-right">NG</th><th class="text-right">總紀錄</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyStatsResult.daily" :key="row.date"><td class="font-mono font-bold">{{ row.date }}</td><td class="text-right">{{ row.success }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right">{{ row.total }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr></tbody></table></div>
                     </div>
                 </template>
             </div>

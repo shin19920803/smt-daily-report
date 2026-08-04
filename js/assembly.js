@@ -1,0 +1,367 @@
+window.SMT = window.SMT || {};
+
+// 組裝測試機台 LOG：瀏覽器版的 Python LOG 自動統計工具
+SMT.assembly = function (ctx) {
+    const { toast, loading, currentLine, data, loadBaseData } = ctx;
+    const STORAGE_KEY = 'koya_assy_log_batches_v1';
+    const today = () => new Date().toISOString().split('T')[0];
+
+    const assemblyUploadDate = ref(today());
+    const assemblyBatches = ref([]);
+    const assemblyLastFile = ref('');
+    const assemblyReportResult = ref(null);
+    const assemblyStatsFilter = ref({ start: today(), end: today() });
+    const assemblyStatsResult = ref(null);
+
+    const RULES = [
+        { keywords: ['取图像成功', '取圖像成功'], category: '生產成功', type: 'SUCCESS' },
+        { keywords: ['Mark1失敗', 'Mark1失败'], category: 'Mark點辨識失敗', type: 'NG' },
+        { keywords: ['请手动清除', '請手動清除'], category: '吸取Mylar失敗', type: 'NG' },
+        {
+            keywords: [
+                'HeadC1底部影像识别失败', 'HeadC2底部影像识别失败',
+                'HeadC3底部影像识别失败', 'HeadC4底部影像识别失败',
+                'HeadC1底部影像識別失敗', 'HeadC2底部影像識別失敗',
+                'HeadC3底部影像識別失敗', 'HeadC4底部影像識別失敗',
+                'Head底部影像识别失败', 'Head底部影像識別失敗'
+            ],
+            category: 'Head底部影像識別失敗', type: 'NG'
+        },
+        {
+            keywords: [
+                '錯誤軸未定位', '错误轴未定位', '軸未定位', '轴未定位',
+                '單軸相對移動發生錯誤', '单轴相对移动发生错误',
+                '板卡-第3軸異常', '板卡-第3轴异常',
+                '錯誤碼2147483690', '错误码2147483690',
+                'CZ2軸未到等待位置', 'CZ2轴未到等待位置'
+            ],
+            category: '調機時軸未定位', type: 'NG'
+        },
+        {
+            keywords: ['吸嘴1取板失敗', '吸嘴1取板失败', '吸嘴2取料失敗', '吸嘴2取料失败'],
+            category: '產品取件失敗', type: 'NG'
+        },
+        {
+            keywords: ['吸嘴3取板失敗', '吸嘴3取板失败', '吸嘴4取板失敗', '吸嘴4取板失败'],
+            category: '板子取回失敗', type: 'NG'
+        },
+        { keywords: ['防護門開啟', '防护门开启'], category: '防護門開啟', type: 'NG' },
+        { keywords: ['等待減速信號超時', '等待减速信号超时'], category: '減速信號超時', type: 'NG' },
+        {
+            keywords: [
+                '找Pcb目标匹配相识度低于', '找PCB目标匹配相识度低于',
+                '找Pcb目標匹配相識度低於', '找PCB目標匹配相識度低於'
+            ],
+            category: '忽略', type: 'IGNORE'
+        }
+    ];
+
+    const readStorage = () => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('組裝測試 LOG 歷史讀取失敗', e);
+            return [];
+        }
+    };
+    const persistStorage = () => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(assemblyBatches.value));
+        } catch (e) {
+            console.warn('組裝測試 LOG 歷史保存失敗', e);
+            toast('分析結果已載入，但瀏覽器儲存空間不足，重新整理後可能消失', 'warning');
+        }
+    };
+
+    const decodeBytes = (arrayBuffer) => {
+        const bytes = new Uint8Array(arrayBuffer);
+        if (!bytes.length) throw new Error('上傳的檔案是空白檔案');
+        const has = (a) => bytes.length >= a.length && a.every((v, i) => bytes[i] === v);
+        const attempts = [];
+        if (has([0xEF, 0xBB, 0xBF])) attempts.push(['utf-8', 'utf-8-sig']);
+        if (has([0xFF, 0xFE, 0x00, 0x00])) attempts.push(['utf-32le', 'utf-32-le']);
+        if (has([0x00, 0x00, 0xFE, 0xFF])) attempts.push(['utf-32be', 'utf-32-be']);
+        if (has([0xFF, 0xFE])) attempts.push(['utf-16le', 'utf-16-le']);
+        if (has([0xFE, 0xFF])) attempts.push(['utf-16be', 'utf-16-be']);
+        const sample = bytes.slice(0, 4000);
+        let oddNulls = 0, evenNulls = 0;
+        sample.forEach((v, i) => { if (v === 0) (i % 2 === 0 ? evenNulls++ : oddNulls++); });
+        if (oddNulls > sample.length * 0.2) attempts.push(['utf-16le', 'utf-16-le']);
+        if (evenNulls > sample.length * 0.2) attempts.push(['utf-16be', 'utf-16-be']);
+        ['utf-8', 'gb18030', 'big5', 'windows-1252'].forEach(enc => attempts.push([enc, enc]));
+        const tried = new Set();
+        for (const [encoding, label] of attempts) {
+            if (tried.has(encoding)) continue;
+            tried.add(encoding);
+            try {
+                const decoder = new TextDecoder(encoding, { fatal: true });
+                return { text: decoder.decode(bytes), encoding: label };
+            } catch (e) {}
+        }
+        throw new Error('無法辨識檔案編碼');
+    };
+
+    const normalizeDate = (value, fallback) => {
+        const m = String(value || '').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+        return m ? m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0') : fallback;
+    };
+
+    const parseLogLine = (line, fallbackDate) => {
+        const original = String(line || '').trim().replace(/\0/g, '');
+        if (!original) return null;
+        const parseCombined = (value, raw) => {
+            const m = value.match(/^\s*(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})\s+(\d{1,2}:\d{2}:\d{2})(?::|\.)?(\d{1,6})?\s*(.*)$/);
+            if (!m) return null;
+            const time = m[2] + (m[3] ? ':' + m[3] : '');
+            return { date: normalizeDate(m[1], fallbackDate), time, message: m[4].trim(), original: raw };
+        };
+        const normal = parseCombined(original, original);
+        if (normal) return normal;
+        const columns = original.split('\t');
+        if (columns.length >= 3) {
+            const tabParsed = parseCombined(columns[0].trim() + ' ' + columns[1].trim() + ' ' + columns.slice(2).join('\t').trim(), original);
+            if (tabParsed) return tabParsed;
+            return { date: normalizeDate(columns[0].trim(), fallbackDate), time: columns[1].trim(), message: columns.slice(2).join('\t').trim(), original };
+        }
+        return { date: fallbackDate, time: '', message: original, original };
+    };
+
+    const classify = (message) => {
+        for (const rule of RULES) {
+            for (const keyword of rule.keywords) {
+                if (message.includes(keyword)) return { type: rule.type, category: rule.category, keyword };
+            }
+        }
+        return null;
+    };
+
+    const emptyBucket = () => ({
+        success: 0, ng: 0, ignored: 0, unclassified: 0, parsedLines: 0,
+        byType: {}, hourlySuccess: {}, hourlyNg: {}
+    });
+    const increment = (map, key, amount = 1) => { if (key) map[key] = (map[key] || 0) + amount; };
+
+    const parseText = (text, fallbackDate) => {
+        const buckets = {};
+        let ignoredCount = 0, unclassifiedCount = 0, parsedLineCount = 0;
+        const lines = text.split(/\r?\n/);
+        lines.forEach(line => {
+            const parsed = parseLogLine(line, fallbackDate);
+            if (!parsed || !parsed.message) return;
+            parsedLineCount++;
+            const result = classify(parsed.message);
+            const date = parsed.date || fallbackDate;
+            const bucket = buckets[date] || (buckets[date] = emptyBucket());
+            bucket.parsedLines++;
+            if (!result) {
+                bucket.unclassified++;
+                unclassifiedCount++;
+                return;
+            }
+            if (result.type === 'IGNORE') {
+                bucket.ignored++;
+                ignoredCount++;
+                return;
+            }
+            if (result.type === 'SUCCESS') {
+                bucket.success++;
+                increment(bucket.hourlySuccess, parsed.time.slice(0, 2));
+            } else {
+                bucket.ng++;
+                increment(bucket.byType, result.category);
+                increment(bucket.hourlyNg, parsed.time.slice(0, 2));
+            }
+        });
+        return { buckets, parsedLineCount, ignoredCount, unclassifiedCount, lineCount: lines.length };
+    };
+
+    const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
+    const aggregate = (batches, start = '', end = '') => {
+        const byType = {}, byDate = {}, hourlySuccess = {}, hourlyNg = {};
+        let success = 0, ng = 0, ignored = 0, unclassified = 0, parsedLines = 0;
+        (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, source]) => {
+            if (!inRange(date, start, end)) return;
+            const day = byDate[date] || (byDate[date] = { date, success: 0, ng: 0, byType: {} });
+            success += source.success || 0;
+            ng += source.ng || 0;
+            ignored += source.ignored || 0;
+            unclassified += source.unclassified || 0;
+            parsedLines += source.parsedLines || 0;
+            day.success += source.success || 0;
+            day.ng += source.ng || 0;
+            Object.entries(source.byType || {}).forEach(([name, qty]) => {
+                increment(byType, name, qty);
+                increment(day.byType, name, qty);
+            });
+            Object.entries(source.hourlySuccess || {}).forEach(([hour, qty]) => increment(hourlySuccess, hour, qty));
+            Object.entries(source.hourlyNg || {}).forEach(([hour, qty]) => increment(hourlyNg, hour, qty));
+        }));
+        const totalRecords = success + ng;
+        const byTypeList = Object.entries(byType).map(([name, qty]) => ({
+            name, qty, ratio: ng ? (qty / ng * 100).toFixed(1) : '0.0'
+        })).sort((a, b) => b.qty - a.qty);
+        const daily = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({
+            ...day,
+            total: day.success + day.ng,
+            successRate: day.success + day.ng ? (day.success / (day.success + day.ng) * 100).toFixed(2) : '100.00',
+            ngRate: day.success + day.ng ? (day.ng / (day.success + day.ng) * 100).toFixed(2) : '0.00'
+        }));
+        const hourly = Array.from({ length: 24 }, (_, i) => {
+            const hour = String(i).padStart(2, '0');
+            const production = hourlySuccess[hour] || 0;
+            const hourlyNgCount = hourlyNg[hour] || 0;
+            const total = production + hourlyNgCount;
+            return {
+                hour, label: hour + ':00–' + hour + ':59', production, ng: hourlyNgCount, total,
+                successRate: total ? (production / total * 100).toFixed(2) : null
+            };
+        });
+        return {
+            totalInput: success, totalSuccess: success, totalDefects: ng, totalRecords,
+            yieldRate: totalRecords ? (success / totalRecords * 100).toFixed(2) : '100.00',
+            byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
+            totalDays: daily.length, topCause: byTypeList[0] || null
+        };
+    };
+
+    const saveNewDefectTypes = async (names) => {
+        const existing = new Set((data.value.defectTypes || []).map(item => item.name));
+        const newNames = [...new Set(names)].filter(name => name && !existing.has(name));
+        if (!newNames.length) return;
+        const failed = [];
+        for (const name of newNames) {
+            const { error } = await _supabase.from('defect_types').insert({ name, line: currentLine.value });
+            if (error) failed.push(name);
+        }
+        if (newNames.length !== failed.length) await loadBaseData();
+        if (failed.length) console.warn('組裝測試不良項目自動新增失敗', failed);
+    };
+
+    const refreshAssemblyReport = () => {
+        if (currentLine.value !== 'ASSY') return;
+        assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
+    };
+    const loadAssemblyData = () => {
+        assemblyBatches.value = readStorage();
+        refreshAssemblyReport();
+        if (currentLine.value === 'ASSY') {
+            assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        }
+    };
+
+    const uploadAssemblyLog = async (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        loading.value = true;
+        try {
+            const decoded = decodeBytes(await file.arrayBuffer());
+            const parsed = parseText(decoded.text, assemblyUploadDate.value);
+            const batch = {
+                id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                line: 'ASSY', fileName: file.name, uploadedAt: new Date().toISOString(),
+                encoding: decoded.encoding, lineCount: parsed.lineCount,
+                parsedLineCount: parsed.parsedLineCount, ignoredCount: parsed.ignoredCount,
+                unclassifiedCount: parsed.unclassifiedCount, buckets: parsed.buckets
+            };
+            assemblyBatches.value = [batch, ...assemblyBatches.value].slice(0, 30);
+            persistStorage();
+            assemblyLastFile.value = file.name;
+            const result = aggregate([batch]);
+            await saveNewDefectTypes(result.byType.map(row => row.name));
+            refreshAssemblyReport();
+            assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+            const dateCount = Object.keys(parsed.buckets).length;
+            toast('LOG 分析完成：成功 ' + result.totalSuccess + '、NG ' + result.totalDefects + '，共 ' + dateCount + ' 天', 'success');
+        } catch (e) {
+            console.error(e);
+            toast('LOG 分析失敗：' + e.message, 'error');
+        } finally {
+            loading.value = false;
+            event.target.value = '';
+        }
+    };
+
+    const calculateAssemblyStats = () => {
+        if (assemblyStatsFilter.value.start && assemblyStatsFilter.value.end && assemblyStatsFilter.value.start > assemblyStatsFilter.value.end) {
+            return toast('開始日期不能晚於結束日期', 'warning');
+        }
+        assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        renderAssemblyStatsCharts();
+    };
+
+    const exportAssemblyStats = () => {
+        const result = assemblyStatsResult.value;
+        if (!result) return toast('請先執行組裝測試統計', 'warning');
+        const range = (assemblyStatsFilter.value.start || '不限') + ' ~ ' + (assemblyStatsFilter.value.end || '不限');
+        const summary = [
+            ['統計區間', range], ['產出成功', result.totalSuccess], ['NG / 停機不良', result.totalDefects],
+            ['成功率', result.yieldRate + '%'], ['LOG 總紀錄', result.totalRecords],
+            ['忽略行數', result.ignored], ['未分類行數', result.unclassified], [],
+            ['停機／不良原因', '次數', '佔 NG 比例'],
+            ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])
+        ];
+        const daily = [['日期', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '估算成功率'],
+            ...result.daily.map(row => [row.date, row.success, row.ng, row.total, row.successRate + '%'])];
+        const hourly = [['時段', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '估算成功率'],
+            ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.successRate === null ? '' : row.successRate + '%'])];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
+        XLSX.writeFile(wb, 'KOYA_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');
+        toast('組裝測試 LOG 報表已導出');
+    };
+
+    let reportChart = null, statsChart = null;
+    const renderChart = (id, result, previous, setPrevious) => {
+        Vue.nextTick(() => {
+            const el = document.getElementById(id);
+            if (!result || !el) {
+                if (previous) previous.dispose();
+                setPrevious(null);
+                return;
+            }
+            if (!previous || previous.getDom() !== el) {
+                if (previous) previous.dispose();
+                previous = echarts.init(el);
+                setPrevious(previous);
+            }
+            const rows = result.byType.slice(0, 12);
+            const names = rows.map(row => row.name);
+            previous.setOption({
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: { top: 28, right: 20, bottom: 70, left: 48 },
+                xAxis: { type: 'category', data: names, axisLabel: { rotate: names.some(name => name.length > 5) ? 25 : 0, fontSize: 10 } },
+                yAxis: { type: 'value', name: 'NG 次數' },
+                series: [{ type: 'bar', data: rows.map(row => row.qty), barMaxWidth: 42, itemStyle: { color: '#dc2626', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top' } }]
+            });
+        });
+    };
+    const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; });
+    const renderAssemblyStatsCharts = () => renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; });
+
+    assemblyBatches.value = readStorage();
+    refreshAssemblyReport();
+    watch(assemblyUploadDate, refreshAssemblyReport);
+    watch(assemblyReportResult, renderAssemblyReportChart);
+    watch(assemblyStatsResult, renderAssemblyStatsCharts);
+    watch(currentLine, line => {
+        if (line === 'ASSY') {
+            refreshAssemblyReport();
+            assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        }
+    });
+    window.addEventListener('resize', () => {
+        if (reportChart) reportChart.resize();
+        if (statsChart) statsChart.resize();
+    });
+
+    return {
+        assemblyUploadDate, assemblyBatches, assemblyLastFile, assemblyReportResult,
+        assemblyStatsFilter, assemblyStatsResult,
+        uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
+        calculateAssemblyStats, exportAssemblyStats, renderAssemblyReportChart, renderAssemblyStatsCharts
+    };
+};

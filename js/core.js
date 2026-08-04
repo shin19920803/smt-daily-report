@@ -106,7 +106,8 @@ SMT.core = function (ctx) {
                     ctx.loadFpyHistory && ctx.loadFpyHistory(),
                     ctx.loadOocHistory && ctx.loadOocHistory(),
                     ctx.loadEqData && ctx.loadEqData(),
-                    ctx.loadNozzleLogs && ctx.loadNozzleLogs()
+                    ctx.loadNozzleLogs && ctx.loadNozzleLogs(),
+                    ctx.loadAssemblyData && ctx.loadAssemblyData()
                 ]);
                 if (ctx.loadFeeders) await ctx.loadFeeders();   // 需要 eqData 先就緒
                 if (ctx.refreshDashboard) await ctx.refreshDashboard();

@@ -1,7 +1,7 @@
 const app = createApp({
     setup() {
         const ctx = {};
-        [SMT.core, SMT.orders, SMT.report, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
+        [SMT.core, SMT.orders, SMT.report, SMT.assembly, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
             .forEach(mod => Object.assign(ctx, mod(ctx)));
 
         onMounted(async () => {
@@ -14,6 +14,9 @@ const app = createApp({
             ctx.loadEqData();
             ctx.loadFeeders();
             ctx.loadNozzleLogs();
+            ctx.loadAssemblyData();
+            ctx.renderAssemblyReportChart();
+            ctx.renderAssemblyStatsCharts();
             setTimeout(() => ctx.initDashboardCharts(), 800);
             const today = new Date();
             ctx.rawExportFilter.value.end = today.toISOString().split('T')[0];

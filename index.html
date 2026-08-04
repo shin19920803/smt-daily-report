@@ -231,7 +231,8 @@
                             <h3 class="font-bold text-lg text-orange-800"><i class="fas fa-file-lines mr-2"></i>組裝測試 LOG 報工</h3>
                             <p class="text-xs text-gray-400 mt-1">選擇日期後直接上傳機台 TXT / LOG，系統會自動整理產出成功與停機不良。</p>
                         </div>
-                        <span class="badge-hint"><i class="fas fa-database"></i>分析結果保存在本機瀏覽器</span>
+                        <span v-if="assemblyRemoteReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
+                        <span v-else class="badge-hint text-orange-700" :title="assemblyRemoteError"><i class="fas fa-laptop"></i>目前僅本機保存</span>
                     </div>
                     <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
                         <div class="w-full md:w-80">

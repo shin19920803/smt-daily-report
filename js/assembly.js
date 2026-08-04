@@ -4,6 +4,8 @@ window.SMT = window.SMT || {};
 SMT.assembly = function (ctx) {
     const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_assy_log_batches_v1';
+    const REMOTE_TABLE = 'assembly_log_batches';
+    const REMOTE_MIGRATED_KEY = 'koya_assy_log_remote_migrated_v1';
     const today = () => new Date().toISOString().split('T')[0];
 
     const assemblyUploadDate = ref(today());
@@ -12,6 +14,8 @@ SMT.assembly = function (ctx) {
     const assemblyReportResult = ref(null);
     const assemblyStatsFilter = ref({ start: today(), end: today() });
     const assemblyStatsResult = ref(null);
+    const assemblyRemoteReady = ref(false);
+    const assemblyRemoteError = ref('');
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
     let applyingAssemblyQuick = false;
@@ -92,13 +96,64 @@ SMT.assembly = function (ctx) {
             return [];
         }
     };
-    const persistStorage = () => {
+    const persistStorage = (batches = assemblyBatches.value) => {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(assemblyBatches.value));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(batches));
         } catch (e) {
             console.warn('組裝測試 LOG 歷史保存失敗', e);
             toast('分析結果已載入，但瀏覽器儲存空間不足，重新整理後可能消失', 'warning');
         }
+    };
+
+    const toRemoteBatch = (batch) => ({
+        id: batch.id,
+        line: 'ASSY',
+        file_name: batch.fileName,
+        uploaded_at: batch.uploadedAt,
+        encoding: batch.encoding,
+        line_count: batch.lineCount,
+        parsed_line_count: batch.parsedLineCount,
+        ignored_count: batch.ignoredCount,
+        unclassified_count: batch.unclassifiedCount,
+        buckets: batch.buckets
+    });
+    const fromRemoteBatch = (row) => ({
+        id: row.id,
+        line: row.line || 'ASSY',
+        fileName: row.file_name,
+        uploadedAt: row.uploaded_at,
+        encoding: row.encoding,
+        lineCount: row.line_count,
+        parsedLineCount: row.parsed_line_count,
+        ignoredCount: row.ignored_count,
+        unclassifiedCount: row.unclassified_count,
+        buckets: row.buckets || {}
+    });
+    const hasRemoteMigrationFlag = () => {
+        try { return localStorage.getItem(REMOTE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
+    };
+    const setRemoteMigrationFlag = () => {
+        try { localStorage.setItem(REMOTE_MIGRATED_KEY, '1'); } catch (e) {}
+    };
+    const saveBatchRemote = async (batch) => {
+        if (!assemblyRemoteReady.value) return false;
+        const { error } = await _supabase.from(REMOTE_TABLE).upsert(toRemoteBatch(batch), { onConflict: 'id' });
+        if (error) {
+            console.error('組裝測試 LOG 共用資料庫寫入失敗', error);
+            assemblyRemoteError.value = error.message || '共用資料庫寫入失敗';
+            return false;
+        }
+        return true;
+    };
+    const deleteBatchRemote = async (id) => {
+        if (!assemblyRemoteReady.value) return true;
+        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', 'ASSY');
+        if (error) {
+            console.error('組裝測試 LOG 共用資料庫刪除失敗', error);
+            toast('共用資料庫刪除失敗：' + error.message, 'error');
+            return false;
+        }
+        return true;
     };
 
     const decodeBytes = (arrayBuffer) => {
@@ -257,9 +312,10 @@ SMT.assembly = function (ctx) {
     };
 
     const assemblyBatchesForDate = computed(() => assemblyBatches.value.filter(batch => Object.prototype.hasOwnProperty.call(batch.buckets || {}, assemblyUploadDate.value)));
-    const deleteAssemblyBatch = (id) => {
+    const deleteAssemblyBatch = async (id) => {
         const batch = assemblyBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 LOG 統計？`)) return;
+        if (!(await deleteBatchRemote(id))) return;
         assemblyBatches.value = assemblyBatches.value.filter(item => item.id !== id);
         persistStorage();
         assemblyLastFile.value = assemblyBatches.value[0]?.fileName || '';
@@ -341,8 +397,42 @@ SMT.assembly = function (ctx) {
         if (currentLine.value !== 'ASSY') return;
         assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
     };
-    const loadAssemblyData = () => {
-        assemblyBatches.value = readStorage();
+    const loadAssemblyData = async () => {
+        const localBatches = readStorage();
+        if (currentLine.value !== 'ASSY') {
+            assemblyBatches.value = localBatches;
+            refreshAssemblyReport();
+            return;
+        }
+        const { data: remoteRows, error } = await _supabase.from(REMOTE_TABLE)
+            .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100);
+        if (error) {
+            assemblyRemoteReady.value = false;
+            assemblyRemoteError.value = error.code === 'PGRST205'
+                ? '尚未建立組裝 LOG 共用資料表'
+                : (error.message || '共用資料庫讀取失敗');
+            assemblyBatches.value = localBatches;
+        } else {
+            assemblyRemoteReady.value = true;
+            assemblyRemoteError.value = '';
+            let remoteBatches = (remoteRows || []).map(fromRemoteBatch);
+            // 第一次建立資料表時，將這台電腦既有的本機批次搬到共用資料庫。
+            if (!hasRemoteMigrationFlag() && localBatches.length && remoteBatches.length === 0) {
+                const { error: migrationError } = await _supabase.from(REMOTE_TABLE)
+                    .upsert(localBatches.map(toRemoteBatch), { onConflict: 'id' });
+                if (!migrationError) {
+                    remoteBatches = localBatches;
+                    setRemoteMigrationFlag();
+                } else {
+                    console.error('組裝測試 LOG 本機資料搬移失敗', migrationError);
+                    assemblyRemoteError.value = migrationError.message || '本機資料搬移失敗';
+                }
+            } else if (!hasRemoteMigrationFlag()) {
+                setRemoteMigrationFlag();
+            }
+            assemblyBatches.value = remoteBatches.slice(0, 100);
+            persistStorage();
+        }
         refreshAssemblyReport();
         if (currentLine.value === 'ASSY') {
             assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
@@ -363,7 +453,8 @@ SMT.assembly = function (ctx) {
                 parsedLineCount: parsed.parsedLineCount, ignoredCount: parsed.ignoredCount,
                 unclassifiedCount: parsed.unclassifiedCount, buckets: parsed.buckets
             };
-            assemblyBatches.value = [batch, ...assemblyBatches.value].slice(0, 30);
+            const remoteSaved = await saveBatchRemote(batch);
+            assemblyBatches.value = [batch, ...assemblyBatches.value].slice(0, 100);
             persistStorage();
             assemblyLastFile.value = file.name;
             const result = aggregate([batch]);
@@ -371,7 +462,10 @@ SMT.assembly = function (ctx) {
             refreshAssemblyReport();
             assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
             const dateCount = Object.keys(parsed.buckets).length;
-            toast('LOG 分析完成：成功 ' + result.totalSuccess + '、NG ' + result.totalDefects + '，共 ' + dateCount + ' 天', 'success');
+            const storageNote = assemblyRemoteReady.value && !remoteSaved
+                ? '；共用資料庫寫入失敗，目前只有本機可見'
+                : (!assemblyRemoteReady.value ? '；共用資料表尚未設定，目前只有本機可見' : '');
+            toast('LOG 分析完成：成功 ' + result.totalSuccess + '、NG ' + result.totalDefects + '，共 ' + dateCount + ' 天' + storageNote, storageNote ? 'warning' : 'success');
         } catch (e) {
             console.error(e);
             toast('LOG 分析失敗：' + e.message, 'error');
@@ -415,7 +509,7 @@ SMT.assembly = function (ctx) {
         toast('組裝測試 LOG 報表已導出');
     };
 
-    let reportChart = null, statsChart = null, reportPieChart = null, statsPieChart = null;
+    let reportChart = null, statsChart = null, statsPieChart = null;
     const renderChart = (id, result, previous, setPrevious) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
@@ -456,10 +550,11 @@ SMT.assembly = function (ctx) {
             }
             previous.setOption({
                 tooltip: { trigger: 'item', formatter: '{b}<br/>數量：{c}<br/>比例：{d}%' },
-                legend: { type: 'scroll', orient: 'vertical', right: 0, top: 'middle', textStyle: { fontSize: 11 } },
+                legend: { show: false },
                 series: [{ type: 'pie', radius: ['38%', '68%'], center: ['34%', '50%'], avoidLabelOverlap: true,
                     itemStyle: { borderColor: '#fff', borderWidth: 2 },
-                    label: { formatter: '{b}\n{d}%', fontSize: 11 },
+                    label: { show: false },
+                    labelLine: { show: false },
                     data: result.byType.map(row => ({ name: row.name, value: row.qty }))
                 }]
             });
@@ -488,12 +583,12 @@ SMT.assembly = function (ctx) {
     window.addEventListener('resize', () => {
         if (reportChart) reportChart.resize();
         if (statsChart) statsChart.resize();
-        if (reportPieChart) reportPieChart.resize();
         if (statsPieChart) statsPieChart.resize();
     });
 
     return {
         assemblyUploadDate, assemblyUploadDateLabel, assemblyUploadDateRelative, assemblyBatchesForDate,
+        assemblyRemoteReady, assemblyRemoteError,
         assemblyBatches, assemblyLastFile, assemblyReportResult,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,

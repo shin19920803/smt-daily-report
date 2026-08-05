@@ -1085,7 +1085,7 @@
                 </div>
             </div>
 
-            <div v-else>
+            <div v-if="!['ASSY', 'DAF'].includes(currentLine)">
             <div class="section-card p-4 mb-5">
                 <!-- 快捷區間：日 / 週(日–六) / 月，左右鍵快速切換上下一期 -->
                 <div class="quick-bar">

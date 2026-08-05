@@ -1340,7 +1340,7 @@
             </div>
             
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div v-for="(cfg, key) in settingConfig" :key="key" class="section-card p-4 h-80 md:h-96 flex flex-col">
+                <div v-for="(cfg, key) in visibleSettingConfig" :key="key" class="section-card p-4 h-80 md:h-96 flex flex-col">
                     <h3 class="font-bold border-b pb-2 mb-2 text-sm" :class="cfg.colorClass">{{ cfg.title }}</h3>
                     <div class="flex gap-2 mb-3"><input v-model="cfg.input" :placeholder="cfg.placeholder" class="border border-gray-200 p-2 rounded-lg flex-1 text-sm" @keyup.enter="addSettingItem(key)"><button @click="addSettingItem(key)" class="text-white px-3 rounded-lg hover:opacity-80 transition text-sm" :class="cfg.btnColor">+</button></div>
                     <ul class="flex-1 overflow-y-auto space-y-1">
@@ -1358,6 +1358,7 @@
                 </div>
             </div>
 
+            <div v-if="showEquipmentModelSettings">
             <!-- Equipment Model Settings -->
             <h3 class="font-black text-gray-700 mt-8 mb-4"><i class="fas fa-tools mr-2 text-teal-500"></i>設備型號設定</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1393,6 +1394,7 @@
                         <li v-if="eqData.nozzleModels.length === 0" class="text-center text-gray-300 py-6 text-xs">尚無型號</li>
                     </ul>
                 </div>
+            </div>
             </div>
         </div>
 

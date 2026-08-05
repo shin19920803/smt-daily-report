@@ -1,8 +1,9 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, getAssemblyReportForDate, getAssemblyUploadedDates } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
+        const dafDashboardResult = ref(null);
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
         const dashDate = ref(new Date().toISOString().split('T')[0]);
@@ -24,6 +25,23 @@ SMT.dashboard = function (ctx) {
             if (currentLine.value === 'ASSY') {
                 assemblyDashboardResult.value = getAssemblyReportForDate(dashDate.value);
                 dashboard.value = { activeWoCount: 0, todayInput: assemblyDashboardResult.value.totalSuccess, todayDefects: assemblyDashboardResult.value.totalDefects, todayYield: assemblyDashboardResult.value.downtimeRate, monthOocCount: 0, weekAvgYield: 0 };
+                dashboardRecentProds.value = [];
+                dashboardRecentOoc.value = [];
+                return;
+            }
+            if (currentLine.value === 'DAF') {
+                const uploadedDates = getDafUploadedDates ? getDafUploadedDates(200) : [];
+                if (!getDafDashboardForDate) {
+                    dafDashboardResult.value = null;
+                } else {
+                    const current = getDafDashboardForDate(dashDate.value);
+                    if (!current.sourceFiles.length && dashDate.value === new Date().toISOString().split('T')[0] && uploadedDates.length) {
+                        dashDate.value = uploadedDates[uploadedDates.length - 1];
+                        return;
+                    }
+                    dafDashboardResult.value = current;
+                    dashboard.value = { activeWoCount: 0, todayInput: current.totalInput, todayDefects: current.totalDefects, todayYield: current.defectRate, monthOocCount: 0, weekAvgYield: 0 };
+                }
                 dashboardRecentProds.value = [];
                 dashboardRecentOoc.value = [];
                 return;
@@ -59,6 +77,8 @@ SMT.dashboard = function (ctx) {
         let dashInputChartInst = null;
         let dashAssemblyDowntimeChartInst = null;
         let dashAssemblyReasonChartInst = null;
+        let dashDafDailyChartInst = null;
+        let dashDafReasonChartInst = null;
         const disposeChart = (chart) => { if (chart) chart.dispose(); return null; };
         const initAssemblyDashboardCharts = async () => {
             const target = dashDate.value;
@@ -92,11 +112,61 @@ SMT.dashboard = function (ctx) {
                 });
             }
         };
+        const initDafDashboardCharts = async () => {
+            const dates = getDafUploadedDates ? getDafUploadedDates(14) : [];
+            const reports = dates.map(date => getDafDashboardForDate(date));
+            const current = dafDashboardResult.value || getDafDashboardForDate(dashDate.value);
+            await Vue.nextTick();
+            const dailyEl = document.getElementById('dashDafDailyChart');
+            if (dailyEl && dates.length) {
+                if (!dashDafDailyChartInst || dashDafDailyChartInst.getDom() !== dailyEl) {
+                    dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
+                    dashDafDailyChartInst = echarts.init(dailyEl);
+                }
+                dashDafDailyChartInst.setOption({
+                    grid: { top: 30, right: 20, bottom: 36, left: 48 },
+                    tooltip: { trigger: 'axis' },
+                    legend: { top: 0, right: 0, textStyle: { fontSize: 11 } },
+                    xAxis: { type: 'category', data: dates.map(date => date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' } },
+                    yAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
+                    series: [
+                        { name: '投入數', type: 'bar', data: reports.map(row => row.totalInput), barMaxWidth: 24, itemStyle: { color: '#7c3aed' } },
+                        { name: '良品數', type: 'bar', data: reports.map(row => row.totalGood), barMaxWidth: 24, itemStyle: { color: '#16a34a' } },
+                        { name: '不良數', type: 'bar', data: reports.map(row => row.totalDefects), barMaxWidth: 24, itemStyle: { color: '#dc2626' } }
+                    ]
+                });
+            } else dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
+            const reasonEl = document.getElementById('dashDafReasonChart');
+            if (reasonEl && current?.byType?.length) {
+                if (!dashDafReasonChartInst || dashDafReasonChartInst.getDom() !== reasonEl) {
+                    dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
+                    dashDafReasonChartInst = echarts.init(reasonEl);
+                }
+                const rows = current.byType.slice(0, 10).reverse();
+                dashDafReasonChartInst.setOption({
+                    grid: { top: 12, right: 24, bottom: 24, left: 120 },
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => `${params[0].name}<br/><b>${params[0].value} 件</b>` },
+                    xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
+                    yAxis: { type: 'category', data: rows.map(row => row.name), axisLabel: { fontSize: 10, color: '#6b7280' } },
+                    series: [{ type: 'bar', data: rows.map(row => row.qty), barMaxWidth: 18, itemStyle: { color: '#dc2626', borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right', fontSize: 10 } }]
+                });
+            } else dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
+        };
         const initDashboardCharts = async () => {
             if (currentLine.value === 'ASSY') {
                 dashYieldChartInst = disposeChart(dashYieldChartInst);
                 dashInputChartInst = disposeChart(dashInputChartInst);
+                dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
+                dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
                 await initAssemblyDashboardCharts();
+                return;
+            }
+            if (currentLine.value === 'DAF') {
+                dashYieldChartInst = disposeChart(dashYieldChartInst);
+                dashInputChartInst = disposeChart(dashInputChartInst);
+                dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);
+                dashAssemblyReasonChartInst = disposeChart(dashAssemblyReasonChartInst);
+                await initDafDashboardCharts();
                 return;
             }
             dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);
@@ -153,14 +223,14 @@ SMT.dashboard = function (ctx) {
         };
         // 容器剛插入 DOM 時寬度可能為 0，ECharts 會以預設寬度初始化 → 渲染後強制 resize
         const resizeDashboardCharts = () => {
-            [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
+            [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst, dashDafDailyChartInst, dashDafReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
         window.addEventListener('resize', () => { if (currentTab.value === 'dashboard') resizeDashboardCharts(); });
 
         watch(currentTab, async (tab) => { if (tab === 'dashboard') { await refreshDashboard(); await initDashboardCharts(); } });
         watch(dashDate, async () => { if (currentTab.value === 'dashboard') { await refreshDashboard(); await initDashboardCharts(); } });
         return {
-            dashboard, assemblyDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
+            dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
             changeDashDate, refreshDashboard, initDashboardCharts
         };
 };

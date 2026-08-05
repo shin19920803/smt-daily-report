@@ -131,6 +131,38 @@
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無組裝測試 LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
             </div>
+            <div v-else-if="currentLine === 'DAF'" class="space-y-6 animate-fade-in">
+                <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                    <div>
+                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-purple-600 rounded inline-block"></span>DAF 總覽儀表板</h2>
+                        <p class="text-xs text-gray-400 mt-1">依 DAF LOG 顯示投入、產出、不良與工單狀況</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left text-xs"></i></button>
+                        <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5"><i class="fas fa-calendar-day text-purple-500 text-sm"></i><input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;"></div>
+                        <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right text-xs"></i></button>
+                        <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} DAF 生產概況</p>
+                <div v-if="dafDashboardResult && dafDashboardResult.sourceFiles.length" class="space-y-5">
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
+                        <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafDashboardResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
+                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">不良數</div></div>
+                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.defectRate }}%</div><div class="kpi-label">不良率</div></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-column text-xs"></i></div>近 14 個有資料日期產能</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-bar text-xs"></i></div>當日不良原因排行</div><div id="dashDafReasonChart" style="width:100%;height:240px;"></div><div v-if="!dafDashboardResult.byType.length" class="empty-state py-5"><div class="hint">當日沒有不良資料</div></div></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>當日機種分佈</h3><div v-if="dafDashboardResult.byModel.length" class="space-y-2"><div v-for="row in dafDashboardResult.byModel" :key="row.name" class="flex items-center gap-2 text-sm"><span class="flex-1 truncate font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></div></div><div v-else class="empty-state py-8"><div class="hint">無機種資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="dafDashboardResult.byWorkOrder.length" class="space-y-2"><div v-for="row in dafDashboardResult.byWorkOrder" :key="row.name" class="flex items-center gap-2 text-sm"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></div></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
+                    </div>
+                </div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 DAF LOG</div><div class="hint">前往「每日報工」上傳檔案；系統會自動切換到最新資料日期</div></div></div>
+            </div>
             <div v-else>
             <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <div>
@@ -428,10 +460,21 @@
                                 <h3 class="text-lg font-black text-purple-800"><i class="fas fa-microchip mr-2 text-purple-500"></i>發現未識別機種</h3>
                                 <p class="text-xs text-gray-500 mt-1">檔案：{{ dafUnknownModelModal.fileName }}；完成歸類後才會保存此次上傳。</p>
                             </div>
-                            <span class="text-xs font-bold text-gray-400">{{ dafUnknownModelModal.currentIndex + 1 }} / {{ dafUnknownModelModal.codes.length }}</span>
+                            <span class="text-xs font-bold text-gray-400">{{ dafUnknownModelModal.currentIndex + 1 }} / {{ dafUnknownModelModal.items.length }}</span>
                         </div>
                         <div class="space-y-4">
-                            <div class="bg-gray-900 text-green-300 rounded-lg p-3 font-mono text-sm break-all">{{ dafUnknownModelModal.codes[dafUnknownModelModal.currentIndex] }}</div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <div class="text-xs font-bold text-gray-400 mb-1">未識別產品代號</div>
+                                    <div class="bg-gray-900 text-green-300 rounded-lg p-3 font-mono text-sm break-all">{{ dafUnknownModelModal.items[dafUnknownModelModal.currentIndex]?.code }}</div>
+                                </div>
+                                <div>
+                                    <div class="text-xs font-bold text-gray-400 mb-1">相關工單</div>
+                                    <div class="min-h-[46px] bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono break-words">
+                                        {{ dafUnknownModelModal.items[dafUnknownModelModal.currentIndex]?.workOrders?.join('、') || '未識別工單' }}
+                                    </div>
+                                </div>
+                            </div>
                             <div>
                                 <label class="block text-xs font-bold text-gray-400 mb-1">選擇既有機種</label>
                                 <select v-model="dafUnknownModelModal.selectedModel" class="w-full border border-gray-200 p-2 rounded-lg bg-white">
@@ -1630,7 +1673,7 @@
 <script src="js/daf.js?v=202608051600"></script>
 <script src="js/fpy.js?v=202608041323"></script>
 <script src="js/ooc.js?v=202608041323"></script>
-<script src="js/dashboard.js?v=202608041323"></script>
+<script src="js/dashboard.js?v=202608051800"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608041323"></script>
 <script src="js/settings.js?v=202608041323"></script>

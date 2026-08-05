@@ -2,10 +2,11 @@ window.SMT = window.SMT || {};
 
 // DAF 檔案統計：依 Google Colab 版本的 C／E／G／I／J 欄位規則分析。
 SMT.daf = function (ctx) {
-    const { toast, loading, currentLine, currentTab } = ctx;
+    const { toast, loading, currentLine, currentTab, data } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
+    const MODEL_MAPPING_STORAGE_KEY = 'koya_daf_model_mappings_v1';
     const COL_WORK_ORDER = 2;
     const COL_PRODUCT_CODE = 4;
     const COL_DATE = 6;
@@ -41,6 +42,13 @@ SMT.daf = function (ctx) {
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
     const dafUploadSummary = ref({ files: 0, rows: 0, failed: [] });
+    const dafModelMappings = ref({});
+    const dafUnknownModelModal = ref({ show: false, fileName: '', codes: [], currentIndex: 0, selectedModel: '', newModel: '' });
+    const pendingDafUpload = ref(null);
+    const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] });
+    const dafQuickMode = ref(null);
+    const dafQuickOffset = ref(0);
+    let applyingDafQuick = false;
 
     const cleanText = (value) => {
         if (value === null || value === undefined) return '';
@@ -48,6 +56,27 @@ SMT.daf = function (ctx) {
         return String(value).replace(/\u00a0/g, ' ').replace(/[\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
     };
     const normalizeText = (value) => cleanText(value).toUpperCase();
+    const readModelMappings = () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(MODEL_MAPPING_STORAGE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (e) { return {}; }
+    };
+    const persistModelMappings = () => {
+        try { localStorage.setItem(MODEL_MAPPING_STORAGE_KEY, JSON.stringify(dafModelMappings.value)); } catch (e) {}
+    };
+    const learnModelMappings = (batches) => {
+        let changed = false;
+        (batches || []).forEach(batch => (batch.records || []).forEach(record => {
+            const code = normalizeText(record.productCode);
+            const model = cleanText(record.model);
+            if (code && model && model !== '未識別機種' && !dafModelMappings.value[code]) {
+                dafModelMappings.value[code] = model;
+                changed = true;
+            }
+        }));
+        if (changed) persistModelMappings();
+    };
     const safeFilename = (value, fallback = '未填寫') => {
         const text = cleanText(value).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^[._ ]+|[._ ]+$/g, '');
         return text || fallback;
@@ -114,15 +143,26 @@ SMT.daf = function (ctx) {
     };
 
     const detectModel = (rows) => {
-        const values = rows.map(row => normalizeText(row[COL_PRODUCT_CODE])).filter(Boolean);
+        const rawValues = [...new Map(rows.map(row => {
+            const raw = cleanText(row[COL_PRODUCT_CODE]);
+            return [normalizeText(raw), raw];
+        }).filter(([key, raw]) => key && !/產品|料號|product\s*code|part\s*number|型號|model/i.test(raw))).values()];
+        const dynamicEntries = Object.entries(dafModelMappings.value).sort((a, b) => b[0].length - a[0].length);
         const matched = [];
-        MAPPING_ENTRIES.forEach(([productCode, model]) => {
-            if (values.some(value => value.includes(productCode)) && !matched.some(item => item.productCode === productCode)) matched.push({ productCode, model });
+        const unknownProductCodes = [];
+        rawValues.forEach(raw => {
+            const value = normalizeText(raw);
+            const staticMatch = MAPPING_ENTRIES.find(([productCode]) => value.includes(productCode));
+            const dynamicMatch = dynamicEntries.find(([productCode]) => value.includes(productCode));
+            const match = staticMatch || dynamicMatch;
+            if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: match[1] });
+            if (!match) unknownProductCodes.push(raw);
         });
-        if (!matched.length) return { model: '未識別機種', productCode: '未識別產品代碼' };
+        const models = [...new Set(matched.map(item => item.model).filter(Boolean))];
         return {
-            model: [...new Set(matched.map(item => item.model))].join('、'),
-            productCode: [...new Set(matched.map(item => item.productCode))].join('、')
+            model: models.length ? models.join('、') : '未識別機種',
+            productCode: matched.length ? [...new Set(matched.map(item => item.productCode))].join('、') : (unknownProductCodes.join('、') || '未識別產品代碼'),
+            unknownProductCodes
         };
     };
     const detectDateRange = (rows) => {
@@ -181,6 +221,7 @@ SMT.daf = function (ctx) {
             unknownStatusText: unknownStatuses.join('、') || '無',
             rowCount: rows.length,
             rawColumnCount: columnCount,
+            unknownProductCodes: model.unknownProductCodes,
             records
         };
     };
@@ -249,12 +290,43 @@ SMT.daf = function (ctx) {
             dafBatches.value = batches.slice(0, 200);
             persistStorage();
         }
+        learnModelMappings(dafBatches.value);
         dafLastUpload.value = dafBatches.value[0] || null;
         if (dafStatsResult.value) calculateDafStats(false);
     };
 
     const allRecords = () => dafBatches.value.flatMap(batch => (batch.records || []).map(record => ({ ...record, fileName: batch.fileName, batchId: batch.id })));
-    const dafModelOptions = computed(() => [...new Set(allRecords().map(row => row.model).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
+    const dafBatchesByDate = computed(() => {
+        const groups = {};
+        dafBatches.value.forEach(batch => {
+            const records = batch.records || [];
+            const dates = [...new Set(records.map(record => record.date).filter(Boolean))];
+            if (!dates.length) dates.push(batch.dateStart || '未識別日期');
+            dates.forEach(date => {
+                const dateRecords = records.filter(record => record.date === date);
+                const inputRecords = dateRecords.filter(record => record.inputIncluded);
+                const group = groups[date] || (groups[date] = { date, files: [], input: 0, good: 0, defects: 0 });
+                group.input += inputRecords.length;
+                group.good += inputRecords.filter(record => record.status === 'GOOD').length;
+                group.defects += inputRecords.filter(record => record.status === 'FAIL').length;
+                group.files.push({
+                    ...batch,
+                    key: `${batch.id}_${date}`,
+                    dateRecords,
+                    dateInput: inputRecords.length,
+                    dateGood: inputRecords.filter(record => record.status === 'GOOD').length,
+                    dateDefects: inputRecords.filter(record => record.status === 'FAIL').length
+                });
+            });
+        });
+        return Object.values(groups).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    });
+    const dafModelOptions = computed(() => [...new Set([
+        ...allRecords().map(row => row.model),
+        ...(data?.value?.models || []).map(model => model.name),
+        ...Object.values(dafModelMappings.value),
+        ...Object.values(MODEL_MAPPING)
+    ].filter(model => model && model !== '未識別機種'))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const dafWorkOrderOptions = computed(() => [...new Set(allRecords().map(row => row.workOrder).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const filterRecords = () => allRecords().filter(row => {
         if (dafStatsFilter.value.start && (!row.date || row.date < dafStatsFilter.value.start)) return false;
@@ -272,10 +344,21 @@ SMT.daf = function (ctx) {
         const input = inputRows.length;
         const defects = failRows.length;
         const defectMap = {};
+        const defectModelMap = {};
+        const defectWorkOrderMap = {};
         const modelMap = {};
         const workOrderMap = {};
         const dayMap = {};
-        failRows.forEach(row => { defectMap[row.defect] = (defectMap[row.defect] || 0) + 1; });
+        failRows.forEach(row => {
+            const defect = row.defect || '未填寫不良原因';
+            const model = row.model || '未識別機種';
+            const workOrder = row.workOrder || '未識別工單';
+            defectMap[defect] = (defectMap[defect] || 0) + 1;
+            if (!defectModelMap[defect]) defectModelMap[defect] = {};
+            if (!defectWorkOrderMap[defect]) defectWorkOrderMap[defect] = {};
+            defectModelMap[defect][model] = (defectModelMap[defect][model] || 0) + 1;
+            defectWorkOrderMap[defect][workOrder] = (defectWorkOrderMap[defect][workOrder] || 0) + 1;
+        });
         inputRows.forEach(row => {
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
@@ -293,7 +376,12 @@ SMT.daf = function (ctx) {
                 if (row.status === 'FAIL') { dayMap[row.date].defects++; dayMap[row.date].byType[row.defect] = (dayMap[row.date].byType[row.defect] || 0) + 1; }
             }
         });
-        const byType = Object.entries(defectMap).map(([name, qty]) => ({ name, qty, inputRatio: mapRate(qty, input), ratio: mapRate(qty, defects) })).sort((a, b) => b.qty - a.qty);
+        const detailRows = map => Object.entries(map || {}).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, Object.values(map).reduce((sum, value) => sum + value, 0)) })).sort((a, b) => b.qty - a.qty);
+        const byType = Object.entries(defectMap).map(([name, qty]) => ({
+            name, qty, inputRatio: mapRate(qty, input), ratio: mapRate(qty, defects),
+            byModel: detailRows(defectModelMap[name]),
+            byWorkOrder: detailRows(defectWorkOrderMap[name])
+        })).sort((a, b) => b.qty - a.qty);
         const byModel = Object.entries(modelMap).map(([name, value]) => ({ name, ...value, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
         const byWorkOrder = Object.entries(workOrderMap).map(([workOrder, value]) => ({ workOrder, model: [...value.models].join(' / '), input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
         const daily = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({ ...day, total: day.input, yieldRate: mapRate(day.good, day.input), defectRate: mapRate(day.defects, day.input) }));
@@ -307,40 +395,142 @@ SMT.daf = function (ctx) {
             byType, byModel, byWorkOrder, daily, rows
         };
     };
+    const dafQuickRange = (mode, offset) => {
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+        if (mode === 'day') {
+            const date = new Date(now); date.setDate(date.getDate() + offset);
+            return { start: date, end: date };
+        }
+        if (mode === 'week') {
+            const start = new Date(now);
+            start.setDate(start.getDate() - start.getDay() + offset * 7);
+            const end = new Date(start); end.setDate(end.getDate() + 6);
+            return { start, end };
+        }
+        const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+        return { start, end };
+    };
+    const dafQuickLabel = computed(() => {
+        if (!dafQuickMode.value) return '';
+        const { start, end } = dafQuickRange(dafQuickMode.value, dafQuickOffset.value);
+        if (dafQuickMode.value === 'day') return `${fmtDate(start)} (週${['日', '一', '二', '三', '四', '五', '六'][start.getDay()]})`;
+        if (dafQuickMode.value === 'week') return `${fmtDate(start)} ~ ${fmtDate(end)}`;
+        return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`;
+    });
+    const dafQuickRelative = computed(() => {
+        if (!dafQuickMode.value) return '';
+        const offset = dafQuickOffset.value;
+        const unit = { day: '日', week: '週', month: '月' }[dafQuickMode.value];
+        if (offset === 0) return `本${unit}`;
+        if (offset === -1) return `上一${unit}`;
+        if (offset === 1) return `下一${unit}`;
+        return offset < 0 ? `${Math.abs(offset)} ${unit}前` : `${offset} ${unit}後`;
+    });
+    const applyDafQuick = async () => {
+        if (!dafQuickMode.value) return;
+        const { start, end } = dafQuickRange(dafQuickMode.value, dafQuickOffset.value);
+        applyingDafQuick = true;
+        dafStatsFilter.value.start = fmtDate(start);
+        dafStatsFilter.value.end = fmtDate(end);
+        await Vue.nextTick();
+        applyingDafQuick = false;
+        calculateDafStats();
+    };
+    const setDafQuickMode = mode => {
+        dafQuickMode.value = mode;
+        dafQuickOffset.value = { day: 0, week: -1, month: -1 }[mode];
+        applyDafQuick();
+    };
+    const shiftDafQuick = delta => {
+        if (!dafQuickMode.value) return;
+        dafQuickOffset.value += delta;
+        applyDafQuick();
+    };
     const calculateDafStats = (showToast = true) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
+        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
         dafStatsResult.value = buildDafStats();
         renderDafCharts();
         if (showToast) toast(`DAF 統計完成，共 ${dafStatsResult.value.sourceFiles.length} 個檔案`);
     };
-    const uploadDafFiles = async (event) => {
+    const openDafDefectDetail = name => {
+        const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
+        dafDefectDetail.value = row
+            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [] }
+            : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+    };
+    const closeDafDefectDetail = () => {
+        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+    };
+    const finishDafUploadQueue = queue => {
+        persistStorage();
+        dafUploadSummary.value = { files: queue.success, rows: queue.rows, failed: queue.failed };
+        if (dafStatsResult.value) dafStatsResult.value = buildDafStats();
+        if (queue.success) toast(`DAF 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
+        else toast('DAF 檔案全部處理失敗', 'error');
+    };
+    const processDafUploadQueue = async queue => {
+        for (let index = queue.index; index < queue.files.length; index++) {
+            const file = queue.files[index];
+            try {
+                const batch = await analyzeFile(file);
+                if (batch.unknownProductCodes?.length) {
+                    queue.index = index;
+                    pendingDafUpload.value = queue;
+                    dafUnknownModelModal.value = { show: true, fileName: file.name, codes: batch.unknownProductCodes, currentIndex: 0, selectedModel: '', newModel: '' };
+                    toast(`發現 ${batch.unknownProductCodes.length} 個未識別機種代號，請先完成歸類`, 'warning');
+                    return false;
+                }
+                const remoteSaved = await saveRemote(batch);
+                dafBatches.value = [batch, ...dafBatches.value].slice(0, 200);
+                dafLastUpload.value = batch;
+                learnModelMappings([batch]);
+                queue.rows += batch.rowCount;
+                queue.success++;
+                if (dafRemoteReady.value && !remoteSaved) queue.failed.push(`${file.name}：共用資料庫寫入失敗`);
+            } catch (error) { queue.failed.push(`${file.name}：${error.message}`); }
+        }
+        finishDafUploadQueue(queue);
+        return true;
+    };
+    const uploadDafFiles = async event => {
         const files = [...(event.target.files || [])];
         if (!files.length) return;
+        const queue = { files, index: 0, success: 0, rows: 0, failed: [] };
         loading.value = true;
-        const failed = [];
-        let success = 0;
-        let rows = 0;
-        try {
-            for (const file of files) {
-                try {
-                    const batch = await analyzeFile(file);
-                    const remoteSaved = await saveRemote(batch);
-                    dafBatches.value = [batch, ...dafBatches.value].slice(0, 200);
-                    dafLastUpload.value = batch;
-                    rows += batch.rowCount;
-                    success++;
-                    if (dafRemoteReady.value && !remoteSaved) failed.push(`${file.name}：共用資料庫寫入失敗`);
-                } catch (error) { failed.push(`${file.name}：${error.message}`); }
-            }
-            persistStorage();
-            dafUploadSummary.value = { files: success, rows, failed };
-            if (dafStatsResult.value) dafStatsResult.value = buildDafStats();
-            if (success) toast(`DAF 完成 ${success} 個檔案，共 ${rows.toLocaleString()} 列${failed.length ? '；有檔案失敗' : ''}`, failed.length ? 'warning' : 'success');
-            else toast('DAF 檔案全部處理失敗', 'error');
-        } finally {
+        try { await processDafUploadQueue(queue); }
+        finally {
             loading.value = false;
             event.target.value = '';
         }
+    };
+    const resolveDafUnknownModel = async () => {
+        const modal = dafUnknownModelModal.value;
+        const code = modal.codes[modal.currentIndex];
+        const selected = cleanText(modal.selectedModel);
+        const created = cleanText(modal.newModel);
+        if (selected && created) return toast('請選擇既有機種或新增機種其中一種', 'warning');
+        if (!selected && !created) return toast('請選擇既有機種或輸入新的機種名稱', 'warning');
+        const modelName = created || selected;
+        dafModelMappings.value = { ...dafModelMappings.value, [normalizeText(code)]: modelName };
+        persistModelMappings();
+        if (modal.currentIndex < modal.codes.length - 1) {
+            dafUnknownModelModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedModel: '', newModel: '' };
+            return;
+        }
+        const queue = pendingDafUpload.value;
+        pendingDafUpload.value = null;
+        dafUnknownModelModal.value = { show: false, fileName: '', codes: [], currentIndex: 0, selectedModel: '', newModel: '' };
+        if (!queue) return;
+        loading.value = true;
+        try { await processDafUploadQueue(queue); }
+        finally { loading.value = false; }
+    };
+    const cancelDafUnknownModel = () => {
+        pendingDafUpload.value = null;
+        dafUnknownModelModal.value = { show: false, fileName: '', codes: [], currentIndex: 0, selectedModel: '', newModel: '' };
+        toast('已取消此次 DAF 上傳', 'info');
     };
     const deleteDafBatch = async (id) => {
         const batch = dafBatches.value.find(item => item.id === id);
@@ -365,6 +555,8 @@ SMT.daf = function (ctx) {
             ['良率', result.yieldRate + '%'], ['不良率', result.defectRate + '%'], ['其他狀態數', result.unknownStatusCount], ['其他狀態內容', result.unknownStatusText]
         ];
         const defects = [['不良原因', '不良數量', '占投入比例', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.inputRatio + '%', row.ratio + '%'])];
+        const defectModels = [['不良原因', '機種', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byModel || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
+        const defectWorkOrders = [['不良原因', '工單', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byWorkOrder || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
         const models = [['機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byModel.map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
@@ -373,7 +565,7 @@ SMT.daf = function (ctx) {
         const rawColumns = Math.max(10, ...result.rows.map(row => row.raw.length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
-        [['生產統計', summary], ['不良原因統計', defects], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
+        [['生產統計', summary], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
         const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
         const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
         XLSX.writeFile(wb, `DAF_${modelPart}_${woPart}_${safeFilename(range, '不限日期')}_統計結果.xlsx`);
@@ -392,22 +584,29 @@ SMT.daf = function (ctx) {
                 if (!reasonChart || reasonChart.getDom() !== reasonEl) { reasonChart = disposeChart(reasonChart); reasonChart = echarts.init(reasonEl); }
                 const rows = result.byType.slice(0, 12).reverse();
                 reasonChart.setOption({ grid: { top: 20, right: 40, bottom: 28, left: 120 }, tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => `${params[0].name}<br/><b>${params[0].value} 件</b>` }, xAxis: { type: 'value', axisLabel: { fontSize: 10 } }, yAxis: { type: 'category', data: rows.map(row => row.name), axisLabel: { fontSize: 10 } }, series: [{ type: 'bar', data: rows.map(row => row.qty), barMaxWidth: 20, itemStyle: { color: '#dc2626', borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right', fontSize: 10 } }] });
+                if (reasonChart.off) reasonChart.off('click');
+                if (reasonChart.on) reasonChart.on('click', params => { if (params?.componentType === 'series' && params.name) openDafDefectDetail(params.name); });
             } else reasonChart = disposeChart(reasonChart);
             if (trendEl && result?.daily?.length) {
                 if (!trendChart || trendChart.getDom() !== trendEl) { trendChart = disposeChart(trendChart); trendChart = echarts.init(trendEl); }
-                trendChart.setOption({ grid: { top: 32, right: 24, bottom: 44, left: 48 }, tooltip: { trigger: 'axis' }, legend: { top: 0, right: 0, textStyle: { fontSize: 11 } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 } }, series: [{ name: '良率', type: 'line', smooth: true, data: result.daily.map(row => Number(row.yieldRate)), itemStyle: { color: '#16a34a' }, lineStyle: { color: '#16a34a', width: 2 } }, { name: '不良率', type: 'line', smooth: true, data: result.daily.map(row => Number(row.defectRate)), itemStyle: { color: '#dc2626' }, lineStyle: { color: '#dc2626', width: 2 } }] });
+                trendChart.setOption({ grid: { top: 32, right: 24, bottom: 44, left: 48 }, tooltip: { trigger: 'axis' }, legend: { top: 0, right: 0, textStyle: { fontSize: 11 } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: { type: 'value', name: '數量', minInterval: 1, axisLabel: { fontSize: 10 } }, series: [{ name: '投入數', type: 'bar', data: result.daily.map(row => row.input), barMaxWidth: 28, itemStyle: { color: '#7c3aed' } }, { name: '良品數', type: 'bar', data: result.daily.map(row => row.good), barMaxWidth: 28, itemStyle: { color: '#16a34a' } }, { name: '不良數', type: 'bar', data: result.daily.map(row => row.defects), barMaxWidth: 28, itemStyle: { color: '#dc2626' } }] });
             } else trendChart = disposeChart(trendChart);
         });
     };
+    dafModelMappings.value = readModelMappings();
     dafBatches.value = readStorage();
+    learnModelMappings(dafBatches.value);
+    watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => { if (!applyingDafQuick) dafQuickMode.value = null; });
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && currentLine.value === 'DAF') renderDafCharts(); });
     watch(currentTab, tab => { if ((tab === 'stats' || tab === 'report') && currentLine.value === 'DAF') renderDafCharts(); });
     watch(currentLine, line => { if (line === 'DAF') { dafStatsResult.value = null; loadDafData(); } });
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); });
 
     return {
-        dafBatches, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary,
-        dafModelOptions, dafWorkOrderOptions, uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch,
+        dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary,
+        dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
+        uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
+        openDafDefectDetail, closeDafDefectDetail, setDafQuickMode, shiftDafQuick,
         renderDafCharts
     };
 };

@@ -43,7 +43,7 @@ SMT.daf = function (ctx) {
     const dafLastUpload = ref(null);
     const dafUploadSummary = ref({ files: 0, rows: 0, failed: [] });
     const dafModelMappings = ref({});
-    const dafUnknownModelModal = ref({ show: false, fileName: '', codes: [], currentIndex: 0, selectedModel: '', newModel: '' });
+    const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
     const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] });
     const dafQuickMode = ref(null);
@@ -158,11 +158,19 @@ SMT.daf = function (ctx) {
             if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: match[1] });
             if (!match) unknownProductCodes.push(raw);
         });
+        const unknownProductDetails = unknownProductCodes.map(code => ({
+            code,
+            workOrders: [...new Set(rows
+                .filter(row => normalizeText(row[COL_PRODUCT_CODE]) === normalizeText(code))
+                .map(row => cleanText(row[COL_WORK_ORDER]))
+                .filter(Boolean))]
+        }));
         const models = [...new Set(matched.map(item => item.model).filter(Boolean))];
         return {
             model: models.length ? models.join('、') : '未識別機種',
             productCode: matched.length ? [...new Set(matched.map(item => item.productCode))].join('、') : (unknownProductCodes.join('、') || '未識別產品代碼'),
-            unknownProductCodes
+            unknownProductCodes,
+            unknownProductDetails
         };
     };
     const detectDateRange = (rows) => {
@@ -222,6 +230,7 @@ SMT.daf = function (ctx) {
             rowCount: rows.length,
             rawColumnCount: columnCount,
             unknownProductCodes: model.unknownProductCodes,
+            unknownProductDetails: model.unknownProductDetails,
             records
         };
     };
@@ -395,6 +404,42 @@ SMT.daf = function (ctx) {
             byType, byModel, byWorkOrder, daily, rows
         };
     };
+    const getDafUploadedDates = (limit = 14) => [...new Set(allRecords().map(row => row.date).filter(Boolean))]
+        .sort()
+        .slice(-limit);
+    const getDafDashboardForDate = date => {
+        const rows = allRecords().filter(row => row.date === date);
+        const inputRows = rows.filter(row => row.inputIncluded);
+        const goodRows = inputRows.filter(row => row.status === 'GOOD');
+        const failRows = inputRows.filter(row => row.status === 'FAIL');
+        const toList = map => {
+            const total = Object.values(map).reduce((sum, qty) => sum + qty, 0);
+            return Object.entries(map).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, total) })).sort((a, b) => b.qty - a.qty);
+        };
+        const defectMap = {}, modelMap = {}, workOrderMap = {};
+        failRows.forEach(row => {
+            const defect = row.defect || '未填寫不良原因';
+            defectMap[defect] = (defectMap[defect] || 0) + 1;
+        });
+        inputRows.forEach(row => {
+            const model = row.model || '未識別機種';
+            const workOrder = row.workOrder || '未識別工單';
+            modelMap[model] = (modelMap[model] || 0) + 1;
+            workOrderMap[workOrder] = (workOrderMap[workOrder] || 0) + 1;
+        });
+        return {
+            date,
+            totalInput: inputRows.length,
+            totalGood: goodRows.length,
+            totalDefects: failRows.length,
+            yieldRate: mapRate(goodRows.length, inputRows.length),
+            defectRate: mapRate(failRows.length, inputRows.length),
+            byType: toList(defectMap),
+            byModel: toList(modelMap),
+            byWorkOrder: toList(workOrderMap),
+            sourceFiles: [...new Set(rows.map(row => row.fileName).filter(Boolean))]
+        };
+    };
     const dafQuickRange = (mode, offset) => {
         const now = new Date(); now.setHours(0, 0, 0, 0);
         if (mode === 'day') {
@@ -475,11 +520,14 @@ SMT.daf = function (ctx) {
             const file = queue.files[index];
             try {
                 const batch = await analyzeFile(file);
-                if (batch.unknownProductCodes?.length) {
+                if (batch.unknownProductDetails?.length || batch.unknownProductCodes?.length) {
                     queue.index = index;
                     pendingDafUpload.value = queue;
-                    dafUnknownModelModal.value = { show: true, fileName: file.name, codes: batch.unknownProductCodes, currentIndex: 0, selectedModel: '', newModel: '' };
-                    toast(`發現 ${batch.unknownProductCodes.length} 個未識別機種代號，請先完成歸類`, 'warning');
+                    const items = batch.unknownProductDetails?.length
+                        ? batch.unknownProductDetails
+                        : batch.unknownProductCodes.map(code => ({ code, workOrders: [] }));
+                    dafUnknownModelModal.value = { show: true, fileName: file.name, items, currentIndex: 0, selectedModel: '', newModel: '' };
+                    toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
                 const remoteSaved = await saveRemote(batch);
@@ -507,7 +555,8 @@ SMT.daf = function (ctx) {
     };
     const resolveDafUnknownModel = async () => {
         const modal = dafUnknownModelModal.value;
-        const code = modal.codes[modal.currentIndex];
+        const current = modal.items[modal.currentIndex];
+        const code = current?.code || current;
         const selected = cleanText(modal.selectedModel);
         const created = cleanText(modal.newModel);
         if (selected && created) return toast('請選擇既有機種或新增機種其中一種', 'warning');
@@ -515,13 +564,13 @@ SMT.daf = function (ctx) {
         const modelName = created || selected;
         dafModelMappings.value = { ...dafModelMappings.value, [normalizeText(code)]: modelName };
         persistModelMappings();
-        if (modal.currentIndex < modal.codes.length - 1) {
+        if (modal.currentIndex < modal.items.length - 1) {
             dafUnknownModelModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedModel: '', newModel: '' };
             return;
         }
         const queue = pendingDafUpload.value;
         pendingDafUpload.value = null;
-        dafUnknownModelModal.value = { show: false, fileName: '', codes: [], currentIndex: 0, selectedModel: '', newModel: '' };
+        dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' };
         if (!queue) return;
         loading.value = true;
         try { await processDafUploadQueue(queue); }
@@ -529,7 +578,7 @@ SMT.daf = function (ctx) {
     };
     const cancelDafUnknownModel = () => {
         pendingDafUpload.value = null;
-        dafUnknownModelModal.value = { show: false, fileName: '', codes: [], currentIndex: 0, selectedModel: '', newModel: '' };
+        dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' };
         toast('已取消此次 DAF 上傳', 'info');
     };
     const deleteDafBatch = async (id) => {
@@ -607,6 +656,7 @@ SMT.daf = function (ctx) {
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
         openDafDefectDetail, closeDafDefectDetail, setDafQuickMode, shiftDafQuick,
+        getDafUploadedDates, getDafDashboardForDate,
         renderDafCharts
     };
 };

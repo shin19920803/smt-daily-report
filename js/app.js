@@ -10,11 +10,11 @@ const app = createApp({
             ctx.loadHistory();
             ctx.loadFpyHistory();
             ctx.loadOocHistory();
-            ctx.refreshDashboard();
             ctx.loadEqData();
             ctx.loadFeeders();
             ctx.loadNozzleLogs();
-            ctx.loadAssemblyData();
+            await ctx.loadAssemblyData();
+            await ctx.refreshDashboard();
             ctx.renderAssemblyReportChart();
             ctx.renderAssemblyStatsCharts();
             setTimeout(() => ctx.initDashboardCharts(), 800);

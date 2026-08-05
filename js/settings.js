@@ -9,10 +9,11 @@ SMT.settings = function (ctx) {
             ooc_causes: { title: 'OOC 原因', colorClass: 'text-pink-600', btnColor: 'bg-pink-600', input: '', placeholder: '異常原因', field: 'name' }
         });
         const hiddenSettingKeys = new Set(['defect_locations', 'machines', 'ooc_causes']);
-        const visibleSettingConfig = computed(() => Object.fromEntries(
-            Object.entries(settingConfig.value).filter(([key]) => !hiddenSettingKeys.has(key))
-        ));
-        const showEquipmentModelSettings = ref(false);
+        const visibleSettingConfig = computed(() => currentLine.value === 'ASSY'
+            ? Object.fromEntries(Object.entries(settingConfig.value).filter(([key]) => !hiddenSettingKeys.has(key)))
+            : settingConfig.value
+        );
+        const showEquipmentModelSettings = computed(() => currentLine.value !== 'ASSY');
         const editingId = ref(null); const editingValue = ref('');
         const sortedList = (key) => { 
             let list = [];

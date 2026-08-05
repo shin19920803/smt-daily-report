@@ -21,8 +21,8 @@ SMT.core = function (ctx) {
         const validLine = (id) => SMT.LINES.some(l => l.id === id) ? id : 'SMT';
         const currentLine = ref(validLine((() => { try { return localStorage.getItem(SMT.LINE_KEY); } catch(e) { return null; } })()));
         const currentLineMeta = computed(() => SMT.LINES.find(l => l.id === currentLine.value) || SMT.LINES[0]);
-        // DAF／組裝測試先保留功能模組，但操作入口暫不顯示。
-        const hideLineTools = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
+        // 組裝測試先保留功能模組，但操作入口暫不顯示；SMT／DAF 維持原有入口。
+        const hideLineTools = computed(() => currentLine.value === 'ASSY');
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 

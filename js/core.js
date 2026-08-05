@@ -5,7 +5,7 @@ window.SMT = window.SMT || {};
 SMT.LINES = [
     { id: 'SMT',  label: 'SMT',      icon: 'fa-microchip',   canImport: true  },
     { id: 'DAF',  label: 'DAF',      icon: 'fa-layer-group', canImport: false },
-    { id: 'ASSY', label: '組裝測試', icon: 'fa-screwdriver-wrench', canImport: false }
+    { id: 'ASSY', label: 'Mylar',     icon: 'fa-screwdriver-wrench', canImport: false }
 ];
 SMT.LINE_KEY = 'koya_current_line';
 
@@ -42,7 +42,8 @@ SMT.core = function (ctx) {
             permissionModal.value = { show: true, title: `${currentLineMeta.value.label} ${action}`, password: '' };
         });
         const submitPermission = () => {
-            if (permissionModal.value.password !== permissionPasswords[currentLine.value]) return toast('密碼錯誤，無法執行刪除', 'error');
+            const enteredPassword = String(permissionModal.value.password || '').trim().toUpperCase();
+            if (enteredPassword !== permissionPasswords[currentLine.value]) return toast('密碼錯誤，無法執行刪除', 'error');
             closePermissionModal(true);
         };
         const cancelPermission = () => closePermissionModal(false);

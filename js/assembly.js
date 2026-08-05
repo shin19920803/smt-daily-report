@@ -539,6 +539,13 @@ SMT.assembly = function (ctx) {
         assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
     };
     const getAssemblyReportForDate = (date) => aggregate(assemblyBatches.value, date, date);
+    const getAssemblyUploadedDates = (limit = 14) => {
+        const dates = new Set();
+        assemblyBatches.value.forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, bucket]) => {
+            if ((bucket.parsedLines || 0) > 0) dates.add(date);
+        }));
+        return [...dates].sort().slice(-limit);
+    };
     const loadAssemblyData = async () => {
         const localBatches = readStorage();
         if (currentLine.value !== 'ASSY') {
@@ -748,7 +755,7 @@ SMT.assembly = function (ctx) {
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
-        getAssemblyReportForDate,
+        getAssemblyReportForDate, getAssemblyUploadedDates,
         calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts

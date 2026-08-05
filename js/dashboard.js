@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, getAssemblyReportForDate } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, getAssemblyReportForDate, getAssemblyUploadedDates } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dashboardRecentProds = ref([]);
@@ -62,11 +62,7 @@ SMT.dashboard = function (ctx) {
         const disposeChart = (chart) => { if (chart) chart.dispose(); return null; };
         const initAssemblyDashboardCharts = async () => {
             const target = dashDate.value;
-            const days = [];
-            for (let i = 13; i >= 0; i--) {
-                const d = new Date(`${target}T00:00:00`); d.setDate(d.getDate() - i);
-                days.push(d.toISOString().split('T')[0]);
-            }
+            const days = getAssemblyUploadedDates(14);
             const reports = days.map(date => getAssemblyReportForDate(date));
             const labels = days.map(d => d.slice(5));
             const downtime = reports.map(result => result.totalRecords > 0 ? parseFloat(result.downtimeRate) : null);

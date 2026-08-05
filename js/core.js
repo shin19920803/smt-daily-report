@@ -92,7 +92,7 @@ SMT.core = function (ctx) {
         const switchLine = async (lineId) => {
             const target = validLine(lineId);
             if (target === currentLine.value) return;
-            if (['DAF', 'ASSY'].includes(target) && ['fpy', 'ooc', 'equipment'].includes(currentTab.value)) {
+            if (target === 'ASSY' && ['fpy', 'ooc', 'equipment'].includes(currentTab.value)) {
                 currentTab.value = 'dashboard';
             }
             currentLine.value = target;
@@ -112,7 +112,8 @@ SMT.core = function (ctx) {
                     ctx.loadOocHistory && ctx.loadOocHistory(),
                     ctx.loadEqData && ctx.loadEqData(),
                     ctx.loadNozzleLogs && ctx.loadNozzleLogs(),
-                    ctx.loadAssemblyData && ctx.loadAssemblyData()
+                    ctx.loadAssemblyData && ctx.loadAssemblyData(),
+                    ctx.loadDafData && ctx.loadDafData()
                 ]);
                 if (ctx.loadFeeders) await ctx.loadFeeders();   // 需要 eqData 先就緒
                 if (ctx.refreshDashboard) await ctx.refreshDashboard();

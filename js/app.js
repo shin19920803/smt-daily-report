@@ -1,7 +1,7 @@
 const app = createApp({
     setup() {
         const ctx = {};
-        [SMT.core, SMT.orders, SMT.report, SMT.assembly, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
+        [SMT.core, SMT.orders, SMT.report, SMT.assembly, SMT.daf, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
             .forEach(mod => Object.assign(ctx, mod(ctx)));
 
         onMounted(async () => {
@@ -14,6 +14,7 @@ const app = createApp({
             ctx.loadFeeders();
             ctx.loadNozzleLogs();
             await ctx.loadAssemblyData();
+            await ctx.loadDafData();
             await ctx.refreshDashboard();
             ctx.renderAssemblyReportChart();
             ctx.renderAssemblyStatsCharts();

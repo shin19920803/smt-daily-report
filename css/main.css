@@ -175,7 +175,7 @@ button:disabled, .btn-primary:disabled, .btn-success:disabled, .btn-danger:disab
 .sidebar-link:focus-visible { outline: 2px solid #93C5FD; outline-offset: -2px; }
 
 /* ============================================================
-   LINE SWITCH (產線切換：SMT / DAF / 組裝測試)
+   LINE SWITCH (產線切換：SMT / DAF / Mylar)
    ============================================================ */
 .line-switch {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;

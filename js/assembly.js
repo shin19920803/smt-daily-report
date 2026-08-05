@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 
-// 組裝測試機台 LOG：瀏覽器版的 Python LOG 自動統計工具
+// Mylar 機台 LOG：瀏覽器版的 Python LOG 自動統計工具
 SMT.assembly = function (ctx) {
     const { toast, loading, currentLine, currentTab, data, loadBaseData, requestPermission } = ctx;
     const STORAGE_KEY = 'koya_assy_log_batches_v1';
@@ -357,7 +357,7 @@ SMT.assembly = function (ctx) {
             ...day,
             total: day.success + day.ng,
             successRate: day.success + day.ng ? (day.success / (day.success + day.ng) * 100).toFixed(2) : '100.00',
-            downtimeRate: (100 - (day.success + day.ng ? day.success / (day.success + day.ng) * 100 : 100)).toFixed(2),
+            downtimeRate: (day.success ? day.ng / day.success * 100 : 0).toFixed(2),
             ngRate: day.success + day.ng ? (day.ng / (day.success + day.ng) * 100).toFixed(2) : '0.00'
         }));
         const hourly = Array.from({ length: 24 }, (_, i) => {
@@ -368,14 +368,14 @@ SMT.assembly = function (ctx) {
             return {
                 hour, label: hour + ':00–' + hour + ':59', production, ng: hourlyNgCount, total,
                 successRate: total ? (production / total * 100).toFixed(2) : '100.00',
-                downtimeRate: (100 - (total ? production / total * 100 : 100)).toFixed(2)
+                downtimeRate: (production ? hourlyNgCount / production * 100 : 0).toFixed(2)
             };
         });
         const successRate = totalRecords ? success / totalRecords * 100 : 100;
         return {
             totalInput: success, totalSuccess: success, totalDefects: ng, totalRecords,
             yieldRate: successRate.toFixed(2),
-            downtimeRate: (100 - successRate).toFixed(2),
+            downtimeRate: (success ? ng / success * 100 : 0).toFixed(2),
             byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
             totalDays: daily.length, topCause: byTypeList[0] || null
         };
@@ -471,7 +471,7 @@ SMT.assembly = function (ctx) {
     const deleteAssemblyBatch = async (id) => {
         const batch = assemblyBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 LOG 統計？`)) return;
-        if (!(await requestPermission('刪除組裝測試 LOG'))) return;
+        if (!(await requestPermission('刪除 Mylar LOG'))) return;
         if (!(await deleteBatchRemote(id))) return;
         assemblyBatches.value = assemblyBatches.value.filter(item => item.id !== id);
         persistStorage();
@@ -681,7 +681,7 @@ SMT.assembly = function (ctx) {
 
     const exportAssemblyStats = () => {
         const result = assemblyStatsResult.value;
-        if (!result) return toast('請先執行組裝測試統計', 'warning');
+        if (!result) return toast('請先執行 Mylar 統計', 'warning');
         const range = (assemblyStatsFilter.value.start || '不限') + ' ~ ' + (assemblyStatsFilter.value.end || '不限');
         const summary = [
             ['統計區間', range], ['產出成功', result.totalSuccess], ['NG / 停機不良', result.totalDefects],
@@ -702,7 +702,7 @@ SMT.assembly = function (ctx) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceDetails), 'LOG原始細項');
         XLSX.writeFile(wb, 'KOYA_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');
-        toast('組裝測試 LOG 報表已導出');
+        toast('Mylar LOG 報表已導出');
     };
 
     let reportChart = null, statsChart = null, statsPieChart = null, statsDailyChart = null;

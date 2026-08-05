@@ -32,7 +32,7 @@
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-fade-in">
             <div class="flex items-center gap-3 mb-4">
                 <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><i class="fas fa-lock"></i></div>
-                <div><h3 class="font-black text-gray-800">{{ permissionModal.title }}</h3><p class="text-xs text-gray-500 mt-1">請輸入目前產線密碼後繼續。</p></div>
+                <div><h3 class="font-black text-gray-800">{{ permissionModal.title }}</h3><p class="text-xs text-gray-500 mt-1">請輸入目前產線密碼後繼續（不分大小寫）。</p></div>
             </div>
             <input type="password" v-model="permissionModal.password" @keyup.enter="submitPermission" @keyup.esc="cancelPermission" autocomplete="off" autofocus class="w-full border border-gray-200 p-3 rounded-lg text-center font-mono tracking-widest" placeholder="輸入密碼" aria-label="產線密碼">
             <div class="flex justify-end gap-2 mt-4"><button @click="cancelPermission" class="btn-ghost">取消</button><button @click="submitPermission" class="btn-primary"><i class="fas fa-unlock mr-1"></i>確認</button></div>
@@ -113,8 +113,8 @@
             <div v-if="currentLine === 'ASSY'" class="space-y-6">
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <div>
-                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-orange-500 rounded inline-block"></span>組裝測試總覽</h2>
-                        <p class="text-xs text-gray-400 mt-1">依組裝測試 LOG 統計產出與停機狀況</p>
+                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-orange-500 rounded inline-block"></span>Mylar 總覽</h2>
+                        <p class="text-xs text-gray-400 mt-1">依 Mylar LOG 統計產出與停機狀況</p>
                     </div>
                     <div class="flex items-center gap-2">
                         <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-left text-xs"></i></button>
@@ -124,7 +124,7 @@
                         <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
                 </div>
-                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} 組裝測試概況</p>
+                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} Mylar 概況</p>
                 <div v-if="assemblyDashboardResult" class="space-y-5">
                     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                         <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyDashboardResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
@@ -141,7 +141,7 @@
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>當日每小時停機</h3><div class="table-wrap max-h-80"><table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyDashboardResult.hourly.filter(item => item.total > 0)" :key="row.hour"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyDashboardResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody></table></div></div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無組裝測試 LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 Mylar LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
             </div>
             <div v-else-if="currentLine === 'DAF'" class="space-y-6 animate-fade-in">
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -307,7 +307,7 @@
                 <div class="section-card p-4 md:p-6 border-l-4 border-orange-500">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
-                            <h3 class="font-bold text-lg text-orange-800"><i class="fas fa-file-lines mr-2"></i>組裝測試 LOG 報工</h3>
+                            <h3 class="font-bold text-lg text-orange-800"><i class="fas fa-file-lines mr-2"></i>Mylar LOG 報工</h3>
                             <p class="text-xs text-gray-400 mt-1">直接上傳機台 TXT / LOG，系統會依 LOG 內日期自動整理產出成功與停機不良。</p>
                         </div>
                         <span v-if="assemblyCloudReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
@@ -927,7 +927,7 @@
                 <div class="section-card p-4">
                     <div class="quick-bar mb-4">
                         <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
-                        <div class="quick-seg" role="group" aria-label="組裝測試快捷統計區間">
+                        <div class="quick-seg" role="group" aria-label="Mylar 快捷統計區間">
                             <button @click="setAssemblyQuickMode('day')" :class="{ 'is-active': assemblyQuickMode === 'day' }" :aria-pressed="assemblyQuickMode === 'day'">日</button>
                             <button @click="setAssemblyQuickMode('week')" :class="{ 'is-active': assemblyQuickMode === 'week' }" :aria-pressed="assemblyQuickMode === 'week'">週</button>
                             <button @click="setAssemblyQuickMode('month')" :class="{ 'is-active': assemblyQuickMode === 'month' }" :aria-pressed="assemblyQuickMode === 'month'">月</button>
@@ -944,9 +944,9 @@
                         <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="assemblyStatsFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                         <div class="flex gap-2"><button @click="calculateAssemblyStats" class="btn-primary text-sm"><i class="fas fa-chart-column mr-1"></i>執行統計</button><button @click="exportAssemblyStats" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i>導出報表</button></div>
                     </div>
-                    <p class="text-xs text-gray-400 mt-3"><i class="fas fa-info-circle mr-1"></i>統計來源為「每日報工」上傳的組裝測試 LOG；新原因會自動加入基礎設定的不良項目。</p>
+                    <p class="text-xs text-gray-400 mt-3"><i class="fas fa-info-circle mr-1"></i>統計來源為「每日報工」上傳的 Mylar LOG；新原因會自動加入基礎設定的不良項目。</p>
                 </div>
-                <div v-if="!assemblyStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行組裝測試統計</div><div class="hint">設定日期區間後點擊「執行統計」</div></div></div>
+                <div v-if="!assemblyStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行 Mylar 統計</div><div class="hint">設定日期區間後點擊「執行統計」</div></div></div>
                 <template v-if="assemblyStatsResult">
                     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                         <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyStatsResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
@@ -1678,10 +1678,10 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608052100"></script>
+<script src="js/core.js?v=202608052300"></script>
 <script src="js/orders.js?v=202608052100"></script>
 <script src="js/report.js?v=202608052100"></script>
-<script src="js/assembly.js?v=202608052100"></script>
+<script src="js/assembly.js?v=202608052300"></script>
 <script src="js/daf.js?v=202608052100"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>

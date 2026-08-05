@@ -24,6 +24,7 @@ SMT.assembly = function (ctx) {
     const assemblyMappings = ref([]);
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
+    const assemblySourceDetail = ref({ show: false, category: '', items: [], total: 0 });
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
     let applyingAssemblyQuick = false;
@@ -273,7 +274,7 @@ SMT.assembly = function (ctx) {
 
     const emptyBucket = () => ({
         success: 0, ng: 0, ignored: 0, unclassified: 0, parsedLines: 0,
-        byType: {}, hourlySuccess: {}, hourlyNg: {}
+        byType: {}, sourceByType: {}, hourlySuccess: {}, hourlyNg: {}
     });
     const increment = (map, key, amount = 1) => { if (key) map[key] = (map[key] || 0) + amount; };
 
@@ -311,6 +312,9 @@ SMT.assembly = function (ctx) {
             } else {
                 bucket.ng++;
                 increment(bucket.byType, result.category);
+                const sourceMessage = normalizeMessage(parsed.message);
+                const sourceMap = bucket.sourceByType[result.category] || (bucket.sourceByType[result.category] = {});
+                increment(sourceMap, sourceMessage);
                 increment(bucket.hourlyNg, parsed.time.slice(0, 2));
             }
         });
@@ -319,7 +323,7 @@ SMT.assembly = function (ctx) {
 
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
     const aggregate = (batches, start = '', end = '') => {
-        const byType = {}, byDate = {}, hourlySuccess = {}, hourlyNg = {};
+        const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {};
         let success = 0, ng = 0, ignored = 0, unclassified = 0, parsedLines = 0;
         (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, source]) => {
             if (!inRange(date, start, end)) return;
@@ -335,12 +339,19 @@ SMT.assembly = function (ctx) {
                 increment(byType, name, qty);
                 increment(day.byType, name, qty);
             });
+            Object.entries(source.sourceByType || {}).forEach(([category, messages]) => {
+                const categoryMap = sourceByType[category] || (sourceByType[category] = {});
+                Object.entries(messages || {}).forEach(([message, qty]) => increment(categoryMap, message, qty));
+            });
             Object.entries(source.hourlySuccess || {}).forEach(([hour, qty]) => increment(hourlySuccess, hour, qty));
             Object.entries(source.hourlyNg || {}).forEach(([hour, qty]) => increment(hourlyNg, hour, qty));
         }));
         const totalRecords = success + ng;
         const byTypeList = Object.entries(byType).map(([name, qty]) => ({
-            name, qty, ratio: ng ? (qty / ng * 100).toFixed(1) : '0.0'
+            name, qty, ratio: ng ? (qty / ng * 100).toFixed(1) : '0.0',
+            sourceItems: Object.entries(sourceByType[name] || {})
+                .map(([message, sourceQty]) => ({ message, qty: sourceQty, ratio: qty ? (sourceQty / qty * 100).toFixed(1) : '0.0' }))
+                .sort((a, b) => b.qty - a.qty)
         })).sort((a, b) => b.qty - a.qty);
         const daily = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({
             ...day,
@@ -647,8 +658,21 @@ SMT.assembly = function (ctx) {
         if (assemblyStatsFilter.value.start && assemblyStatsFilter.value.end && assemblyStatsFilter.value.start > assemblyStatsFilter.value.end) {
             return toast('開始日期不能晚於結束日期', 'warning');
         }
+        assemblySourceDetail.value = { show: false, category: '', items: [], total: 0 };
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
+    };
+    const openAssemblySourceDetail = (category) => {
+        const row = (assemblyStatsResult.value?.byType || []).find(item => item.name === category);
+        assemblySourceDetail.value = {
+            show: true,
+            category,
+            items: row?.sourceItems || [],
+            total: row?.qty || 0
+        };
+    };
+    const closeAssemblySourceDetail = () => {
+        assemblySourceDetail.value = { show: false, category: '', items: [], total: 0 };
     };
     watch(() => [assemblyStatsFilter.value.start, assemblyStatsFilter.value.end], () => {
         if (!applyingAssemblyQuick) assemblyQuickMode.value = null;
@@ -669,16 +693,19 @@ SMT.assembly = function (ctx) {
             ...result.daily.map(row => [row.date, row.success, row.ng, row.total, row.downtimeRate + '%'])];
         const hourly = [['時段', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '停機率'],
             ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
+        const sourceDetails = [['停機／不良項目', 'LOG 原始訊息', '次數', '占該分類比例'],
+            ...result.byType.flatMap(row => (row.sourceItems || []).map(item => [row.name, item.message, item.qty, item.ratio + '%']))];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceDetails), 'LOG原始細項');
         XLSX.writeFile(wb, 'KOYA_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');
         toast('組裝測試 LOG 報表已導出');
     };
 
     let reportChart = null, statsChart = null, statsPieChart = null;
-    const renderChart = (id, result, previous, setPrevious) => {
+    const renderChart = (id, result, previous, setPrevious, onClick) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
             if (!result || !el) {
@@ -700,6 +727,12 @@ SMT.assembly = function (ctx) {
                 yAxis: { type: 'value', name: 'NG 次數' },
                 series: [{ type: 'bar', data: rows.map(row => row.qty), barMaxWidth: 42, itemStyle: { color: '#dc2626', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top' } }]
             });
+            if (previous.off) previous.off('click');
+            if (onClick && previous.on) {
+                previous.on('click', params => {
+                    if (params?.componentType === 'series' && params.name) onClick(params.name);
+                });
+            }
         });
     };
     const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; });
@@ -729,7 +762,7 @@ SMT.assembly = function (ctx) {
         });
     };
     const renderAssemblyStatsCharts = () => {
-        renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; });
+        renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
         renderPieChart('assemblyStatsPieChart', assemblyStatsResult.value, statsPieChart, value => { statsPieChart = value; });
     };
 
@@ -757,12 +790,12 @@ SMT.assembly = function (ctx) {
     return {
         assemblyUploadDate, assemblyUploadDateLabel, assemblyUploadDateRelative, assemblyBatchesForDate,
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
-        assemblyBatches, assemblyLastFile, assemblyReportResult,
+        assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

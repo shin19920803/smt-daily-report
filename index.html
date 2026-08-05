@@ -362,6 +362,58 @@
                 <div v-else class="section-card"><div class="empty-state py-12"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 LOG 統計</div><div class="hint">請上傳機台 LOG 檔案，系統會自動偵測日期</div></div></div>
             </div>
 
+            <div v-else-if="currentLine === 'DAF'" class="space-y-4 animate-fade-in">
+                <div class="section-card p-4 md:p-6 border-l-4 border-purple-500">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>DAF 檔案報工</h3>
+                            <p class="text-xs text-gray-400 mt-1">依 Python 版本讀取 C／E／G／I／J 欄：工單、產品代碼、日期、不良原因、GOOD／FAIL。</p>
+                        </div>
+                        <span v-if="dafRemoteReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
+                        <span v-else class="badge-hint text-orange-700" :title="dafRemoteError"><i class="fas fa-laptop"></i>目前僅本機保存</span>
+                    </div>
+                    <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
+                        <label class="btn-primary cursor-pointer text-center" style="background:#7c3aed">
+                            <i class="fas fa-upload mr-1"></i>選擇多份 DAF 檔案
+                            <input type="file" accept=".xlsx,.xls,.xlsm,.csv,.txt" multiple @change="uploadDafFiles" class="hidden">
+                        </label>
+                        <button @click="loadDafData" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
+                    </div>
+                    <div class="mt-3 text-xs text-gray-400">可一次上傳多個工單檔案；每個檔案會獨立保存，統計時可依日期、機種與工單篩選。</div>
+                    <div v-if="dafUploadSummary.files" class="mt-3 p-3 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-800">
+                        <i class="fas fa-circle-check mr-1"></i>本次完成 {{ dafUploadSummary.files }} 個檔案，共 {{ dafUploadSummary.rows.toLocaleString() }} 列
+                        <span v-if="dafUploadSummary.failed.length" class="text-red-600 ml-2">失敗 {{ dafUploadSummary.failed.length }} 個：{{ dafUploadSummary.failed.join('；') }}</span>
+                    </div>
+                </div>
+
+                <div v-if="dafBatches.length" class="section-card p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="card-title mb-0"><i class="fas fa-layer-group text-purple-600"></i>已上傳檔案</h3>
+                        <span class="text-xs text-gray-400">共 {{ dafBatches.length }} 份</span>
+                    </div>
+                    <div class="space-y-2">
+                        <div v-for="batch in dafBatches" :key="batch.id" class="border border-gray-200 rounded-xl p-3 hover:border-purple-300 transition">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <i class="fas fa-file-excel text-green-600"></i>
+                                <span class="font-bold text-sm truncate flex-1">{{ batch.fileName }}</span>
+                                <span class="text-xs text-gray-400">{{ batch.reportDate }}</span>
+                                <button @click="deleteDafBatch(batch.id)" class="text-red-400 hover:text-red-600 px-1" title="刪除此檔案統計"><i class="fas fa-trash-alt"></i></button>
+                            </div>
+                            <div class="grid grid-cols-2 md:grid-cols-6 gap-2 mt-3 text-xs">
+                                <div><span class="text-gray-400 block">機種</span><b class="text-purple-700 break-words">{{ batch.modelName }}</b></div>
+                                <div><span class="text-gray-400 block">工單</span><b class="break-words">{{ batch.workOrder }}</b></div>
+                                <div><span class="text-gray-400 block">投入數</span><b>{{ batch.inputCount.toLocaleString() }}</b></div>
+                                <div><span class="text-gray-400 block">良品數</span><b class="text-green-600">{{ batch.goodCount.toLocaleString() }}</b></div>
+                                <div><span class="text-gray-400 block">不良數</span><b class="text-red-600">{{ batch.failCount.toLocaleString() }}</b></div>
+                                <div><span class="text-gray-400 block">良率／不良率</span><b>{{ batch.yieldRate }}% ／ {{ batch.defectRate }}%</b></div>
+                            </div>
+                            <div v-if="batch.unknownStatusCount" class="mt-2 text-xs text-orange-600"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ batch.unknownStatusCount }} 筆：{{ batch.unknownStatusText }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚未上傳 DAF 檔案</div><div class="hint">可一次選擇多份檔案，系統會自動分類整理</div></div></div>
+            </div>
+
             <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lg:col-span-2 space-y-6">
                     <!-- Step 1 -->
@@ -809,9 +861,23 @@
                         <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ assemblyStatsResult.totalDays }}</div><div class="kpi-label">統計天數</div></div>
                     </div>
                     <div class="section-card p-4">
-                        <h3 class="card-title"><i class="fas fa-chart-column text-red-600"></i>停機／不良原因 Pareto 圖</h3>
+                        <h3 class="card-title"><i class="fas fa-chart-column text-red-600"></i>停機／不良原因 Pareto 圖<span v-if="assemblyStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊不良柱狀查看 LOG 原始細項</span></h3>
                         <div v-if="assemblyStatsResult.byType.length" id="assemblyStatsChart" style="width:100%;height:340px;"></div>
                         <div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="title">此區間沒有停機／不良</div></div>
+                    </div>
+                    <div v-if="assemblySourceDetail.show" class="section-card p-4 border-l-4 border-red-500">
+                        <div class="flex items-center justify-between gap-2 mb-3">
+                            <h3 class="card-title mb-0"><i class="fas fa-list-ul text-red-600"></i>{{ assemblySourceDetail.category }} 的 LOG 原始細項</h3>
+                            <button @click="closeAssemblySourceDetail" class="btn-ghost text-xs">關閉</button>
+                        </div>
+                        <div v-if="assemblySourceDetail.items.length" class="space-y-2">
+                            <div v-for="item in assemblySourceDetail.items" :key="item.message" class="flex items-center gap-3 p-2 rounded-lg bg-gray-50 border border-gray-100">
+                                <span class="flex-1 text-sm break-all">{{ item.message }}</span>
+                                <span class="font-mono text-sm text-red-600 whitespace-nowrap">{{ item.qty }} 次</span>
+                                <span class="font-mono text-xs text-gray-500 w-16 text-right">{{ item.ratio }}%</span>
+                            </div>
+                        </div>
+                        <div v-else class="text-xs text-gray-500 bg-orange-50 border border-orange-100 rounded-lg p-3">此筆歷史資料尚未保存 LOG 原始細項；重新上傳檔案後即可查看。</div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4">
@@ -841,6 +907,47 @@
                     </div>
                 </template>
             </div>
+            <div v-else-if="currentLine === 'DAF'" class="space-y-4 animate-fade-in">
+                <div class="section-card p-4">
+                    <div class="quick-bar mb-4">
+                        <span class="quick-bar-label"><i class="fas fa-bolt"></i>DAF 統計篩選</span>
+                        <span class="quick-hint">可依日期、機種與工單查看多份檔案合併結果</span>
+                    </div>
+                    <div class="flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end">
+                        <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="dafStatsFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
+                        <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="dafStatsFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
+                        <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">機種</label><select v-model="dafStatsFilter.model" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white"><option value="all">全部機種</option><option v-for="model in dafModelOptions" :key="model" :value="model">{{ model }}</option></select></div>
+                        <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="dafStatsFilter.workOrder" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white"><option value="all">全部工單</option><option v-for="workOrder in dafWorkOrderOptions" :key="workOrder" :value="workOrder">{{ workOrder }}</option></select></div>
+                        <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateDafStats" class="btn-primary text-sm"><i class="fas fa-chart-column mr-1"></i>執行統計</button><button @click="exportDafStats" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i>導出完整報表</button></div>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-3"><i class="fas fa-info-circle mr-1"></i>統計依 Python 規則：GOOD／FAIL 列入投入數，FAIL 依 I 欄統計不良原因；其他狀態另列。</p>
+                </div>
+                <div v-if="!dafStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行 DAF 統計</div><div class="hint">設定篩選條件後點擊「執行統計」</div></div></div>
+                <template v-if="dafStatsResult">
+                    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                        <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafStatsResult.totalInput.toLocaleString() }}</div><div class="kpi-label">投入數</div></div>
+                        <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafStatsResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
+                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-times-circle"></i></div><div class="kpi-value text-danger">{{ dafStatsResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">不良數</div></div>
+                        <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-success">{{ dafStatsResult.yieldRate }}%</div><div class="kpi-label">良率</div></div>
+                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-line"></i></div><div class="kpi-value text-danger">{{ dafStatsResult.defectRate }}%</div><div class="kpi-label">不良率</div></div>
+                    </div>
+                    <div v-if="dafStatsResult.unknownStatusCount" class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ dafStatsResult.unknownStatusCount }} 筆：{{ dafStatsResult.unknownStatusText }}；不列入投入、良品與不良統計。</div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-column text-red-600"></i>不良原因排行</h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-wave-square text-blue-600"></i>每日良率／不良率</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
+                    </div>
+                    <div class="section-card p-4">
+                        <h3 class="card-title"><i class="fas fa-bug text-red-600"></i>不良原因明細</h3>
+                        <div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>不良原因</th><th class="text-right">不良數</th><th class="text-right">占投入比例</th><th class="text-right">占不良比例</th></tr></thead><tbody><tr v-for="row in dafStatsResult.byType" :key="row.name"><td class="font-bold">{{ row.name }}</td><td class="text-right font-mono text-danger font-bold">{{ row.qty }}</td><td class="text-right font-mono">{{ row.inputRatio }}%</td><td class="text-right font-mono">{{ row.ratio }}%</td></tr><tr v-if="!dafStatsResult.byType.length"><td colspan="4" class="text-center text-gray-400 py-6">無不良資料</td></tr></tbody></table></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>機種統計</h3><div class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>機種</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.byModel" :key="row.name"><td class="font-bold">{{ row.name }}</td><td class="text-right font-mono">{{ row.input }}</td><td class="text-right font-mono text-success">{{ row.good }}</td><td class="text-right font-mono text-danger">{{ row.defects }}</td><td class="text-right font-mono">{{ row.yieldRate }}%</td><td class="text-right font-mono text-danger">{{ row.defectRate }}%</td></tr><tr v-if="!dafStatsResult.byModel.length"><td colspan="6" class="text-center text-gray-400 py-6">無資料</td></tr></tbody></table></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單統計</h3><div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>工單</th><th>機種</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.byWorkOrder" :key="row.workOrder"><td class="font-mono font-bold">{{ row.workOrder }}</td><td class="text-xs">{{ row.model }}</td><td class="text-right font-mono">{{ row.input }}</td><td class="text-right font-mono text-success">{{ row.good }}</td><td class="text-right font-mono text-danger">{{ row.defects }}</td><td class="text-right font-mono">{{ row.yieldRate }}%</td><td class="text-right font-mono text-danger">{{ row.defectRate }}%</td></tr><tr v-if="!dafStatsResult.byWorkOrder.length"><td colspan="7" class="text-center text-gray-400 py-6">無資料</td></tr></tbody></table></div></div>
+                    </div>
+                    <div class="section-card p-4" v-if="dafStatsResult.daily.length"><h3 class="card-title"><i class="fas fa-calendar-days text-blue-600"></i>每日明細</h3><div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>日期</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.daily" :key="row.date"><td class="font-mono font-bold">{{ row.date }}</td><td class="text-right">{{ row.input }}</td><td class="text-right text-success">{{ row.good }}</td><td class="text-right text-danger">{{ row.defects }}</td><td class="text-right">{{ row.yieldRate }}%</td><td class="text-right text-danger">{{ row.defectRate }}%</td></tr></tbody></table></div></div>
+                </template>
+            </div>
+
             <div v-else>
             <div class="section-card p-4 mb-5">
                 <!-- 快捷區間：日 / 週(日–六) / 月，左右鍵快速切換上下一期 -->
@@ -1438,6 +1545,7 @@
 <script src="js/orders.js?v=202608041323"></script>
 <script src="js/report.js?v=202608041323"></script>
 <script src="js/assembly.js?v=202608041323"></script>
+<script src="js/daf.js?v=202608041323"></script>
 <script src="js/fpy.js?v=202608041323"></script>
 <script src="js/ooc.js?v=202608041323"></script>
 <script src="js/dashboard.js?v=202608041323"></script>

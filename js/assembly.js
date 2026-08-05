@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 
 // 組裝測試機台 LOG：瀏覽器版的 Python LOG 自動統計工具
 SMT.assembly = function (ctx) {
-    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
+    const { toast, loading, currentLine, currentTab, data, loadBaseData, requestPermission } = ctx;
     const STORAGE_KEY = 'koya_assy_log_batches_v1';
     const REMOTE_TABLE = 'assembly_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_assy_log_remote_migrated_v1';
@@ -471,6 +471,7 @@ SMT.assembly = function (ctx) {
     const deleteAssemblyBatch = async (id) => {
         const batch = assemblyBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 LOG 統計？`)) return;
+        if (!(await requestPermission('刪除組裝測試 LOG'))) return;
         if (!(await deleteBatchRemote(id))) return;
         assemblyBatches.value = assemblyBatches.value.filter(item => item.id !== id);
         persistStorage();

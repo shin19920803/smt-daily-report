@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 
 // DAF 檔案統計：依 Google Colab 版本的 C／E／G／I／J 欄位規則分析。
 SMT.daf = function (ctx) {
-    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
+    const { toast, loading, currentLine, currentTab, data, loadBaseData, requestPermission } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
@@ -620,6 +620,7 @@ SMT.daf = function (ctx) {
     const deleteDafBatch = async (id) => {
         const batch = dafBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 DAF 統計？`)) return;
+        if (!(await requestPermission('刪除 DAF 檔案'))) return;
         if (!(await deleteRemote(id))) return;
         dafBatches.value = dafBatches.value.filter(item => item.id !== id);
         dafLastUpload.value = dafBatches.value[0] || null;

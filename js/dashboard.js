@@ -1,7 +1,8 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, getAssemblyReportForDate } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
+        const assemblyDashboardResult = ref(null);
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
         const dashDate = ref(new Date().toISOString().split('T')[0]);
@@ -20,6 +21,13 @@ SMT.dashboard = function (ctx) {
         };
 
         const refreshDashboard = async () => {
+            if (currentLine.value === 'ASSY') {
+                assemblyDashboardResult.value = getAssemblyReportForDate(dashDate.value);
+                dashboard.value = { activeWoCount: 0, todayInput: assemblyDashboardResult.value.totalSuccess, todayDefects: assemblyDashboardResult.value.totalDefects, todayYield: assemblyDashboardResult.value.downtimeRate, monthOocCount: 0, weekAvgYield: 0 };
+                dashboardRecentProds.value = [];
+                dashboardRecentOoc.value = [];
+                return;
+            }
             dashboard.value.activeWoCount = activeWoNumbers.value.length;
 
             const targetDate = dashDate.value;
@@ -49,7 +57,54 @@ SMT.dashboard = function (ctx) {
         };
         let dashYieldChartInst = null;
         let dashInputChartInst = null;
+        let dashAssemblyDowntimeChartInst = null;
+        let dashAssemblyReasonChartInst = null;
+        const disposeChart = (chart) => { if (chart) chart.dispose(); return null; };
+        const initAssemblyDashboardCharts = async () => {
+            const target = dashDate.value;
+            const days = [];
+            for (let i = 13; i >= 0; i--) {
+                const d = new Date(`${target}T00:00:00`); d.setDate(d.getDate() - i);
+                days.push(d.toISOString().split('T')[0]);
+            }
+            const reports = days.map(date => getAssemblyReportForDate(date));
+            const labels = days.map(d => d.slice(5));
+            const downtime = reports.map(result => result.totalRecords > 0 ? parseFloat(result.downtimeRate) : null);
+            const current = assemblyDashboardResult.value || getAssemblyReportForDate(target);
+            await Vue.nextTick();
+            const downtimeEl = document.getElementById('dashAssemblyDowntimeChart');
+            if (downtimeEl) {
+                if (!dashAssemblyDowntimeChartInst) dashAssemblyDowntimeChartInst = echarts.init(downtimeEl);
+                dashAssemblyDowntimeChartInst.setOption({
+                    grid:{top:28,right:20,bottom:36,left:48},
+                    tooltip:{trigger:'axis',formatter:p=>{const v=p[0];return v.name+'<br/>'+(v.value!==null?'<b>'+v.value+'%</b>':'無資料');}},
+                    xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
+                    yAxis:{type:'value',min:0,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
+                    series:[{type:'line',data:downtime,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#dc2626',width:2.5},itemStyle:{color:'#dc2626'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(220,38,38,0.15)'},{offset:1,color:'rgba(220,38,38,0)'}]}}}]
+                });
+            }
+            const reasonEl = document.getElementById('dashAssemblyReasonChart');
+            if (reasonEl) {
+                if (!dashAssemblyReasonChartInst) dashAssemblyReasonChartInst = echarts.init(reasonEl);
+                const rows = (current?.byType || []).slice(0, 10).reverse();
+                dashAssemblyReasonChartInst.setOption({
+                    grid:{top:12,right:20,bottom:24,left:112},
+                    tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>p[0].name+'<br/><b>'+p[0].value+' 次</b>'},
+                    xAxis:{type:'value',splitLine:{lineStyle:{color:'#f3f4f6'}},axisLabel:{fontSize:10,color:'#9ca3af'}},
+                    yAxis:{type:'category',data:rows.map(row=>row.name),axisLabel:{fontSize:10,color:'#6b7280'}},
+                    series:[{type:'bar',data:rows.map(row=>row.qty),barMaxWidth:18,itemStyle:{color:'#dc2626',borderRadius:[0,4,4,0]},label:{show:true,position:'right',fontSize:10}}]
+                });
+            }
+        };
         const initDashboardCharts = async () => {
+            if (currentLine.value === 'ASSY') {
+                dashYieldChartInst = disposeChart(dashYieldChartInst);
+                dashInputChartInst = disposeChart(dashInputChartInst);
+                await initAssemblyDashboardCharts();
+                return;
+            }
+            dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);
+            dashAssemblyReasonChartInst = disposeChart(dashAssemblyReasonChartInst);
             const today = new Date();
             const days = [];
             for (let i = 13; i >= 0; i--) {
@@ -102,13 +157,14 @@ SMT.dashboard = function (ctx) {
         };
         // 容器剛插入 DOM 時寬度可能為 0，ECharts 會以預設寬度初始化 → 渲染後強制 resize
         const resizeDashboardCharts = () => {
-            [dashYieldChartInst, dashInputChartInst].forEach(inst => { if (inst) inst.resize(); });
+            [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
         window.addEventListener('resize', () => { if (currentTab.value === 'dashboard') resizeDashboardCharts(); });
 
-        watch(currentTab, async (tab) => { if (tab === 'dashboard') { await initDashboardCharts(); } });
+        watch(currentTab, async (tab) => { if (tab === 'dashboard') { await refreshDashboard(); await initDashboardCharts(); } });
+        watch(dashDate, async () => { if (currentTab.value === 'dashboard') { await refreshDashboard(); await initDashboardCharts(); } });
         return {
-            dashboard, dashboardRecentProds, dashboardRecentOoc, dashDate,
+            dashboard, assemblyDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
             changeDashDate, refreshDashboard, initDashboardCharts
         };
 };

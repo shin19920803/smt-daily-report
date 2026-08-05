@@ -6,6 +6,9 @@ SMT.assembly = function (ctx) {
     const STORAGE_KEY = 'koya_assy_log_batches_v1';
     const REMOTE_TABLE = 'assembly_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_assy_log_remote_migrated_v1';
+    const MAPPING_STORAGE_KEY = 'koya_assy_log_mappings_v1';
+    const MAPPING_TABLE = 'assembly_log_mappings';
+    const MAPPING_MIGRATED_KEY = 'koya_assy_log_mapping_migrated_v1';
     const today = () => new Date().toISOString().split('T')[0];
 
     const assemblyUploadDate = ref(today());
@@ -16,6 +19,11 @@ SMT.assembly = function (ctx) {
     const assemblyStatsResult = ref(null);
     const assemblyRemoteReady = ref(false);
     const assemblyRemoteError = ref('');
+    const assemblyMappingRemoteReady = ref(false);
+    const assemblyCloudReady = computed(() => assemblyRemoteReady.value && assemblyMappingRemoteReady.value);
+    const assemblyMappings = ref([]);
+    const pendingAssemblyUpload = ref(null);
+    const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
     let applyingAssemblyQuick = false;
@@ -96,6 +104,16 @@ SMT.assembly = function (ctx) {
             return [];
         }
     };
+    const readMappingStorage = () => {
+        try {
+            const raw = localStorage.getItem(MAPPING_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('組裝測試 LOG 對應讀取失敗', e);
+            return [];
+        }
+    };
     const persistStorage = (batches = assemblyBatches.value) => {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(batches));
@@ -103,6 +121,9 @@ SMT.assembly = function (ctx) {
             console.warn('組裝測試 LOG 歷史保存失敗', e);
             toast('分析結果已載入，但瀏覽器儲存空間不足，重新整理後可能消失', 'warning');
         }
+    };
+    const persistMappingStorage = (mappings = assemblyMappings.value) => {
+        try { localStorage.setItem(MAPPING_STORAGE_KEY, JSON.stringify(mappings)); } catch (e) {}
     };
 
     const toRemoteBatch = (batch) => ({
@@ -117,6 +138,11 @@ SMT.assembly = function (ctx) {
         unclassified_count: batch.unclassifiedCount,
         buckets: batch.buckets
     });
+    const toRemoteMapping = (mapping) => ({
+        line: 'ASSY',
+        log_message: mapping.logMessage,
+        defect_name: mapping.defectName
+    });
     const fromRemoteBatch = (row) => ({
         id: row.id,
         line: row.line || 'ASSY',
@@ -129,11 +155,22 @@ SMT.assembly = function (ctx) {
         unclassifiedCount: row.unclassified_count,
         buckets: row.buckets || {}
     });
+    const fromRemoteMapping = (row) => ({
+        line: row.line || 'ASSY',
+        logMessage: row.log_message,
+        defectName: row.defect_name
+    });
     const hasRemoteMigrationFlag = () => {
         try { return localStorage.getItem(REMOTE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
     };
     const setRemoteMigrationFlag = () => {
         try { localStorage.setItem(REMOTE_MIGRATED_KEY, '1'); } catch (e) {}
+    };
+    const hasMappingMigrationFlag = () => {
+        try { return localStorage.getItem(MAPPING_MIGRATED_KEY) === '1'; } catch (e) { return false; }
+    };
+    const setMappingMigrationFlag = () => {
+        try { localStorage.setItem(MAPPING_MIGRATED_KEY, '1'); } catch (e) {}
     };
     const saveBatchRemote = async (batch) => {
         if (!assemblyRemoteReady.value) return false;
@@ -151,6 +188,15 @@ SMT.assembly = function (ctx) {
         if (error) {
             console.error('組裝測試 LOG 共用資料庫刪除失敗', error);
             toast('共用資料庫刪除失敗：' + error.message, 'error');
+            return false;
+        }
+        return true;
+    };
+    const saveMappingRemote = async (mapping) => {
+        if (!assemblyMappingRemoteReady.value) return false;
+        const { error } = await _supabase.from(MAPPING_TABLE).upsert(toRemoteMapping(mapping), { onConflict: 'line,log_message' });
+        if (error) {
+            console.error('組裝測試 LOG 對應共用資料庫寫入失敗', error);
             return false;
         }
         return true;
@@ -188,6 +234,7 @@ SMT.assembly = function (ctx) {
         const m = String(value || '').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
         return m ? m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0') : fallback;
     };
+    const normalizeMessage = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
     const parseLogLine = (line, fallbackDate) => {
         const original = String(line || '').trim().replace(/\0/g, '');
@@ -209,12 +256,14 @@ SMT.assembly = function (ctx) {
         return { date: fallbackDate, time: '', message: original, original };
     };
 
-    const classify = (message) => {
+    const classify = (message, mappingMap = new Map()) => {
         for (const rule of RULES) {
             for (const keyword of rule.keywords) {
                 if (message.includes(keyword)) return { type: rule.type, category: rule.category, keyword };
             }
         }
+        const mappedCategory = mappingMap.get(normalizeMessage(message));
+        if (mappedCategory) return { type: 'NG', category: mappedCategory, keyword: 'user-mapping' };
         return null;
     };
 
@@ -224,21 +273,27 @@ SMT.assembly = function (ctx) {
     });
     const increment = (map, key, amount = 1) => { if (key) map[key] = (map[key] || 0) + amount; };
 
-    const parseText = (text, fallbackDate) => {
+    const parseText = (text, fallbackDate, mappings = assemblyMappings.value) => {
         const buckets = {};
+        const mappingMap = new Map((mappings || []).map(item => [item.logMessage, item.defectName]));
+        const unknownMap = new Map();
         let ignoredCount = 0, unclassifiedCount = 0, parsedLineCount = 0;
         const lines = text.split(/\r?\n/);
         lines.forEach(line => {
             const parsed = parseLogLine(line, fallbackDate);
             if (!parsed || !parsed.message) return;
             parsedLineCount++;
-            const result = classify(parsed.message);
+            const result = classify(parsed.message, mappingMap);
             const date = parsed.date || fallbackDate;
             const bucket = buckets[date] || (buckets[date] = emptyBucket());
             bucket.parsedLines++;
             if (!result) {
                 bucket.unclassified++;
                 unclassifiedCount++;
+                const key = normalizeMessage(parsed.message);
+                const existing = unknownMap.get(key) || { key, message: parsed.message, original: parsed.original, count: 0 };
+                existing.count++;
+                unknownMap.set(key, existing);
                 return;
             }
             if (result.type === 'IGNORE') {
@@ -255,7 +310,7 @@ SMT.assembly = function (ctx) {
                 increment(bucket.hourlyNg, parsed.time.slice(0, 2));
             }
         });
-        return { buckets, parsedLineCount, ignoredCount, unclassifiedCount, lineCount: lines.length };
+        return { buckets, parsedLineCount, ignoredCount, unclassifiedCount, lineCount: lines.length, unknownMessages: [...unknownMap.values()] };
     };
 
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
@@ -309,6 +364,92 @@ SMT.assembly = function (ctx) {
             byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
             totalDays: daily.length, topCause: byTypeList[0] || null
         };
+    };
+
+    const assemblyDefectOptions = computed(() => [...(data.value.defectTypes || [])].sort((a, b) => a.name.localeCompare(b.name)));
+    const assemblyUnknownCurrent = computed(() => {
+        const modal = assemblyUnknownModal.value;
+        return modal.items[modal.currentIndex] || null;
+    });
+    const addAssemblyDefectType = async (name) => {
+        const existing = (data.value.defectTypes || []).find(item => item.name === name);
+        if (existing) return existing.name;
+        const { error } = await _supabase.from('defect_types').insert({ name, line: 'ASSY' });
+        if (error) {
+            toast('新增不良項目失敗：' + error.message, 'error');
+            return null;
+        }
+        await loadBaseData();
+        return name;
+    };
+    const appendAssemblyMapping = async (logMessage, defectName) => {
+        const mapping = { line: 'ASSY', logMessage: normalizeMessage(logMessage), defectName };
+        assemblyMappings.value = [
+            mapping,
+            ...assemblyMappings.value.filter(item => item.logMessage !== mapping.logMessage)
+        ];
+        persistMappingStorage();
+        if (assemblyMappingRemoteReady.value) {
+            const saved = await saveMappingRemote(mapping);
+            if (!saved) toast('對應已保存在本機，但共用資料庫寫入失敗', 'warning');
+        }
+    };
+    const createAssemblyBatch = (pending, parsed) => ({
+        id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        line: 'ASSY', fileName: pending.fileName, uploadedAt: new Date().toISOString(),
+        encoding: pending.encoding, lineCount: parsed.lineCount,
+        parsedLineCount: parsed.parsedLineCount, ignoredCount: parsed.ignoredCount,
+        unclassifiedCount: parsed.unclassifiedCount, buckets: parsed.buckets
+    });
+    const saveAssemblyBatch = async (pending, parsed) => {
+        const batch = createAssemblyBatch(pending, parsed);
+        const remoteSaved = await saveBatchRemote(batch);
+        assemblyBatches.value = [batch, ...assemblyBatches.value].slice(0, 100);
+        persistStorage();
+        assemblyLastFile.value = batch.fileName;
+        const result = aggregate([batch]);
+        await saveNewDefectTypes(result.byType.map(row => row.name));
+        refreshAssemblyReport();
+        assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        const dateCount = Object.keys(parsed.buckets).length;
+        const storageNote = assemblyRemoteReady.value && !remoteSaved
+            ? '；共用資料庫寫入失敗，目前只有本機可見'
+            : (!assemblyRemoteReady.value ? '；共用資料表尚未設定，目前只有本機可見' : '');
+        toast('LOG 分析完成：成功 ' + result.totalSuccess + '、NG ' + result.totalDefects + '，共 ' + dateCount + ' 天' + storageNote, storageNote ? 'warning' : 'success');
+    };
+    const resolveAssemblyUnknown = async () => {
+        const modal = assemblyUnknownModal.value;
+        const current = assemblyUnknownCurrent.value;
+        if (!current) return;
+        const selected = String(modal.selectedDefectName || '').trim();
+        const created = String(modal.newDefectName || '').trim();
+        if (selected && created) return toast('請選擇既有項目或新增項目其中一種', 'warning');
+        if (!selected && !created) return toast('請選擇既有不良項目或輸入新的不良項目', 'warning');
+        loading.value = true;
+        try {
+            const defectName = created ? await addAssemblyDefectType(created) : selected;
+            if (!defectName) return;
+            await appendAssemblyMapping(current.key, defectName);
+            if (modal.currentIndex < modal.items.length - 1) {
+                assemblyUnknownModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedDefectName: '', newDefectName: '' };
+                return;
+            }
+            const pending = pendingAssemblyUpload.value;
+            pendingAssemblyUpload.value = null;
+            assemblyUnknownModal.value = { show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' };
+            if (pending) {
+                const parsed = parseText(pending.text, pending.fallbackDate, assemblyMappings.value);
+                if (parsed.unknownMessages.length) return toast('仍有未分類 LOG，請重新上傳處理', 'warning');
+                await saveAssemblyBatch(pending, parsed);
+            }
+        } finally {
+            loading.value = false;
+        }
+    };
+    const cancelAssemblyUnknown = () => {
+        pendingAssemblyUpload.value = null;
+        assemblyUnknownModal.value = { show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' };
+        toast('已取消此次 LOG 上傳', 'info');
     };
 
     const assemblyBatchesForDate = computed(() => assemblyBatches.value.filter(batch => Object.prototype.hasOwnProperty.call(batch.buckets || {}, assemblyUploadDate.value)));
@@ -397,6 +538,7 @@ SMT.assembly = function (ctx) {
         if (currentLine.value !== 'ASSY') return;
         assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
     };
+    const getAssemblyReportForDate = (date) => aggregate(assemblyBatches.value, date, date);
     const loadAssemblyData = async () => {
         const localBatches = readStorage();
         if (currentLine.value !== 'ASSY') {
@@ -433,6 +575,31 @@ SMT.assembly = function (ctx) {
             assemblyBatches.value = remoteBatches.slice(0, 100);
             persistStorage();
         }
+        const localMappings = readMappingStorage();
+        const { data: remoteMappingRows, error: mappingError } = await _supabase.from(MAPPING_TABLE)
+            .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500);
+        if (mappingError) {
+            assemblyMappingRemoteReady.value = false;
+            assemblyMappings.value = localMappings;
+            if (!assemblyRemoteError.value) assemblyRemoteError.value = mappingError.code === 'PGRST205'
+                ? '尚未建立 LOG 不良對應資料表'
+                : (mappingError.message || 'LOG 對應資料庫讀取失敗');
+        } else {
+            assemblyMappingRemoteReady.value = true;
+            let remoteMappings = (remoteMappingRows || []).map(fromRemoteMapping);
+            if (!hasMappingMigrationFlag() && localMappings.length && remoteMappings.length === 0) {
+                const { error: mappingMigrationError } = await _supabase.from(MAPPING_TABLE)
+                    .upsert(localMappings.map(toRemoteMapping), { onConflict: 'line,log_message' });
+                if (!mappingMigrationError) {
+                    remoteMappings = localMappings;
+                    setMappingMigrationFlag();
+                }
+            } else if (!hasMappingMigrationFlag()) {
+                setMappingMigrationFlag();
+            }
+            assemblyMappings.value = remoteMappings;
+            persistMappingStorage();
+        }
         refreshAssemblyReport();
         if (currentLine.value === 'ASSY') {
             assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
@@ -445,27 +612,15 @@ SMT.assembly = function (ctx) {
         loading.value = true;
         try {
             const decoded = decodeBytes(await file.arrayBuffer());
-            const parsed = parseText(decoded.text, assemblyUploadDate.value);
-            const batch = {
-                id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-                line: 'ASSY', fileName: file.name, uploadedAt: new Date().toISOString(),
-                encoding: decoded.encoding, lineCount: parsed.lineCount,
-                parsedLineCount: parsed.parsedLineCount, ignoredCount: parsed.ignoredCount,
-                unclassifiedCount: parsed.unclassifiedCount, buckets: parsed.buckets
-            };
-            const remoteSaved = await saveBatchRemote(batch);
-            assemblyBatches.value = [batch, ...assemblyBatches.value].slice(0, 100);
-            persistStorage();
-            assemblyLastFile.value = file.name;
-            const result = aggregate([batch]);
-            await saveNewDefectTypes(result.byType.map(row => row.name));
-            refreshAssemblyReport();
-            assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
-            const dateCount = Object.keys(parsed.buckets).length;
-            const storageNote = assemblyRemoteReady.value && !remoteSaved
-                ? '；共用資料庫寫入失敗，目前只有本機可見'
-                : (!assemblyRemoteReady.value ? '；共用資料表尚未設定，目前只有本機可見' : '');
-            toast('LOG 分析完成：成功 ' + result.totalSuccess + '、NG ' + result.totalDefects + '，共 ' + dateCount + ' 天' + storageNote, storageNote ? 'warning' : 'success');
+            const parsed = parseText(decoded.text, assemblyUploadDate.value, assemblyMappings.value);
+            const pending = { text: decoded.text, fallbackDate: assemblyUploadDate.value, encoding: decoded.encoding, fileName: file.name };
+            if (parsed.unknownMessages.length) {
+                pendingAssemblyUpload.value = pending;
+                assemblyUnknownModal.value = { show: true, items: parsed.unknownMessages, currentIndex: 0, selectedDefectName: '', newDefectName: '' };
+                toast('發現 ' + parsed.unknownMessages.length + ' 個尚未分類的 LOG 訊息，請逐筆設定不良項目', 'warning');
+            } else {
+                await saveAssemblyBatch(pending, parsed);
+            }
         } catch (e) {
             console.error(e);
             toast('LOG 分析失敗：' + e.message, 'error');
@@ -588,11 +743,14 @@ SMT.assembly = function (ctx) {
 
     return {
         assemblyUploadDate, assemblyUploadDateLabel, assemblyUploadDateRelative, assemblyBatchesForDate,
-        assemblyRemoteReady, assemblyRemoteError,
+        assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
         assemblyBatches, assemblyLastFile, assemblyReportResult,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
+        assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
+        getAssemblyReportForDate,
         calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate,
-        setAssemblyQuickMode, shiftAssemblyQuick, renderAssemblyReportChart, renderAssemblyStatsCharts
+        setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
+        renderAssemblyReportChart, renderAssemblyStatsCharts
     };
 };

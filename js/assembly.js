@@ -704,7 +704,7 @@ SMT.assembly = function (ctx) {
         toast('組裝測試 LOG 報表已導出');
     };
 
-    let reportChart = null, statsChart = null, statsPieChart = null;
+    let reportChart = null, statsChart = null, statsPieChart = null, statsDailyChart = null;
     const renderChart = (id, result, previous, setPrevious, onClick) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
@@ -764,6 +764,30 @@ SMT.assembly = function (ctx) {
     const renderAssemblyStatsCharts = () => {
         renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
         renderPieChart('assemblyStatsPieChart', assemblyStatsResult.value, statsPieChart, value => { statsPieChart = value; });
+        Vue.nextTick(() => {
+            const el = document.getElementById('assemblyDailyChart');
+            const result = assemblyStatsResult.value;
+            if (!result?.daily?.length || !el) {
+                if (statsDailyChart) statsDailyChart.dispose();
+                statsDailyChart = null;
+                return;
+            }
+            if (!statsDailyChart || statsDailyChart.getDom() !== el) {
+                if (statsDailyChart) statsDailyChart.dispose();
+                statsDailyChart = echarts.init(el);
+            }
+            statsDailyChart.setOption({
+                tooltip: { trigger: 'axis' },
+                legend: { top: 0, right: 0, textStyle: { fontSize: 11 } },
+                grid: { top: 32, right: 20, bottom: 44, left: 48 },
+                xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } },
+                yAxis: { type: 'value', name: '數量', minInterval: 1, axisLabel: { fontSize: 10 } },
+                series: [
+                    { name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 30, itemStyle: { color: '#2563eb' } },
+                    { name: '停機／不良', type: 'bar', data: result.daily.map(row => row.ng), barMaxWidth: 30, itemStyle: { color: '#dc2626' } }
+                ]
+            });
+        });
     };
 
     assemblyBatches.value = readStorage();
@@ -785,6 +809,7 @@ SMT.assembly = function (ctx) {
         if (reportChart) reportChart.resize();
         if (statsChart) statsChart.resize();
         if (statsPieChart) statsPieChart.resize();
+        if (statsDailyChart) statsDailyChart.resize();
     });
 
     return {

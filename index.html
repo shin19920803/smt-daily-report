@@ -964,19 +964,24 @@
                         <div v-if="assemblyStatsResult.daily.length" id="assemblyDailyChart" style="width:100%;height:320px;"></div>
                         <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
                     </div>
-                    <div v-if="assemblySourceDetail.show" class="section-card p-4 border-l-4 border-red-500">
-                        <div class="flex items-center justify-between gap-2 mb-3">
-                            <h3 class="card-title mb-0"><i class="fas fa-list-ul text-red-600"></i>{{ assemblySourceDetail.category }} 的 LOG 原始細項</h3>
-                            <button @click="closeAssemblySourceDetail" class="btn-ghost text-xs">關閉</button>
-                        </div>
-                        <div v-if="assemblySourceDetail.items.length" class="space-y-2">
-                            <div v-for="item in assemblySourceDetail.items" :key="item.message" class="flex items-center gap-3 p-2 rounded-lg bg-gray-50 border border-gray-100">
-                                <span class="flex-1 text-sm break-all">{{ item.message }}</span>
-                                <span class="font-mono text-sm text-red-600 whitespace-nowrap">{{ item.qty }} 次</span>
-                                <span class="font-mono text-xs text-gray-500 w-16 text-right">{{ item.ratio }}%</span>
+                    <div v-if="assemblySourceDetail.show" class="fixed inset-0 bg-black/50 modal-backdrop flex items-center justify-center z-50 p-4" @click.self="closeAssemblySourceDetail">
+                        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-5 md:p-6 max-h-[85vh] overflow-y-auto animate-fade-in">
+                            <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
+                                <div>
+                                    <h3 class="text-lg font-black text-red-800"><i class="fas fa-list-ul mr-2 text-red-600"></i>{{ assemblySourceDetail.category }} 的 LOG 細項</h3>
+                                    <p class="text-xs text-gray-500 mt-1">此不良共 {{ assemblySourceDetail.total }} 次；以下顯示各原始訊息數量與比例。</p>
+                                </div>
+                                <button @click="closeAssemblySourceDetail" class="btn-ghost text-xs whitespace-nowrap">關閉</button>
                             </div>
+                            <div v-if="assemblySourceDetail.items.length" class="space-y-2">
+                                <div v-for="item in assemblySourceDetail.items" :key="item.message" class="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                                    <span class="flex-1 text-sm leading-5 break-all">{{ item.message }}</span>
+                                    <span class="font-mono text-sm text-red-600 whitespace-nowrap">{{ item.qty }} 次</span>
+                                    <span class="font-mono text-xs text-gray-500 w-16 text-right pt-0.5">{{ item.ratio }}%</span>
+                                </div>
+                            </div>
+                            <div v-else class="text-xs text-gray-500 bg-orange-50 border border-orange-100 rounded-lg p-3">此筆歷史資料尚未保存 LOG 原始細項；重新上傳檔案後即可查看。</div>
                         </div>
-                        <div v-else class="text-xs text-gray-500 bg-orange-50 border border-orange-100 rounded-lg p-3">此筆歷史資料尚未保存 LOG 原始細項；重新上傳檔案後即可查看。</div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4">
@@ -992,9 +997,9 @@
                             <div v-else class="empty-state py-8"><div class="hint">無資料</div></div>
                         </div>
                         <div class="section-card p-4">
-                            <h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>每小時統計</h3>
+                            <h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>每小時統計（每日平均）</h3>
                             <div class="table-wrap max-h-80">
-                                <table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead>
+                                <table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">平均成功</th><th class="text-right">平均 NG</th><th class="text-right">停機率</th></tr></thead>
                                     <tbody><tr v-for="row in assemblyStatsResult.hourly.filter(item => item.total > 0)" :key="row.hour"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyStatsResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody>
                                 </table>
                             </div>
@@ -1002,7 +1007,7 @@
                     </div>
                     <div class="section-card p-4" v-if="assemblyStatsResult.daily.length">
                         <h3 class="card-title"><i class="fas fa-calendar-days text-blue-600"></i>每日明細</h3>
-                        <div class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>日期</th><th class="text-right">生產成功</th><th class="text-right">NG</th><th class="text-right">總紀錄</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyStatsResult.daily" :key="row.date"><td class="font-mono font-bold">{{ row.date }}</td><td class="text-right">{{ row.success }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right">{{ row.total }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr></tbody></table></div>
+                        <div class="table-wrap"><table class="data-table min-w-[480px]"><thead><tr><th>日期</th><th class="text-right">生產成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyStatsResult.daily" :key="row.date"><td class="font-mono font-bold">{{ row.date }}</td><td class="text-right">{{ row.success }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr></tbody></table></div>
                     </div>
                 </template>
             </div>
@@ -1681,7 +1686,7 @@
 <script src="js/core.js?v=202608052300"></script>
 <script src="js/orders.js?v=202608052100"></script>
 <script src="js/report.js?v=202608052100"></script>
-<script src="js/assembly.js?v=202608052300"></script>
+<script src="js/assembly.js?v=202608052310"></script>
 <script src="js/daf.js?v=202608052100"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>

@@ -360,9 +360,9 @@ SMT.assembly = function (ctx) {
             downtimeRate: (day.success ? day.ng / day.success * 100 : 0).toFixed(2),
             ngRate: day.success + day.ng ? (day.ng / (day.success + day.ng) * 100).toFixed(2) : '0.00'
         }));
-        const periodDays = start && end
-            ? Math.max(1, Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / 86400000) + 1)
-            : Math.max(1, daily.length);
+        // 每小時平均只除以實際有成功或 NG 紀錄的作業日期，排除篩選區間內無作業的日期。
+        const operationDays = daily.filter(day => day.success + day.ng > 0).length;
+        const periodDays = Math.max(1, operationDays);
         const averagePerDay = value => Number((value / periodDays).toFixed(2));
         const hourly = Array.from({ length: 24 }, (_, i) => {
             const hour = String(i).padStart(2, '0');
@@ -381,7 +381,7 @@ SMT.assembly = function (ctx) {
             yieldRate: successRate.toFixed(2),
             downtimeRate: (success ? ng / success * 100 : 0).toFixed(2),
             byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
-            periodDays, totalDays: daily.length, topCause: byTypeList[0] || null
+            periodDays, totalDays: operationDays, topCause: byTypeList[0] || null
         };
     };
 

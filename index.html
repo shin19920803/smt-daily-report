@@ -27,6 +27,18 @@
         </div>
     </div>
 
+    <!-- 基本刪除權限 -->
+    <div v-if="permissionModal.show" class="fixed inset-0 bg-black/50 modal-backdrop flex items-center justify-center z-[70] p-4" @click.self="cancelPermission">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-fade-in">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><i class="fas fa-lock"></i></div>
+                <div><h3 class="font-black text-gray-800">{{ permissionModal.title }}</h3><p class="text-xs text-gray-500 mt-1">請輸入目前產線密碼後繼續。</p></div>
+            </div>
+            <input type="password" v-model="permissionModal.password" @keyup.enter="submitPermission" @keyup.esc="cancelPermission" autocomplete="off" autofocus class="w-full border border-gray-200 p-3 rounded-lg text-center font-mono tracking-widest" placeholder="輸入密碼" aria-label="產線密碼">
+            <div class="flex justify-end gap-2 mt-4"><button @click="cancelPermission" class="btn-ghost">取消</button><button @click="submitPermission" class="btn-primary"><i class="fas fa-unlock mr-1"></i>確認</button></div>
+        </div>
+    </div>
+
     <!-- Desktop Sidebar -->
     <aside class="hidden md:flex w-60 flex-col flex-shrink-0" style="background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);">
         <div class="p-4 border-b border-slate-700/50">
@@ -1666,17 +1678,17 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608051600"></script>
-<script src="js/orders.js?v=202608041323"></script>
-<script src="js/report.js?v=202608041323"></script>
-<script src="js/assembly.js?v=202608051600"></script>
-<script src="js/daf.js?v=202608051930"></script>
-<script src="js/fpy.js?v=202608041323"></script>
-<script src="js/ooc.js?v=202608041323"></script>
+<script src="js/core.js?v=202608052100"></script>
+<script src="js/orders.js?v=202608052100"></script>
+<script src="js/report.js?v=202608052100"></script>
+<script src="js/assembly.js?v=202608052100"></script>
+<script src="js/daf.js?v=202608052100"></script>
+<script src="js/fpy.js?v=202608052100"></script>
+<script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608051800"></script>
 <script src="js/stats.js?v=202608041323"></script>
-<script src="js/equipment.js?v=202608041323"></script>
-<script src="js/settings.js?v=202608051930"></script>
+<script src="js/equipment.js?v=202608052100"></script>
+<script src="js/settings.js?v=202608052100"></script>
 <script src="js/app.js?v=202608051600"></script>
 </body>
 </html>

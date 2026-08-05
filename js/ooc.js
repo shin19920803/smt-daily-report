@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.ooc = function (ctx) {
-        const { data, toast, loading, calendarYear, calendarMonth, currentLine } = ctx;
+        const { data, toast, loading, calendarYear, calendarMonth, currentLine, requestPermission } = ctx;
         const oocForm = ref({ id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' });
         const oocHistory = ref([]);
         const showOocModal = ref(false);
@@ -33,7 +33,7 @@ SMT.ooc = function (ctx) {
             } catch(e) { toast("失敗: " + e.message + " (若無 notes 欄位請忽略此欄)", "error"); } finally { loading.value = false; }
         };
         const loadOocHistory = async () => { const { data: list } = await _supabase.from('ooc_records').select('*, work_orders(wo_number, models(name)), machines(name), ooc_causes(name)').eq('line', currentLine.value).order('production_date', {ascending:false}).limit(200); if(list) oocHistory.value = list; };
-        const deleteOoc = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('ooc_records').delete().eq('id', id); loadOocHistory(); toast("已刪除", "info"); };
+        const deleteOoc = async (id) => { if(!confirm("確定刪除？")) return; if (!(await requestPermission('刪除 OOC 紀錄'))) return; await _supabase.from('ooc_records').delete().eq('id', id); loadOocHistory(); toast("已刪除", "info"); };
         const openOocDayDetail = (day) => { oocDayModal.value = { show: true, date: day.dateStr, list: day.items }; };
         return {
             oocForm, oocHistory, showOocModal, selectedOocId, oocDayModal,

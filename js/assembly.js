@@ -360,10 +360,14 @@ SMT.assembly = function (ctx) {
             downtimeRate: (day.success ? day.ng / day.success * 100 : 0).toFixed(2),
             ngRate: day.success + day.ng ? (day.ng / (day.success + day.ng) * 100).toFixed(2) : '0.00'
         }));
+        const periodDays = start && end
+            ? Math.max(1, Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / 86400000) + 1)
+            : Math.max(1, daily.length);
+        const averagePerDay = value => Number((value / periodDays).toFixed(2));
         const hourly = Array.from({ length: 24 }, (_, i) => {
             const hour = String(i).padStart(2, '0');
-            const production = hourlySuccess[hour] || 0;
-            const hourlyNgCount = hourlyNg[hour] || 0;
+            const production = averagePerDay(hourlySuccess[hour] || 0);
+            const hourlyNgCount = averagePerDay(hourlyNg[hour] || 0);
             const total = production + hourlyNgCount;
             return {
                 hour, label: hour + ':00–' + hour + ':59', production, ng: hourlyNgCount, total,
@@ -377,7 +381,7 @@ SMT.assembly = function (ctx) {
             yieldRate: successRate.toFixed(2),
             downtimeRate: (success ? ng / success * 100 : 0).toFixed(2),
             byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
-            totalDays: daily.length, topCause: byTypeList[0] || null
+            periodDays, totalDays: daily.length, topCause: byTypeList[0] || null
         };
     };
 
@@ -685,14 +689,14 @@ SMT.assembly = function (ctx) {
         const range = (assemblyStatsFilter.value.start || '不限') + ' ~ ' + (assemblyStatsFilter.value.end || '不限');
         const summary = [
             ['統計區間', range], ['產出成功', result.totalSuccess], ['NG / 停機不良', result.totalDefects],
-            ['停機率', result.downtimeRate + '%'], ['LOG 總紀錄', result.totalRecords],
+            ['停機率', result.downtimeRate + '%'], ['LOG 總紀錄', result.totalRecords], ['每小時平均天數', result.periodDays],
             ['忽略行數', result.ignored], ['未分類行數', result.unclassified], [],
             ['停機／不良原因', '次數', '佔 NG 比例'],
             ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])
         ];
-        const daily = [['日期', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '停機率'],
-            ...result.daily.map(row => [row.date, row.success, row.ng, row.total, row.downtimeRate + '%'])];
-        const hourly = [['時段', '生產成功', 'NG 次數', '成功與 NG 總紀錄', '停機率'],
+        const daily = [['日期', '生產成功', 'NG 次數', '停機率'],
+            ...result.daily.map(row => [row.date, row.success, row.ng, row.downtimeRate + '%'])];
+        const hourly = [['時段', '平均每日生產成功', '平均每日 NG', '平均每日紀錄', '停機率'],
             ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
         const sourceDetails = [['停機／不良項目', 'LOG 原始訊息', '次數', '占該分類比例'],
             ...result.byType.flatMap(row => (row.sourceItems || []).map(item => [row.name, item.message, item.qty, item.ratio + '%']))];
@@ -737,7 +741,7 @@ SMT.assembly = function (ctx) {
         });
     };
     const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; });
-    const renderPieChart = (id, result, previous, setPrevious) => {
+    const renderPieChart = (id, result, previous, setPrevious, onClick) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
             if (!result || !result.byType.length || !el) {
@@ -753,18 +757,24 @@ SMT.assembly = function (ctx) {
             previous.setOption({
                 tooltip: { trigger: 'item', formatter: '{b}<br/>數量：{c}<br/>比例：{d}%' },
                 legend: { show: false },
-                series: [{ type: 'pie', radius: ['38%', '68%'], center: ['34%', '50%'], avoidLabelOverlap: true,
+                series: [{ type: 'pie', radius: ['38%', '68%'], center: ['50%', '50%'], avoidLabelOverlap: true,
                     itemStyle: { borderColor: '#fff', borderWidth: 2 },
                     label: { show: false },
                     labelLine: { show: false },
                     data: result.byType.map(row => ({ name: row.name, value: row.qty }))
                 }]
             });
+            if (previous.off) previous.off('click');
+            if (onClick && previous.on) {
+                previous.on('click', params => {
+                    if (params?.componentType === 'series' && params.name) onClick(params.name);
+                });
+            }
         });
     };
     const renderAssemblyStatsCharts = () => {
         renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
-        renderPieChart('assemblyStatsPieChart', assemblyStatsResult.value, statsPieChart, value => { statsPieChart = value; });
+        renderPieChart('assemblyStatsPieChart', assemblyStatsResult.value, statsPieChart, value => { statsPieChart = value; }, openAssemblySourceDetail);
         Vue.nextTick(() => {
             const el = document.getElementById('assemblyDailyChart');
             const result = assemblyStatsResult.value;

@@ -8,11 +8,16 @@ SMT.settings = function (ctx) {
             machines: { title: '機台清單', colorClass: 'text-purple-600', btnColor: 'bg-purple-600', input: '', placeholder: '機台名稱', field: 'name' },
             ooc_causes: { title: 'OOC 原因', colorClass: 'text-pink-600', btnColor: 'bg-pink-600', input: '', placeholder: '異常原因', field: 'name' }
         });
-        const hiddenSettingKeys = new Set(['defect_locations', 'machines', 'ooc_causes']);
-        const visibleSettingConfig = computed(() => currentLine.value === 'ASSY'
-            ? Object.fromEntries(Object.entries(settingConfig.value).filter(([key]) => !hiddenSettingKeys.has(key)))
-            : settingConfig.value
-        );
+        const hiddenSettingKeysByLine = {
+            ASSY: new Set(['defect_locations', 'machines', 'ooc_causes']),
+            DAF: new Set(['defect_locations', 'ooc_causes'])
+        };
+        const visibleSettingConfig = computed(() => {
+            const hiddenKeys = hiddenSettingKeysByLine[currentLine.value];
+            return hiddenKeys
+                ? Object.fromEntries(Object.entries(settingConfig.value).filter(([key]) => !hiddenKeys.has(key)))
+                : settingConfig.value;
+        });
         const showEquipmentModelSettings = computed(() => currentLine.value !== 'ASSY');
         const editingId = ref(null); const editingValue = ref('');
         const sortedList = (key) => { 

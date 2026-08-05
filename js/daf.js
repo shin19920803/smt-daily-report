@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 
 // DAF 檔案統計：依 Google Colab 版本的 C／E／G／I／J 欄位規則分析。
 SMT.daf = function (ctx) {
-    const { toast, loading, currentLine, currentTab, data } = ctx;
+    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
@@ -158,12 +158,15 @@ SMT.daf = function (ctx) {
             if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: match[1] });
             if (!match) unknownProductCodes.push(raw);
         });
+        const unknownWorkOrders = new Map(unknownProductCodes.map(code => [normalizeText(code), new Set()]));
+        rows.forEach(row => {
+            const code = normalizeText(row[COL_PRODUCT_CODE]);
+            const workOrder = cleanText(row[COL_WORK_ORDER]);
+            if (unknownWorkOrders.has(code) && workOrder) unknownWorkOrders.get(code).add(workOrder);
+        });
         const unknownProductDetails = unknownProductCodes.map(code => ({
             code,
-            workOrders: [...new Set(rows
-                .filter(row => normalizeText(row[COL_PRODUCT_CODE]) === normalizeText(code))
-                .map(row => cleanText(row[COL_WORK_ORDER]))
-                .filter(Boolean))]
+            workOrders: [...(unknownWorkOrders.get(normalizeText(code)) || [])]
         }));
         const models = [...new Set(matched.map(item => item.model).filter(Boolean))];
         return {
@@ -508,6 +511,38 @@ SMT.daf = function (ctx) {
     const closeDafDefectDetail = () => {
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
     };
+    const ensureDafBaseSettings = async batch => {
+        const modelNames = [...new Set((batch.records || []).flatMap(record => cleanText(record.model).split('、').map(cleanText).filter(model => model && model !== '未識別機種')))];
+        const defectNames = [...new Set((batch.records || []).filter(record => record.isDefect).map(record => cleanText(record.defect)).filter(Boolean))];
+        if (!modelNames.length && !defectNames.length) return;
+        try {
+            const [{ data: existingModels, error: modelReadError }, { data: existingDefects, error: defectReadError }] = await Promise.all([
+                _supabase.from('models').select('name').eq('line', 'DAF'),
+                _supabase.from('defect_types').select('name').eq('line', 'DAF')
+            ]);
+            if (modelReadError || defectReadError) throw modelReadError || defectReadError;
+            const modelSet = new Set((existingModels || []).map(row => normalizeText(row.name)));
+            const defectSet = new Set((existingDefects || []).map(row => normalizeText(row.name)));
+            const missingModels = modelNames.filter(name => !modelSet.has(normalizeText(name)));
+            const missingDefects = defectNames.filter(name => !defectSet.has(normalizeText(name)));
+            let created = 0;
+            for (const name of missingModels) {
+                const { error } = await _supabase.from('models').insert({ name, line: 'DAF' });
+                if (!error) created++;
+            }
+            for (const name of missingDefects) {
+                const { error } = await _supabase.from('defect_types').insert({ name, line: 'DAF' });
+                if (!error) created++;
+            }
+            if (created && loadBaseData) await loadBaseData();
+            if (missingModels.length || missingDefects.length) {
+                toast(`DAF 已自動新增基礎設定：機種 ${missingModels.length} 項、不良現象 ${missingDefects.length} 項`, 'info');
+            }
+        } catch (error) {
+            console.warn('DAF 基礎設定自動同步失敗', error);
+            toast('DAF 檔案已分析，但基礎設定自動新增失敗', 'warning');
+        }
+    };
     const finishDafUploadQueue = queue => {
         persistStorage();
         dafUploadSummary.value = { files: queue.success, rows: queue.rows, failed: queue.failed };
@@ -530,6 +565,7 @@ SMT.daf = function (ctx) {
                     toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
+                await ensureDafBaseSettings(batch);
                 const remoteSaved = await saveRemote(batch);
                 dafBatches.value = [batch, ...dafBatches.value].slice(0, 200);
                 dafLastUpload.value = batch;

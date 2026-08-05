@@ -113,6 +113,11 @@ SMT.dashboard = function (ctx) {
             }
         };
         const initDafDashboardCharts = async () => {
+            if (!getDafDashboardForDate) {
+                dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
+                dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
+                return;
+            }
             const dates = getDafUploadedDates ? getDafUploadedDates(14) : [];
             const reports = dates.map(date => getDafDashboardForDate(date));
             const current = dafDashboardResult.value || getDafDashboardForDate(dashDate.value);

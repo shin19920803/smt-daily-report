@@ -50,6 +50,10 @@ SMT.assembly = function (ctx) {
     const shiftAssemblyUploadDate = (amount) => {
         assemblyUploadDate.value = dayOffset(assemblyUploadDate.value, amount);
     };
+    const setAssemblyDateFromParsedLog = (parsed, fallbackDate) => {
+        const dates = Object.keys(parsed?.buckets || {}).sort();
+        assemblyUploadDate.value = dates[dates.length - 1] || fallbackDate;
+    };
 
     const RULES = [
         { keywords: ['取图像成功', '取圖像成功'], category: '生產成功', type: 'SUCCESS' },
@@ -619,8 +623,10 @@ SMT.assembly = function (ctx) {
         loading.value = true;
         try {
             const decoded = decodeBytes(await file.arrayBuffer());
-            const parsed = parseText(decoded.text, assemblyUploadDate.value, assemblyMappings.value);
-            const pending = { text: decoded.text, fallbackDate: assemblyUploadDate.value, encoding: decoded.encoding, fileName: file.name };
+            const fallbackDate = today();
+            const parsed = parseText(decoded.text, fallbackDate, assemblyMappings.value);
+            setAssemblyDateFromParsedLog(parsed, fallbackDate);
+            const pending = { text: decoded.text, fallbackDate, encoding: decoded.encoding, fileName: file.name };
             if (parsed.unknownMessages.length) {
                 pendingAssemblyUpload.value = pending;
                 assemblyUnknownModal.value = { show: true, items: parsed.unknownMessages, currentIndex: 0, selectedDefectName: '', newDefectName: '' };

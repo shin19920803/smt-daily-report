@@ -264,14 +264,15 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-orange-800"><i class="fas fa-file-lines mr-2"></i>組裝測試 LOG 報工</h3>
-                            <p class="text-xs text-gray-400 mt-1">選擇日期後直接上傳機台 TXT / LOG，系統會自動整理產出成功與停機不良。</p>
+                            <p class="text-xs text-gray-400 mt-1">直接上傳機台 TXT / LOG，系統會依 LOG 內日期自動整理產出成功與停機不良。</p>
                         </div>
                         <span v-if="assemblyCloudReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
+                        <span v-else-if="assemblyRemoteReady" class="badge-hint text-orange-700" :title="assemblyRemoteError"><i class="fas fa-cloud-arrow-up"></i>LOG 已同步／分類待設定</span>
                         <span v-else class="badge-hint text-orange-700" :title="assemblyRemoteError"><i class="fas fa-laptop"></i>目前僅本機保存</span>
                     </div>
                     <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
                         <div class="w-full md:w-80">
-                            <label class="block text-xs font-bold text-gray-400 mb-1">報工日期</label>
+                            <label class="block text-xs font-bold text-gray-400 mb-1">查看日期</label>
                             <div class="quick-nav w-full">
                                 <button @click="shiftAssemblyUploadDate(-1)" class="quick-arrow" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left"></i></button>
                                 <div class="quick-range flex-1">
@@ -280,7 +281,6 @@
                                 </div>
                                 <button @click="shiftAssemblyUploadDate(1)" class="quick-arrow" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right"></i></button>
                             </div>
-                            <input type="date" v-model="assemblyUploadDate" class="w-full border border-gray-200 p-2 rounded-lg mt-2">
                         </div>
                         <label class="btn-primary cursor-pointer text-center">
                             <i class="fas fa-upload mr-1"></i>選擇 LOG 檔案
@@ -299,7 +299,7 @@
                             <button @click="deleteAssemblyBatch(batch.id)" class="text-red-400 hover:text-red-600 px-1" title="刪除此上傳統計"><i class="fas fa-trash-alt"></i></button>
                         </div>
                     </div>
-                    <div class="mt-3 text-xs text-gray-400">LOG 內有日期時依 LOG 日期統計；沒有日期的行會歸到上方選定日期。</div>
+                    <div class="mt-3 text-xs text-gray-400">上傳後會自動切換到 LOG 內最新日期；沒有日期的行會歸到今天。可用左右箭頭查看其他日期。</div>
                 </div>
 
                 <div v-if="assemblyUnknownModal.show" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4">
@@ -359,7 +359,7 @@
                         <div v-else class="empty-state py-8"><i class="fas fa-circle-check text-green-500"></i><div class="hint">本日沒有停機／不良</div></div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-12"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 LOG 統計</div><div class="hint">請選擇日期並上傳機台 LOG 檔案</div></div></div>
+                <div v-else class="section-card"><div class="empty-state py-12"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 LOG 統計</div><div class="hint">請上傳機台 LOG 檔案，系統會自動偵測日期</div></div></div>
             </div>
 
             <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">

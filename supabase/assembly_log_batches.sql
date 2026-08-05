@@ -37,3 +37,6 @@ create index if not exists assembly_log_mappings_line_idx
 alter table public.assembly_log_mappings disable row level security;
 grant select, insert, update, delete on public.assembly_log_mappings to anon, authenticated;
 grant usage, select on sequence public.assembly_log_mappings_id_seq to anon, authenticated;
+
+-- 立即讓 Supabase API 重新載入新資料表結構。
+notify pgrst, 'reload schema';

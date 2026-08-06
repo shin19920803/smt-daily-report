@@ -78,12 +78,23 @@ SMT.core = function (ctx) {
         const todayStr = new Date().toISOString().split('T')[0];
         const loadBaseData = async () => {
             const L = currentLine.value;
+            if (L !== 'SMT') {
+                const [mo, dt] = await Promise.all([
+                    _supabase.from('models').select('*').eq('line', L),
+                    _supabase.from('defect_types').select('*').eq('line', L)
+                ]);
+                data.value = { workOrders: [], models: mo.data || [], defectTypes: dt.data || [], defectLocations: [], machines: [], oocCauses: [] };
+                return;
+            }
             const [wo, mo, dt, dl, mac, oc] = await Promise.all([
                 _supabase.from('work_orders').select('*, models(name), daily_production(production_date, input_quantity)').eq('line', L).order('created_at', {ascending: false}),
-                _supabase.from('models').select('*').eq('line', L), _supabase.from('defect_types').select('*').eq('line', L), _supabase.from('defect_locations').select('*').eq('line', L),
-                _supabase.from('machines').select('*').eq('line', L), _supabase.from('ooc_causes').select('*').eq('line', L)
+                _supabase.from('models').select('*').eq('line', L),
+                _supabase.from('defect_types').select('*').eq('line', L),
+                _supabase.from('defect_locations').select('*').eq('line', L),
+                _supabase.from('machines').select('*').eq('line', L),
+                _supabase.from('ooc_causes').select('*').eq('line', L)
             ]);
-            data.value.workOrders = (wo.data || []).map(w => ({ ...w, current_input: w.daily_production.reduce((sum, d) => sum + d.input_quantity, 0) })); 
+            data.value.workOrders = (wo.data || []).map(w => ({ ...w, current_input: (w.daily_production || []).reduce((sum, d) => sum + (Number(d.input_quantity) || 0), 0) }));
             data.value.models = mo.data || []; data.value.defectTypes = dt.data || []; data.value.defectLocations = dl.data || [];
             data.value.machines = mac.data || []; data.value.oocCauses = oc.data || [];
         };
@@ -110,19 +121,13 @@ SMT.core = function (ctx) {
                 if (ctx.selectedFeederId) ctx.selectedFeederId.value = null;
                 if (ctx.selectedNozzleModelId) ctx.selectedNozzleModelId.value = null;
                 if (ctx.calHistory) ctx.calHistory.value = [];
-                await loadBaseData();
-                await Promise.all([
-                    ctx.loadHistory && ctx.loadHistory(),
-                    ctx.loadFpyHistory && ctx.loadFpyHistory(),
-                    ctx.loadOocHistory && ctx.loadOocHistory(),
-                    ctx.loadEqData && ctx.loadEqData(),
-                    ctx.loadNozzleLogs && ctx.loadNozzleLogs(),
-                    ctx.loadAssemblyData && ctx.loadAssemblyData(),
-                    ctx.loadDafData && ctx.loadDafData()
-                ]);
-                if (ctx.loadFeeders) await ctx.loadFeeders();   // 需要 eqData 先就緒
-                if (ctx.refreshDashboard) await ctx.refreshDashboard();
-                if (ctx.initDashboardCharts && currentTab.value === 'dashboard') await ctx.initDashboardCharts();
+                const isSmt = target === 'SMT';
+                const tasks = [loadBaseData(), ctx.loadAssemblyData && ctx.loadAssemblyData(), ctx.loadDafData && ctx.loadDafData()];
+                if (isSmt) tasks.push(ctx.loadHistory && ctx.loadHistory(), ctx.loadFpyHistory && ctx.loadFpyHistory(), ctx.loadOocHistory && ctx.loadOocHistory(), ctx.loadEqData && ctx.loadEqData());
+                await Promise.all(tasks);
+                if (isSmt) await Promise.all([ctx.loadFeeders && ctx.loadFeeders(), ctx.loadNozzleLogs && ctx.loadNozzleLogs()]);
+                const refreshed = ctx.refreshDashboard ? await ctx.refreshDashboard() : true;
+                if (refreshed !== false && ctx.initDashboardCharts && currentTab.value === 'dashboard') await ctx.initDashboardCharts();
             } finally { loading.value = false; }
             toast(`已切換至 ${currentLineMeta.value.label}`, 'info');
         };

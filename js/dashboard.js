@@ -8,7 +8,7 @@ SMT.dashboard = function (ctx) {
         const dashboardRecentOoc = ref([]);
         const dashDate = ref(new Date().toISOString().split('T')[0]);
         const dashboardDetail = ref({ show: false, title: '', subtitle: '', metrics: [], sections: [], allowNote: false, noteKey: '', note: '' });
-        const smtDashboardData = ref({ production: [], byType: [], byLocation: [], byModel: [], byWorkOrder: [], weekDays: [], weekRange: null });
+        const smtDashboardData = ref({ production: [], byType: [], byLocation: [], byModel: [], byWorkOrder: [], weekDays: [], trendDays: [], weekRange: null });
         const assemblyWeekDays = ref([]);
         const dafWeekDays = ref([]);
 
@@ -99,7 +99,19 @@ SMT.dashboard = function (ctx) {
                 ]
             };
         };
-        const buildSmtDashboardData = (rows, weekRows, weekRange) => {
+        const buildSmtTrendData = rows => {
+            const dayMap = {};
+            normalizeSmtRows(rows).forEach(row => {
+                const day = dayMap[row.date] || (dayMap[row.date] = { date: row.date, input: 0, defects: 0 });
+                day.input += row.input;
+                day.defects += row.defects;
+            });
+            return Object.values(dayMap)
+                .filter(day => day.input > 0)
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map(day => ({ ...day, yieldRate: calcYield(day.input, day.defects) }));
+        };
+        const buildSmtDashboardData = (rows, weekRows, weekRange, trendRows = []) => {
             const normalized = normalizeSmtRows(rows);
             const typeAgg = {}, locationAgg = {}, modelAgg = {}, workOrderAgg = {};
             normalized.forEach(row => {
@@ -187,7 +199,7 @@ SMT.dashboard = function (ctx) {
                 byLocation: listFromMap(Object.fromEntries(Object.entries(locationAgg).map(([key, value]) => [key, value.qty])), defects, (key) => locationDetail(key, locationAgg[key])),
                 byModel: listFromMap(Object.fromEntries(Object.entries(modelAgg).map(([key, value]) => [key, value.input])), input, (key) => modelDetail(key, modelAgg[key])),
                 byWorkOrder: listFromMap(Object.fromEntries(Object.entries(workOrderAgg).map(([key, value]) => [key, value.input])), input, (key) => workOrderDetail(key, workOrderAgg[key])),
-                weekDays, weekRange
+                weekDays, trendDays: buildSmtTrendData(trendRows), weekRange
             };
         };
 
@@ -195,16 +207,18 @@ SMT.dashboard = function (ctx) {
             const d = new Date(dashDate.value);
             d.setDate(d.getDate() + delta);
             dashDate.value = d.toISOString().split('T')[0];
-            refreshDashboard();
         };
 
+        let dashboardRefreshId = 0;
         const refreshDashboard = async () => {
+            const requestId = ++dashboardRefreshId;
+            const line = currentLine.value;
             if (currentLine.value === 'ASSY') {
                 assemblyDashboardResult.value = getAssemblyReportForDate(dashDate.value);
                 const uploadedDates = getAssemblyUploadedDates ? getAssemblyUploadedDates(200) : [];
                 if (!assemblyDashboardResult.value.totalRecords && dashDate.value === new Date().toISOString().split('T')[0] && uploadedDates.length) {
                     dashDate.value = uploadedDates[uploadedDates.length - 1];
-                    return;
+                    return false;
                 }
                 const weekRange = getWeekRange(dashDate.value);
                 assemblyWeekDays.value = (getAssemblyUploadedDates ? getAssemblyUploadedDates(200) : [])
@@ -215,7 +229,7 @@ SMT.dashboard = function (ctx) {
                 dashboard.value = { activeWoCount: 0, todayInput: assemblyDashboardResult.value.totalSuccess, todayDefects: assemblyDashboardResult.value.totalDefects, todayYield: assemblyDashboardResult.value.downtimeRate, monthOocCount: 0, weekAvgYield: weeklyDowntime.length ? (weeklyDowntime.reduce((sum, value) => sum + value, 0) / weeklyDowntime.length).toFixed(2) : '0.00' };
                 dashboardRecentProds.value = [];
                 dashboardRecentOoc.value = [];
-                return;
+                return requestId === dashboardRefreshId;
             }
             if (currentLine.value === 'DAF') {
                 const uploadedDates = getDafUploadedDates ? getDafUploadedDates(200) : [];
@@ -223,10 +237,12 @@ SMT.dashboard = function (ctx) {
                     dafDashboardResult.value = null;
                 } else {
                     const current = getDafDashboardForDate(dashDate.value);
-                    if (!current.sourceFiles.length && dashDate.value === new Date().toISOString().split('T')[0] && uploadedDates.length) {
-                        dashDate.value = uploadedDates[uploadedDates.length - 1];
-                        return;
+                    const fallbackDate = uploadedDates[uploadedDates.length - 1];
+                    if (!current.sourceFiles.length && fallbackDate && dashDate.value !== fallbackDate) {
+                        dashDate.value = fallbackDate;
+                        return false;
                     }
+                    if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
                     dafDashboardResult.value = current;
                     const weekRange = getWeekRange(dashDate.value);
                     dafWeekDays.value = (getDafUploadedDates ? getDafUploadedDates(200) : [])
@@ -238,16 +254,22 @@ SMT.dashboard = function (ctx) {
                 }
                 dashboardRecentProds.value = [];
                 dashboardRecentOoc.value = [];
-                return;
+                return requestId === dashboardRefreshId;
             }
             dashboard.value.activeWoCount = activeWoNumbers.value.length;
             const targetDate = dashDate.value;
             const weekRange = getWeekRange(targetDate);
-            const [todayRows, weekRows] = await Promise.all([
-                loadSmtDateRows(targetDate),
-                loadSmtDateRows(weekRange.start, weekRange.end)
-            ]);
-            const smtData = buildSmtDashboardData(todayRows, weekRows, weekRange);
+            const trendStartDate = new Date(`${targetDate}T00:00:00`);
+            trendStartDate.setDate(trendStartDate.getDate() - 13);
+            const trendStart = fmtDate(trendStartDate);
+            const queryStart = [trendStart, weekRange.start, targetDate].sort()[0];
+            const queryEnd = [targetDate, weekRange.end].sort().pop();
+            const rangeRows = await loadSmtDateRows(queryStart, queryEnd);
+            if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
+            const todayRows = rangeRows.filter(row => row.production_date === targetDate);
+            const weekRows = rangeRows.filter(row => row.production_date >= weekRange.start && row.production_date <= weekRange.end);
+            const trendRows = rangeRows.filter(row => row.production_date >= trendStart && row.production_date <= targetDate);
+            const smtData = buildSmtDashboardData(todayRows, weekRows, weekRange, trendRows);
             smtDashboardData.value = smtData;
             dashboardRecentProds.value = smtData.production;
             dashboardRecentOoc.value = [];
@@ -262,6 +284,7 @@ SMT.dashboard = function (ctx) {
                 monthOocCount: 0,
                 weekAvgYield: weekYields.length ? (weekYields.reduce((sum, value) => sum + value, 0) / weekYields.length).toFixed(2) : '0.00'
             };
+            return true;
         };
         const openSmtInputDetail = () => openDashboardDetail({
             title: `${dashDate.value} 當日投入`, subtitle: `依工單查看投入數量`,
@@ -363,18 +386,37 @@ SMT.dashboard = function (ctx) {
         let dashDafDailyChartInst = null;
         let dashDafReasonChartInst = null;
         const disposeChart = (chart) => { if (chart) chart.dispose(); return null; };
-        const initAssemblyDashboardCharts = async () => {
+        const ensureDashboardChart = (chart, el) => {
+            if (!el) return disposeChart(chart);
+            if (chart && chart.getDom() === el) return chart;
+            if (chart) chart.dispose();
+            const existing = echarts.getInstanceByDom ? echarts.getInstanceByDom(el) : null;
+            if (existing) existing.dispose();
+            return echarts.init(el);
+        };
+        const setDashboardOption = (chart, option) => {
+            chart.clear();
+            chart.setOption(option, { notMerge: true, lazyUpdate: false });
+        };
+        const waitForDashboardLayout = async () => {
+            await Vue.nextTick();
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        };
+        let dashboardChartRequestId = 0;
+        const canRenderDashboard = (requestId, line) => requestId === dashboardChartRequestId && currentTab.value === 'dashboard' && currentLine.value === line;
+        const initAssemblyDashboardCharts = async (requestId, line) => {
             const target = dashDate.value;
             const days = getAssemblyUploadedDates(14);
             const reports = days.map(date => getAssemblyReportForDate(date));
             const labels = days.map(d => d.slice(5));
             const downtime = reports.map(result => result.totalRecords > 0 ? parseFloat(result.downtimeRate) : null);
             const current = assemblyDashboardResult.value || getAssemblyReportForDate(target);
-            await Vue.nextTick();
+            await waitForDashboardLayout();
+            if (!canRenderDashboard(requestId, line)) return;
             const downtimeEl = document.getElementById('dashAssemblyDowntimeChart');
             if (downtimeEl) {
-                if (!dashAssemblyDowntimeChartInst) dashAssemblyDowntimeChartInst = echarts.init(downtimeEl);
-                dashAssemblyDowntimeChartInst.setOption({
+                dashAssemblyDowntimeChartInst = ensureDashboardChart(dashAssemblyDowntimeChartInst, downtimeEl);
+                setDashboardOption(dashAssemblyDowntimeChartInst, {
                     grid:{top:28,right:20,bottom:36,left:48},
                     tooltip:{trigger:'axis',formatter:p=>{const v=p[0];return v.name+'<br/>'+(v.value!==null?'<b>'+v.value+'%</b>':'無資料');}},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
@@ -386,9 +428,9 @@ SMT.dashboard = function (ctx) {
             }
             const reasonEl = document.getElementById('dashAssemblyReasonChart');
             if (reasonEl) {
-                if (!dashAssemblyReasonChartInst) dashAssemblyReasonChartInst = echarts.init(reasonEl);
+                dashAssemblyReasonChartInst = ensureDashboardChart(dashAssemblyReasonChartInst, reasonEl);
                 const rows = (current?.byType || []).slice(0, 10).reverse();
-                dashAssemblyReasonChartInst.setOption({
+                setDashboardOption(dashAssemblyReasonChartInst, {
                     grid:{top:12,right:20,bottom:24,left:112},
                     tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>p[0].name+'<br/><b>'+p[0].value+' 次</b>'},
                     xAxis:{type:'value',splitLine:{lineStyle:{color:'#f3f4f6'}},axisLabel:{fontSize:10,color:'#9ca3af'}},
@@ -399,7 +441,7 @@ SMT.dashboard = function (ctx) {
                 if (dashAssemblyReasonChartInst.on) dashAssemblyReasonChartInst.on('click', params => { const row = (current?.byType || []).find(item => item.name === params.name); if (row) openDashboardDetail(assemblyReasonDetail(row)); });
             }
         };
-        const initDafDashboardCharts = async () => {
+        const initDafDashboardCharts = async (requestId, line) => {
             if (!getDafDashboardForDate) {
                 dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
                 dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
@@ -408,14 +450,12 @@ SMT.dashboard = function (ctx) {
             const dates = getDafUploadedDates ? getDafUploadedDates(14) : [];
             const reports = dates.map(date => getDafDashboardForDate(date));
             const current = dafDashboardResult.value || getDafDashboardForDate(dashDate.value);
-            await Vue.nextTick();
+            await waitForDashboardLayout();
+            if (!canRenderDashboard(requestId, line)) return;
             const dailyEl = document.getElementById('dashDafDailyChart');
             if (dailyEl && dates.length) {
-                if (!dashDafDailyChartInst || dashDafDailyChartInst.getDom() !== dailyEl) {
-                    dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
-                    dashDafDailyChartInst = echarts.init(dailyEl);
-                }
-                dashDafDailyChartInst.setOption({
+                dashDafDailyChartInst = ensureDashboardChart(dashDafDailyChartInst, dailyEl);
+                setDashboardOption(dashDafDailyChartInst, {
                     grid: { top: 30, right: 20, bottom: 36, left: 48 },
                     tooltip: { trigger: 'axis' },
                     legend: { top: 0, right: 0, textStyle: { fontSize: 11 } },
@@ -432,12 +472,9 @@ SMT.dashboard = function (ctx) {
             } else dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
             const reasonEl = document.getElementById('dashDafReasonChart');
             if (reasonEl && current?.byType?.length) {
-                if (!dashDafReasonChartInst || dashDafReasonChartInst.getDom() !== reasonEl) {
-                    dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
-                    dashDafReasonChartInst = echarts.init(reasonEl);
-                }
+                dashDafReasonChartInst = ensureDashboardChart(dashDafReasonChartInst, reasonEl);
                 const rows = current.byType.slice(0, 10).reverse();
-                dashDafReasonChartInst.setOption({
+                setDashboardOption(dashDafReasonChartInst, {
                     grid: { top: 12, right: 24, bottom: 24, left: 120 },
                     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => `${params[0].name}<br/><b>${params[0].value} 件</b>` },
                     xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
@@ -449,47 +486,37 @@ SMT.dashboard = function (ctx) {
             } else dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
         };
         const initDashboardCharts = async () => {
-            if (currentLine.value === 'ASSY') {
+            const requestId = ++dashboardChartRequestId;
+            const line = currentLine.value;
+            if (currentTab.value !== 'dashboard') return;
+            if (line === 'ASSY') {
                 dashYieldChartInst = disposeChart(dashYieldChartInst);
                 dashInputChartInst = disposeChart(dashInputChartInst);
                 dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
                 dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
-                await initAssemblyDashboardCharts();
+                await initAssemblyDashboardCharts(requestId, line);
                 return;
             }
-            if (currentLine.value === 'DAF') {
+            if (line === 'DAF') {
                 dashYieldChartInst = disposeChart(dashYieldChartInst);
                 dashInputChartInst = disposeChart(dashInputChartInst);
                 dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);
                 dashAssemblyReasonChartInst = disposeChart(dashAssemblyReasonChartInst);
-                await initDafDashboardCharts();
+                await initDafDashboardCharts(requestId, line);
                 return;
             }
             dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);
             dashAssemblyReasonChartInst = disposeChart(dashAssemblyReasonChartInst);
-            const today = new Date();
-            const endDate = fmtDate(today);
-            const startDate = new Date(today); startDate.setDate(startDate.getDate() - 13);
-            const { data: prods } = await _supabase
-                .from('daily_production')
-                .select('production_date, input_quantity, defect_logs(quantity)')
-                .eq('line', currentLine.value)
-                .gte('production_date', fmtDate(startDate)).lte('production_date', endDate);
-            const dayMap = {};
-            (prods || []).forEach(p => {
-                const day = dayMap[p.production_date] || (dayMap[p.production_date] = { input: 0, defects: 0 });
-                day.input += Number(p.input_quantity) || 0;
-                day.defects += (p.defect_logs||[]).reduce((s,d)=>s + (Number(d.quantity) || 0),0);
-            });
-            const days = Object.keys(dayMap).filter(date => dayMap[date].input > 0).sort();
+            await waitForDashboardLayout();
+            if (!canRenderDashboard(requestId, line)) return;
+            const days = (smtDashboardData.value.trendDays || []).map(row => row.date);
             const labels = days.map(d => d.slice(5));
-            const yields = days.map(d => { const {input,defects}=dayMap[d]; return input>0?parseFloat(calcYield(input,defects)):null; });
-            const inputs = days.map(d => dayMap[d].input);
-            await Vue.nextTick();
+            const yields = (smtDashboardData.value.trendDays || []).map(row => parseFloat(row.yieldRate));
+            const inputs = (smtDashboardData.value.trendDays || []).map(row => row.input);
             const yieldEl = document.getElementById('dashYieldChart');
             if (yieldEl) {
-                if (!dashYieldChartInst) dashYieldChartInst = echarts.init(yieldEl);
-                dashYieldChartInst.setOption({
+                dashYieldChartInst = ensureDashboardChart(dashYieldChartInst, yieldEl);
+                setDashboardOption(dashYieldChartInst, {
                     grid:{top:28,right:20,bottom:36,left:48},
                     tooltip:{trigger:'axis',formatter:p=>{const v=p[0];return v.name+'<br/>'+(v.value!==null?'<b>'+v.value+'%</b>':'無資料');}},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
@@ -501,8 +528,8 @@ SMT.dashboard = function (ctx) {
             }
             const inputEl = document.getElementById('dashInputChart');
             if (inputEl) {
-                if (!dashInputChartInst) dashInputChartInst = echarts.init(inputEl);
-                dashInputChartInst.setOption({
+                dashInputChartInst = ensureDashboardChart(dashInputChartInst, inputEl);
+                setDashboardOption(dashInputChartInst, {
                     grid:{top:28,right:20,bottom:36,left:48},
                     tooltip:{trigger:'axis',formatter:p=>p[0].name+'<br/><b>'+p[0].value+' pcs</b>'},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
@@ -521,14 +548,29 @@ SMT.dashboard = function (ctx) {
         const resizeDashboardCharts = () => {
             [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst, dashDafDailyChartInst, dashDafReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
+        const refreshDashboardAndCharts = async () => {
+            const refreshed = await refreshDashboard();
+            if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
+        };
         window.addEventListener('resize', () => { if (currentTab.value === 'dashboard') resizeDashboardCharts(); });
 
-        watch(currentTab, async (tab) => { if (tab === 'dashboard') { await refreshDashboard(); await initDashboardCharts(); } });
-        watch(dashDate, async () => { if (currentTab.value === 'dashboard') { await refreshDashboard(); await initDashboardCharts(); } });
+        watch(currentTab, async (tab) => {
+            if (tab !== 'dashboard') {
+                dashboardChartRequestId++;
+                return;
+            }
+            const refreshed = await refreshDashboard();
+            if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
+        });
+        watch(dashDate, async () => {
+            if (currentTab.value !== 'dashboard') return;
+            const refreshed = await refreshDashboard();
+            if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
+        });
         return {
             dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
             dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays,
-            changeDashDate, refreshDashboard, initDashboardCharts,
+            changeDashDate, refreshDashboard, refreshDashboardAndCharts, initDashboardCharts,
             openDashboardDetail, openDashboardDetailItem, closeDashboardDetail, saveDashboardNote,
             openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail,
             openDafInputDetail, openDafYieldDetail, openDafDefectDashboardDetail, openDafWeekDetail,

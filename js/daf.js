@@ -356,7 +356,7 @@ SMT.daf = function (ctx) {
         return true;
     };
     const loadDafRemoteRows = async () => {
-        const pageSize = 100;
+        const pageSize = 500;
         const rows = [];
         for (let offset = 0; ; offset += pageSize) {
             const { data: page, error } = await _supabase.from(REMOTE_TABLE)
@@ -494,7 +494,15 @@ SMT.daf = function (ctx) {
         if (dafStatsResult.value) calculateDafStats(false);
     };
 
-    const allRecords = () => dafBatches.value.flatMap(batch => (batch.records || []).map(record => ({ ...record, fileName: batch.fileName, batchId: batch.id })));
+    let allRecordsCacheSource = null;
+    let allRecordsCacheRows = [];
+    const allRecords = () => {
+        if (allRecordsCacheSource !== dafBatches.value) {
+            allRecordsCacheSource = dafBatches.value;
+            allRecordsCacheRows = dafBatches.value.flatMap(batch => (batch.records || []).map(record => ({ ...record, fileName: batch.fileName, batchId: batch.id })));
+        }
+        return allRecordsCacheRows;
+    };
     const dafBatchesByDate = computed(() => {
         const groups = {};
         dafBatches.value.forEach(batch => {
@@ -594,10 +602,17 @@ SMT.daf = function (ctx) {
             byType, byModel, byWorkOrder, daily, rows
         };
     };
+    let dafDashboardCacheSource = null;
+    const dafDashboardCache = new Map();
     const getDafUploadedDates = (limit = 14) => [...new Set(allRecords().map(row => row.date).filter(Boolean))]
         .sort()
         .slice(-limit);
     const getDafDashboardForDate = date => {
+        if (dafDashboardCacheSource !== dafBatches.value) {
+            dafDashboardCacheSource = dafBatches.value;
+            dafDashboardCache.clear();
+        }
+        if (dafDashboardCache.has(date)) return dafDashboardCache.get(date);
         const rows = allRecords().filter(row => row.date === date);
         const inputRows = rows.filter(row => row.inputIncluded);
         const goodRows = inputRows.filter(row => row.status === 'GOOD');
@@ -646,7 +661,7 @@ SMT.daf = function (ctx) {
             model: [...value.models].join(' / '), yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input),
             ratio: mapRate(value.input, inputRows.length), byModel: toList(value.byModel)
         })).sort((a, b) => b.input - a.input || b.defects - a.defects);
-        return {
+        const result = {
             date,
             totalInput: inputRows.length,
             totalGood: goodRows.length,
@@ -658,6 +673,8 @@ SMT.daf = function (ctx) {
             byWorkOrder,
             sourceFiles: [...new Set(rows.map(row => row.fileName).filter(Boolean))]
         };
+        dafDashboardCache.set(date, result);
+        return result;
     };
     const dafQuickRange = (mode, offset) => {
         const now = new Date(); now.setHours(0, 0, 0, 0);
@@ -898,7 +915,7 @@ SMT.daf = function (ctx) {
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => { if (!applyingDafQuick) dafQuickMode.value = null; });
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && currentLine.value === 'DAF') renderDafCharts(); });
     watch(currentTab, tab => { if ((tab === 'stats' || tab === 'report') && currentLine.value === 'DAF') renderDafCharts(); });
-    watch(currentLine, line => { if (line === 'DAF') { dafStatsResult.value = null; loadDafData(); } });
+    watch(currentLine, line => { if (line === 'DAF') dafStatsResult.value = null; });
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); });
 
     return {

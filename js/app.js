@@ -5,26 +5,29 @@ const app = createApp({
             .forEach(mod => Object.assign(ctx, mod(ctx)));
 
         onMounted(async () => {
-            ctx.loadFpyTargets();
-            await ctx.loadBaseData();
-            ctx.loadHistory();
-            ctx.loadFpyHistory();
-            ctx.loadOocHistory();
-            ctx.loadEqData();
-            ctx.loadFeeders();
-            ctx.loadNozzleLogs();
-            await ctx.loadAssemblyData();
-            await ctx.loadDafData();
-            await ctx.refreshDashboard();
-            ctx.renderAssemblyReportChart();
-            ctx.renderAssemblyStatsCharts();
-            setTimeout(() => ctx.initDashboardCharts(), 800);
-            const today = new Date();
-            ctx.rawExportFilter.value.end = today.toISOString().split('T')[0];
-            ctx.fpyFilter.value.end = today.toISOString().split('T')[0];
-            today.setDate(today.getDate() - 7);
-            ctx.rawExportFilter.value.start = today.toISOString().split('T')[0];
-            ctx.fpyFilter.value.start = today.toISOString().split('T')[0];
+            ctx.loading.value = true;
+            try {
+                ctx.loadFpyTargets();
+                const isSmt = ctx.currentLine.value === 'SMT';
+                const tasks = [ctx.loadBaseData(), ctx.loadAssemblyData(), ctx.loadDafData()];
+                if (isSmt) {
+                    tasks.push(ctx.loadHistory(), ctx.loadFpyHistory(), ctx.loadOocHistory(), ctx.loadEqData());
+                }
+                await Promise.all(tasks);
+                if (isSmt) await Promise.all([ctx.loadFeeders(), ctx.loadNozzleLogs()]);
+                const refreshed = await ctx.refreshDashboard();
+                ctx.renderAssemblyReportChart();
+                ctx.renderAssemblyStatsCharts();
+                if (refreshed !== false) await ctx.initDashboardCharts();
+                const today = new Date();
+                ctx.rawExportFilter.value.end = today.toISOString().split('T')[0];
+                ctx.fpyFilter.value.end = today.toISOString().split('T')[0];
+                today.setDate(today.getDate() - 7);
+                ctx.rawExportFilter.value.start = today.toISOString().split('T')[0];
+                ctx.fpyFilter.value.start = today.toISOString().split('T')[0];
+            } finally {
+                ctx.loading.value = false;
+            }
         });
 
         return ctx;

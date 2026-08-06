@@ -280,8 +280,27 @@ SMT.daf = function (ctx) {
             return Array.isArray(parsed) ? parsed.map(normalizeBatchModels) : [];
         } catch (e) { return []; }
     };
+    // 本機只保存統計所需欄位；原始 raw 欄位由 Supabase 批次資料保留，避免大量 LOG 撐滿 localStorage。
+    const compactDafBatch = batch => ({
+        ...batch,
+        records: (batch.records || []).map(({ raw, ...record }) => record)
+    });
     const persistStorage = () => {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dafBatches.value)); } catch (e) { toast('DAF 統計保存空間不足，可能無法保留資料', 'warning'); }
+        const compact = dafBatches.value.map(compactDafBatch);
+        const attempts = [
+            compact.slice(0, 100),
+            compact.slice(0, 40),
+            compact.slice(0, 15),
+            compact.slice(0, 5).map(batch => ({ ...batch, records: batch.records.slice(0, 5000) })),
+            compact.slice(0, 5).map(batch => ({ ...batch, records: [] }))
+        ];
+        for (const cache of attempts) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+                return;
+            } catch (e) {}
+        }
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
     };
     const hasMigrationFlag = () => {
         try { return localStorage.getItem(REMOTE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
@@ -713,8 +732,8 @@ SMT.daf = function (ctx) {
         const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
         const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
-        const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...row.raw]);
-        const rawColumns = Math.max(10, ...result.rows.map(row => row.raw.length));
+        const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
+        const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
         [['生產統計', summary], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));

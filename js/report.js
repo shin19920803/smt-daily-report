@@ -4,6 +4,9 @@ SMT.report = function (ctx) {
         const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
+        const reportHistoryList = computed(() => report.value.wo_id
+            ? historyList.value.filter(rec => rec.wo_id === report.value.wo_id)
+            : historyList.value);
         const rawExportFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
 
         const availableModelsForSelectedWo = computed(() => !report.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === report.value.selectedWoNumber));
@@ -11,8 +14,7 @@ SMT.report = function (ctx) {
         
         // 一鍵選定工單號碼+機種
         const selectReportWo = async (woNumber, woId) => {
-            report.value.selectedWoNumber = woNumber;
-            report.value.wo_id = woId;
+            report.value = { ...report.value, selectedWoNumber: woNumber, wo_id: woId, currentId: null, logs: [], inputQty: 0, isEditing: false, originalDate: null };
             await fetchDailyRecord();
         };
         
@@ -182,7 +184,7 @@ SMT.report = function (ctx) {
             return [...list];
         });
         return {
-            report, defectForm, historyList, rawExportFilter,
+            report, defectForm, historyList, reportHistoryList, rawExportFilter,
             availableModelsForSelectedWo, reportWoList, onWoNumberChange, selectReportWo, backToWoList,
             onDateChange, cancelEdit, loadHistory, loadRecordForEdit, fetchDailyRecord,
             saveDailyInput, addDefect, deleteDefect, importDefectCsv,

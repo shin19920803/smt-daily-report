@@ -30,27 +30,6 @@ SMT.core = function (ctx) {
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
-        // 基本防誤刪權限：僅作前端操作確認，不是登入驗證。
-        const permissionPasswords = { SMT: 'TMS', DAF: 'DAF', ASSY: 'ASB' };
-        const permissionModal = ref({ show: false, title: '', password: '' });
-        let permissionResolver = null;
-        const closePermissionModal = (approved) => {
-            const resolve = permissionResolver;
-            permissionResolver = null;
-            permissionModal.value = { show: false, title: '', password: '' };
-            if (resolve) resolve(approved);
-        };
-        const requestPermission = (action = '刪除操作') => new Promise(resolve => {
-            permissionResolver = resolve;
-            permissionModal.value = { show: true, title: `${currentLineMeta.value.label} ${action}`, password: '' };
-        });
-        const submitPermission = () => {
-            const enteredPassword = String(permissionModal.value.password || '').trim().toUpperCase();
-            if (enteredPassword !== permissionPasswords[currentLine.value]) return toast('密碼錯誤，無法執行刪除', 'error');
-            closePermissionModal(true);
-        };
-        const cancelPermission = () => closePermissionModal(false);
-
 
         // --- Toast System ---
         const toasts = ref([]);
@@ -154,6 +133,5 @@ SMT.core = function (ctx) {
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
             lines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, hideSettings, canImport, switchLine,
-            permissionModal, requestPermission, submitPermission, cancelPermission
         };
 };

@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.report = function (ctx) {
-        const { data, toast, loading, loadBaseData, activeWoNumbers, currentLine, requestPermission } = ctx;
+        const { data, toast, loading, loadBaseData, activeWoNumbers, currentLine } = ctx;
         const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
@@ -108,7 +108,7 @@ SMT.report = function (ctx) {
         };
 
         const addDefect = async () => { if (!report.value.currentId) return toast("請先儲存投入數", "warning"); if (!defectForm.value.typeId || !defectForm.value.locationId) return toast("請選擇不良與位置", "warning"); loading.value = true; try { await _supabase.from('defect_logs').insert({ production_id: report.value.currentId, defect_type_id: defectForm.value.typeId, location_id: defectForm.value.locationId, quantity: defectForm.value.qty }); await fetchDailyRecord(); await loadHistory(); defectForm.value.qty = 1; toast("不良紀錄已新增"); } catch (e) { toast("新增失敗", "error"); } finally { loading.value = false; } };
-        const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; if (!(await requestPermission('刪除不良紀錄'))) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); toast("已刪除", "info"); };
+        const deleteDefect = async (id) => { if(!confirm("確定刪除此紀錄？")) return; await _supabase.from('defect_logs').delete().eq('id', id); await fetchDailyRecord(); await loadHistory(); toast("已刪除", "info"); };
 
         const importDefectCsv = async (e) => {
             const file = e.target.files[0]; if (!file || !report.value.currentId) return toast('請先建立投入數', 'warning');
@@ -169,7 +169,7 @@ SMT.report = function (ctx) {
                 await fetchDailyRecord(); await loadHistory(); toast('已更新');
             } catch(e) { toast('更新失敗', 'error'); } finally { loading.value = false; }
         };
-        const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; if (!(await requestPermission('刪除生產紀錄'))) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; report.value.isEditing = false; report.value.originalDate = null; } loading.value = false; toast("紀錄已刪除", "info"); };
+        const deleteDailyRecord = async (id) => { if(!confirm("⚠️ 確定刪除整筆生產紀錄？")) return; loading.value = true; await _supabase.from('defect_logs').delete().eq('production_id', id); await _supabase.from('daily_production').delete().eq('id', id); await loadHistory(); await loadBaseData(); if (report.value.currentId === id) { report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; report.value.isEditing = false; report.value.originalDate = null; } loading.value = false; toast("紀錄已刪除", "info"); };
         
         // Raw Export (format preserved exactly)
         const exportRawData = async () => { loading.value = true; try { let query = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, models (name), model_id, id), defect_logs (quantity, defect_types (name), defect_locations (code))`).eq('line', currentLine.value); if (rawExportFilter.value.start) query = query.gte('production_date', rawExportFilter.value.start); if (rawExportFilter.value.end) query = query.lte('production_date', rawExportFilter.value.end); const { data: rows, error } = await query; if (error) throw error; let filtered = rows || []; if (rawExportFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == rawExportFilter.value.modelId); if (rawExportFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.id == rawExportFilter.value.woId); const excelData = []; excelData.push(["日期", "工單號碼", "機種", "當日投入數", "不良現象", "不良位置", "不良數量"]); filtered.forEach(row => { const date = row.production_date; const wo = row.work_orders.wo_number; const model = row.work_orders.models.name; const input = row.input_quantity; if (row.defect_logs && row.defect_logs.length > 0) { row.defect_logs.forEach(log => { excelData.push([ date, wo, model, input, log.defect_types?.name || '', log.defect_locations?.code || '', log.quantity ]); }); } else { excelData.push([date, wo, model, input, "無不良", "", 0]); } }); const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(excelData); XLSX.utils.book_append_sheet(wb, ws, "Raw Data"); XLSX.writeFile(wb, `KOYA_${currentLine.value}_Raw_Data_${new Date().toISOString().slice(0,10)}.xlsx`); toast("Raw Data 已導出"); } catch (e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; } };

@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.equipment = function (ctx) {
-        const { toast, loading, currentLine, requestPermission } = ctx;
+        const { toast, loading, currentLine } = ctx;
         const eqTab = ref('feeder');
         const eqData = ref({ feederModels: [], nozzleModels: [] });
         const feederList = ref([]);
@@ -205,7 +205,7 @@ SMT.equipment = function (ctx) {
             } catch(e) { toast('儲存失敗: ' + e.message, 'error'); } finally { loading.value = false; }
         };
 
-        const deleteFeeder = async (id) => { if (!confirm('確定刪除此 Feeder？相關校正紀錄也會一併刪除')) return; if (!(await requestPermission('刪除設備資料'))) return; loading.value = true; await _supabase.from('feeder_calibrations').delete().eq('feeder_id', id); await _supabase.from('feeders').delete().eq('id', id); await loadFeeders(); loading.value = false; toast('已刪除', 'info'); };
+        const deleteFeeder = async (id) => { if (!confirm('確定刪除此 Feeder？相關校正紀錄也會一併刪除')) return; loading.value = true; await _supabase.from('feeder_calibrations').delete().eq('feeder_id', id); await _supabase.from('feeders').delete().eq('id', id); await loadFeeders(); loading.value = false; toast('已刪除', 'info'); };
 
         const saveCalibration = async () => {
             if (!feederLogForm.value.calibration_date || !selectedFeederId.value) return toast('請填日期', 'warning');
@@ -222,7 +222,7 @@ SMT.equipment = function (ctx) {
             } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
         };
 
-        const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; if (!(await requestPermission('刪除校正紀錄'))) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); if (selectedFeederId.value) { const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', selectedFeederId.value).order('calibration_date', { ascending: false }); calHistory.value = list || []; } await loadFeeders(); toast('已刪除', 'info'); };
+        const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); if (selectedFeederId.value) { const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', selectedFeederId.value).order('calibration_date', { ascending: false }); calHistory.value = list || []; } await loadFeeders(); toast('已刪除', 'info'); };
 
         const openNozzleLogModal = (type = 'in') => { nozzleLogForm.value = { nozzle_model_id: null, change_type: type, quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' }; showNozzleLogModal.value = true; };
 
@@ -236,12 +236,12 @@ SMT.equipment = function (ctx) {
             } catch(e) { toast('失敗: ' + e.message, 'error'); } finally { loading.value = false; }
         };
 
-        const deleteNozzleLog = async (id) => { if (!confirm('確定刪除？')) return; if (!(await requestPermission('刪除吸嘴紀錄'))) return; await _supabase.from('nozzle_inventory_logs').delete().eq('id', id); await loadNozzleLogs(); toast('已刪除', 'info'); };
+        const deleteNozzleLog = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('nozzle_inventory_logs').delete().eq('id', id); await loadNozzleLogs(); toast('已刪除', 'info'); };
 
         // Equipment settings helpers
         const addFeederModel = async () => { const b = eqSettingForm.value.feederBrand.trim(); const m = eqSettingForm.value.feederModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('feeder_models').insert({ brand: b, model: m, line: currentLine.value }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.feederBrand = ''; eqSettingForm.value.feederModel = ''; await loadEqData(); toast('已新增'); };
         const addNozzleModel = async () => { const b = eqSettingForm.value.nozzleBrand.trim(); const m = eqSettingForm.value.nozzleModel.trim(); if (!b || !m) return toast('請填廠牌與型號', 'warning'); const { error } = await _supabase.from('nozzle_models').insert({ brand: b, model: m, line: currentLine.value }); if (error) return toast('新增失敗: ' + error.message + ' (請確認 RLS 已關閉或已設定 Policy)', 'error'); eqSettingForm.value.nozzleBrand = ''; eqSettingForm.value.nozzleModel = ''; await loadEqData(); toast('已新增'); };
-        const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; if (!(await requestPermission('刪除設備型號'))) return; const { error } = await _supabase.from(table).delete().eq('id', id); if (error) return toast('刪除失敗: ' + error.message, 'error'); await loadEqData(); toast('已刪除', 'info'); };
+        const deleteEqModel = async (table, id) => { if (!confirm('確定刪除？')) return; const { error } = await _supabase.from(table).delete().eq('id', id); if (error) return toast('刪除失敗: ' + error.message, 'error'); await loadEqData(); toast('已刪除', 'info'); };
         return {
             eqTab, eqData, feederList, nozzleLogs, nozzleStock,
             feederSort, setFeederSort, feederSortIcon, sortedFeederList,

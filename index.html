@@ -138,12 +138,14 @@
                     </div>
                 </div>
                 <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} DAF 生產概況</p>
+                <div v-if="dafDashboardResult && !dafDashboardResult.sourceFiles.length" class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800"><i class="fas fa-info-circle mr-1"></i>選擇日期沒有 DAF 報工；當日數據顯示 0，週統計與近 14 個有投入日期仍會保留。</div>
                 <div v-if="dafDashboardResult" class="space-y-5">
-                    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <div class="kpi-card cursor-pointer" @click="openDafInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
                         <div class="kpi-card cursor-pointer" @click="openDafYieldDetail"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafDashboardResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
                         <div class="kpi-card cursor-pointer" @click="openDafDefectDashboardDetail"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">不良數</div></div>
                         <div class="kpi-card cursor-pointer" @click="openDafYieldDetail"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.defectRate }}%</div><div class="kpi-label">不良率</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openDafWeekDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value text-purple-700">{{ dafWeekInput.toLocaleString() }}</div><div class="kpi-label">本週投入</div></div>
                         <div class="kpi-card cursor-pointer" @click="openDafWeekDetail"><div class="kpi-icon purple"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-success">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均良率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -155,7 +157,7 @@
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="dafDashboardResult.byWorkOrder.length" class="space-y-2"><button v-for="row in dafDashboardResult.byWorkOrder" :key="row.name" @click="openDafWorkOrderDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-blue-50 rounded-lg p-1"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 DAF LOG</div><div class="hint">前往「每日報工」上傳檔案；系統會自動切換到最新資料日期</div></div></div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 DAF LOG</div><div class="hint">前往「每日報工」上傳檔案；有資料日期會自動出現在近 14 日統計</div></div></div>
             </div>
             <div v-else>
             <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -1703,10 +1705,10 @@
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
 <script src="js/assembly.js?v=202608062810"></script>
-<script src="js/daf.js?v=202608062510"></script>
+<script src="js/daf.js?v=202608062520"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608062810"></script>
+<script src="js/dashboard.js?v=202608062820"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>

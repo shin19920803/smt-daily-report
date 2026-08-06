@@ -11,6 +11,7 @@ SMT.dashboard = function (ctx) {
         const smtDashboardData = ref({ production: [], byType: [], byLocation: [], byModel: [], byWorkOrder: [], weekDays: [], trendDays: [], weekRange: null });
         const assemblyWeekDays = ref([]);
         const dafWeekDays = ref([]);
+        const dafWeekInput = computed(() => dafWeekDays.value.reduce((sum, day) => sum + (Number(day.report?.totalInput) || 0), 0));
 
         const closeDashboardDetail = () => {
             dashboardDetail.value = { show: false, title: '', subtitle: '', metrics: [], sections: [], allowNote: false, noteKey: '', note: '' };
@@ -232,20 +233,15 @@ SMT.dashboard = function (ctx) {
                 return requestId === dashboardRefreshId;
             }
             if (currentLine.value === 'DAF') {
-                const uploadedDates = getDafUploadedDates ? getDafUploadedDates(200) : [];
+                const uploadedDates = getDafUploadedDates ? getDafUploadedDates(2000) : [];
                 if (!getDafDashboardForDate) {
                     dafDashboardResult.value = null;
                 } else {
                     const current = getDafDashboardForDate(dashDate.value);
-                    const fallbackDate = uploadedDates[uploadedDates.length - 1];
-                    if (!current.sourceFiles.length && fallbackDate && dashDate.value !== fallbackDate) {
-                        dashDate.value = fallbackDate;
-                        return false;
-                    }
                     if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
                     dafDashboardResult.value = current;
                     const weekRange = getWeekRange(dashDate.value);
-                    dafWeekDays.value = (getDafUploadedDates ? getDafUploadedDates(200) : [])
+                    dafWeekDays.value = uploadedDates
                         .filter(date => date >= weekRange.start && date <= weekRange.end)
                         .map(date => ({ date, report: getDafDashboardForDate(date) }))
                         .filter(day => day.report.totalInput > 0);
@@ -569,7 +565,7 @@ SMT.dashboard = function (ctx) {
         });
         return {
             dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
-            dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays,
+            dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays, dafWeekInput,
             changeDashDate, refreshDashboard, refreshDashboardAndCharts, initDashboardCharts,
             openDashboardDetail, openDashboardDetailItem, closeDashboardDetail, saveDashboardNote,
             openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail,

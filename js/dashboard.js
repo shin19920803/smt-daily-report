@@ -344,7 +344,7 @@ SMT.dashboard = function (ctx) {
         const assemblyReasonDetail = row => {
             return { title: `${row.name} 停機明細`, subtitle: `${dashDate.value} · ${row.qty} 次`, metrics: [toMetric('發生次數', row.qty, 'red')], allowNote: false, sections: [makeDistributionSection('每小時發生次數', 'fa-clock', (row.hourly || []).map(item => {
                 const note = assemblyHourlyNotes?.value?.[hourlyNoteKey(row.name, item.hour)] || '';
-                return { label: item.label, qty: item.qty, ratio: row.qty ? (item.qty / row.qty * 100).toFixed(1) + '%' : '0.0%', isHourlyNote: true, noteCategory: row.name, noteHour: item.hour, note, draftNote: note };
+                return { label: item.label, qty: item.qty, ratio: row.qty ? (item.qty / row.qty * 100).toFixed(1) + '%' : '0.0%', isHourlyNote: true, noteCategory: row.name, noteHour: item.hour, note, draftNote: note, noteOpen: false };
             })), makeDistributionSection('LOG 原始細項', 'fa-list-ul', (row.sourceItems || []).map(item => ({ label: item.message, qty: item.qty, ratio: item.ratio + '%' })))] };
         };
         const openAssemblyReasonDashboard = row => openDashboardDetail(assemblyReasonDetail(row));

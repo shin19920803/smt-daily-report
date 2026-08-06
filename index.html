@@ -270,9 +270,8 @@
                             <div class="space-y-1.5 max-h-64 overflow-y-auto">
                                 <template v-for="item in section.items" :key="item.label">
                                     <div v-if="item.isHourlyNote" class="rounded-lg p-2 bg-blue-50 border border-blue-100">
-                                        <div class="flex items-center gap-2"><span class="flex-1 min-w-0 truncate text-sm font-bold text-blue-900">{{ item.label }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div>
-                                        <textarea v-model="item.draftNote" rows="2" class="mt-2 w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea>
-                                        <div class="flex justify-end mt-1"><button @click="saveDashboardHourNote(item)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存此時段備註</button></div>
+                                        <div class="flex items-center gap-2"><span class="flex-1 min-w-0 truncate text-sm font-bold text-blue-900">{{ item.label }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><span v-if="item.note" class="text-[10px] text-blue-600 whitespace-nowrap">有備註</span><button type="button" @click.stop="item.noteOpen = !item.noteOpen" class="px-2 py-1 rounded border border-blue-200 bg-white text-blue-700 text-xs font-bold whitespace-nowrap" :aria-expanded="item.noteOpen">{{ item.noteOpen ? '收合' : item.note ? '查看備註' : '備註' }}</button></div>
+                                        <div v-if="item.noteOpen" class="mt-2"><textarea v-model="item.draftNote" rows="2" class="w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea><div class="flex justify-end mt-1"><button @click="saveDashboardHourNote(item)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存備註</button></div></div>
                                     </div>
                                     <button v-else-if="item.detail" @click="openDashboardDetailItem(item)" class="w-full flex items-center gap-2 rounded-lg p-2 text-left hover:bg-blue-50 transition"><span class="flex-1 min-w-0 truncate text-sm font-bold">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><i class="fas fa-chevron-right text-gray-300 text-xs"></i></button>
                                     <div v-else class="flex items-center gap-2 rounded-lg p-2 bg-gray-50"><span class="flex-1 min-w-0 truncate text-sm">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div>
@@ -982,9 +981,8 @@
                                 <h4 class="font-black text-blue-800 mb-2"><i class="fas fa-clock mr-2"></i>每小時發生次數</h4>
                                 <div v-if="assemblySourceDetail.hourly.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     <div v-for="hour in assemblySourceDetail.hourly" :key="hour.hour" class="rounded-lg bg-blue-50 border border-blue-100 p-2 text-sm">
-                                        <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="font-black text-blue-900">{{ hour.qty }} 次</div></div>
-                                        <textarea v-model="hour.draftNote" rows="2" class="mt-2 w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea>
-                                        <div class="flex justify-end mt-1"><button @click="saveAssemblyHourNote(assemblySourceDetail.category, hour.hour, hour.draftNote)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存此時段備註</button></div>
+                                        <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="flex items-center gap-2"><div class="font-black text-blue-900">{{ hour.qty }} 次</div><span v-if="hour.note" class="text-[10px] text-blue-600 whitespace-nowrap">有備註</span><button type="button" @click.stop="hour.noteOpen = !hour.noteOpen" class="px-2 py-1 rounded border border-blue-200 bg-white text-blue-700 text-xs font-bold whitespace-nowrap" :aria-expanded="hour.noteOpen">{{ hour.noteOpen ? '收合' : hour.note ? '查看備註' : '備註' }}</button></div></div>
+                                        <div v-if="hour.noteOpen" class="mt-2"><textarea v-model="hour.draftNote" rows="2" class="w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea><div class="flex justify-end mt-1"><button @click="saveAssemblyHourNote(assemblySourceDetail.category, hour.hour, hour.draftNote)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存備註</button></div></div>
                                     </div>
                                 </div>
                                 <div v-else class="text-xs text-gray-400">沒有可用的小時資料。</div>
@@ -1694,11 +1692,11 @@
 <script src="js/core.js?v=202608062130"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
-<script src="js/assembly.js?v=202608062500"></script>
+<script src="js/assembly.js?v=202608062600"></script>
 <script src="js/daf.js?v=202608062500"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608062500"></script>
+<script src="js/dashboard.js?v=202608062600"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>

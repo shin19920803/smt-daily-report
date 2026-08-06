@@ -789,7 +789,7 @@ SMT.assembly = function (ctx) {
             items: row?.sourceItems || [],
             hourly: (row?.hourly || []).map(item => {
                 const note = assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
-                return { ...item, note, draftNote: note };
+                return { ...item, note, draftNote: note, noteOpen: false };
             }),
             total: row?.qty || 0,
             note: assemblyDefectNotes.value[category] || '',

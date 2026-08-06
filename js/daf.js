@@ -503,6 +503,25 @@ SMT.daf = function (ctx) {
         }
         return allRecordsCacheRows;
     };
+    let dafDateIndexSource = null;
+    let dafRowsByDate = new Map();
+    let dafInputCountByDate = new Map();
+    const ensureDafDateIndex = () => {
+        if (dafDateIndexSource === dafBatches.value) return;
+        dafDateIndexSource = dafBatches.value;
+        dafRowsByDate = new Map();
+        dafInputCountByDate = new Map();
+        allRecords().forEach(row => {
+            if (!row.date) return;
+            if (!dafRowsByDate.has(row.date)) dafRowsByDate.set(row.date, []);
+            dafRowsByDate.get(row.date).push(row);
+            if (row.inputIncluded) dafInputCountByDate.set(row.date, (dafInputCountByDate.get(row.date) || 0) + 1);
+        });
+    };
+    const getDafRowsForDate = date => {
+        ensureDafDateIndex();
+        return dafRowsByDate.get(date) || [];
+    };
     const dafBatchesByDate = computed(() => {
         const groups = {};
         dafBatches.value.forEach(batch => {
@@ -604,16 +623,20 @@ SMT.daf = function (ctx) {
     };
     let dafDashboardCacheSource = null;
     const dafDashboardCache = new Map();
-    const getDafUploadedDates = (limit = 14) => [...new Set(allRecords().map(row => row.date).filter(Boolean))]
-        .sort()
-        .slice(-limit);
+    const getDafUploadedDates = (limit = 14) => {
+        ensureDafDateIndex();
+        return [...dafInputCountByDate.keys()]
+            .filter(date => dafInputCountByDate.get(date) > 0)
+            .sort()
+            .slice(-limit);
+    };
     const getDafDashboardForDate = date => {
         if (dafDashboardCacheSource !== dafBatches.value) {
             dafDashboardCacheSource = dafBatches.value;
             dafDashboardCache.clear();
         }
         if (dafDashboardCache.has(date)) return dafDashboardCache.get(date);
-        const rows = allRecords().filter(row => row.date === date);
+        const rows = getDafRowsForDate(date);
         const inputRows = rows.filter(row => row.inputIncluded);
         const goodRows = inputRows.filter(row => row.status === 'GOOD');
         const failRows = inputRows.filter(row => row.status === 'FAIL');

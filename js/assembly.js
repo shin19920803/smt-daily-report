@@ -413,17 +413,71 @@ SMT.assembly = function (ctx) {
             if (!saved) toast('對應已保存在本機，但共用資料庫寫入失敗', 'warning');
         }
     };
-    const createAssemblyBatch = (pending, parsed) => ({
-        id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    const getAssemblyBatchDates = (batch) => Object.keys(batch?.buckets || {}).sort();
+    const compactAssemblyBatches = (batches = []) => {
+        const claimedDates = new Set();
+        const cleanups = [];
+        const compacted = [];
+        const sorted = [...batches].sort((a, b) => String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')));
+        sorted.forEach(batch => {
+            const entries = Object.entries(batch.buckets || {});
+            const remaining = entries.filter(([date]) => !claimedDates.has(date));
+            if (!remaining.length) {
+                if (batch.id) cleanups.push({ type: 'delete', id: batch.id });
+                return;
+            }
+            const keptBatch = remaining.length === entries.length
+                ? batch
+                : { ...batch, buckets: Object.fromEntries(remaining) };
+            if (keptBatch !== batch) cleanups.push({ type: 'upsert', batch: keptBatch });
+            compacted.push(keptBatch);
+            remaining.forEach(([date]) => claimedDates.add(date));
+        });
+        return { batches: compacted, cleanups };
+    };
+    const applyAssemblyBatchCleanups = async (cleanups = []) => {
+        for (const cleanup of cleanups) {
+            if (cleanup.type === 'upsert') await saveBatchRemote(cleanup.batch);
+            else await deleteBatchRemote(cleanup.id);
+        }
+    };
+    const createAssemblyBatch = (pending, parsed) => {
+        const dates = getAssemblyBatchDates({ buckets: parsed.buckets });
+        return {
+        id: 'ASSY_' + (dates.join('_') || pending.fallbackDate),
         line: 'ASSY', fileName: pending.fileName, uploadedAt: new Date().toISOString(),
         encoding: pending.encoding, lineCount: parsed.lineCount,
         parsedLineCount: parsed.parsedLineCount, ignoredCount: parsed.ignoredCount,
         unclassifiedCount: parsed.unclassifiedCount, buckets: parsed.buckets
-    });
+        };
+    };
     const saveAssemblyBatch = async (pending, parsed) => {
         const batch = createAssemblyBatch(pending, parsed);
         const remoteSaved = await saveBatchRemote(batch);
-        assemblyBatches.value = [batch, ...assemblyBatches.value].slice(0, 100);
+        const newDates = new Set(getAssemblyBatchDates(batch));
+        const prior = compactAssemblyBatches(assemblyBatches.value).batches;
+        const cleanups = [];
+        const retained = [];
+        prior.forEach(oldBatch => {
+            if (oldBatch.id === batch.id) return;
+            const oldDates = getAssemblyBatchDates(oldBatch);
+            const hasOverlap = oldDates.some(date => newDates.has(date));
+            if (!hasOverlap) {
+                retained.push(oldBatch);
+                return;
+            }
+            const remainingEntries = Object.entries(oldBatch.buckets || {})
+                .filter(([date]) => !newDates.has(date));
+            if (remainingEntries.length) {
+                const remainingBatch = { ...oldBatch, buckets: Object.fromEntries(remainingEntries) };
+                retained.push(remainingBatch);
+                cleanups.push({ type: 'upsert', batch: remainingBatch });
+            } else {
+                cleanups.push({ type: 'delete', id: oldBatch.id });
+            }
+        });
+        if (assemblyRemoteReady.value && remoteSaved) await applyAssemblyBatchCleanups(cleanups);
+        assemblyBatches.value = [batch, ...retained].slice(0, 100);
         persistStorage();
         assemblyLastFile.value = batch.fileName;
         const result = aggregate([batch]);
@@ -567,7 +621,9 @@ SMT.assembly = function (ctx) {
         return [...dates].sort().slice(-limit);
     };
     const loadAssemblyData = async () => {
-        const localBatches = readStorage();
+        const localState = compactAssemblyBatches(readStorage());
+        const localBatches = localState.batches;
+        if (localState.cleanups.length) persistStorage(localBatches);
         if (currentLine.value !== 'ASSY') {
             assemblyBatches.value = localBatches;
             refreshAssemblyReport();
@@ -599,6 +655,9 @@ SMT.assembly = function (ctx) {
             } else if (!hasRemoteMigrationFlag()) {
                 setRemoteMigrationFlag();
             }
+            const remoteState = compactAssemblyBatches(remoteBatches);
+            remoteBatches = remoteState.batches;
+            await applyAssemblyBatchCleanups(remoteState.cleanups);
             assemblyBatches.value = remoteBatches.slice(0, 100);
             persistStorage();
         }
@@ -801,7 +860,7 @@ SMT.assembly = function (ctx) {
         });
     };
 
-    assemblyBatches.value = readStorage();
+    assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
     refreshAssemblyReport();
     watch(assemblyUploadDate, refreshAssemblyReport);
     watch(assemblyReportResult, renderAssemblyReportChart);

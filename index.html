@@ -450,7 +450,7 @@
                                         <div><span class="text-gray-400 block">當日不良</span><b class="text-red-600">{{ batch.dateDefects.toLocaleString() }}</b></div>
                                         <div><span class="text-gray-400 block">檔案區間</span><b>{{ batch.reportDate }}</b></div>
                                     </div>
-                                    <div v-if="batch.unknownStatusCount" class="mt-2 text-xs text-orange-600"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ batch.unknownStatusCount }} 筆：{{ batch.unknownStatusText }}</div>
+                                    <div v-if="batch.unknownStatusCount" class="mt-2 text-xs text-orange-600"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ batch.unknownStatusCount }} 筆：{{ batch.unknownStatusText }}<span v-if="batch.unknownStatusText.includes('SCRAP')" class="ml-1">（SCRAP 代表報廢，未列入 GOOD／FAIL 投入統計）</span></div>
                                 </div>
                             </div>
                         </div>
@@ -978,20 +978,11 @@
                                 <div v-if="assemblySourceDetail.hourly.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     <div v-for="hour in assemblySourceDetail.hourly" :key="hour.hour" class="rounded-lg bg-blue-50 border border-blue-100 p-2 text-sm">
                                         <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="font-black text-blue-900">{{ hour.qty }} 次</div></div>
-                                        <button @click="toggleAssemblyHourNote(hour.hour)" class="mt-2 text-xs font-bold text-blue-600 hover:text-blue-800"><i class="fas fa-note-sticky mr-1"></i>{{ hour.note ? '查看／編輯備註' : '新增備註' }}</button>
-                                        <div v-if="hour.note && !hour.editing" class="mt-1 text-xs text-gray-600 bg-white/70 rounded p-2 break-words">{{ hour.note }}</div>
-                                        <div v-if="hour.editing" class="mt-2 flex gap-1" @click.stop>
-                                            <input v-model="hour.draftNote" class="min-w-0 flex-1 border border-blue-200 rounded px-2 py-1 text-xs bg-white" placeholder="輸入此時段備註">
-                                            <button @click="saveAssemblyHourNote(assemblySourceDetail.category, hour.hour, hour.draftNote)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold">儲存</button>
-                                        </div>
+                                        <textarea v-model="hour.draftNote" rows="2" class="mt-2 w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea>
+                                        <div class="flex justify-end mt-1"><button @click="saveAssemblyHourNote(assemblySourceDetail.category, hour.hour, hour.draftNote)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存此時段備註</button></div>
                                     </div>
                                 </div>
                                 <div v-else class="text-xs text-gray-400">沒有可用的小時資料。</div>
-                            </div>
-                            <div class="mt-4 border-t pt-4">
-                                <label class="block text-xs font-bold text-gray-500 mb-1">停機原因備註</label>
-                                <textarea v-model="assemblySourceDetail.draftNote" rows="2" class="w-full border border-gray-200 rounded-lg p-2 text-sm" placeholder="例如：吸嘴真空不足，常發生於換料後"></textarea>
-                                <div class="flex justify-end mt-2"><button @click="saveAssemblyDefectNote(assemblySourceDetail.category, assemblySourceDetail.draftNote)" class="btn-primary text-xs"><i class="fas fa-save mr-1"></i>儲存備註</button></div>
                             </div>
                         </div>
                     </div>
@@ -1698,7 +1689,7 @@
 <script src="js/core.js?v=202608062130"></script>
 <script src="js/orders.js?v=202608062300"></script>
 <script src="js/report.js?v=202608062300"></script>
-<script src="js/assembly.js?v=202608062130"></script>
+<script src="js/assembly.js?v=202608062330"></script>
 <script src="js/daf.js?v=202608062300"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>

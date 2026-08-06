@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, saveAssemblyHourNote, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dafDashboardResult = ref(null);
@@ -22,6 +22,13 @@ SMT.dashboard = function (ctx) {
         const saveDashboardNote = () => {
             if (!dashboardDetail.value.allowNote || !dashboardDetail.value.noteKey || !saveAssemblyDefectNote) return;
             saveAssemblyDefectNote(dashboardDetail.value.noteKey, dashboardDetail.value.note);
+        };
+        const hourlyNoteKey = (category, hour) => `${category}::${String(hour).padStart(2, '0')}`;
+        const saveDashboardHourNote = item => {
+            if (!item?.isHourlyNote || !saveAssemblyHourNote) return;
+            const value = String(item.draftNote || '').trim();
+            saveAssemblyHourNote(item.noteCategory, item.noteHour, value);
+            item.note = value;
         };
         const listFromMap = (map, total, detailFactory) => Object.entries(map || {})
             .map(([key, qty]) => ({ key, label: key, qty, ratio: total ? (qty / total * 100).toFixed(1) : '0.0', detail: detailFactory ? detailFactory(key, qty) : { title: `${key} 明細`, subtitle: '目前儀表板連動資料', metrics: [toMetric('數量', qty, 'slate')], sections: [] } }))
@@ -335,8 +342,10 @@ SMT.dashboard = function (ctx) {
             openDashboardDetail({ title: `${date} DAF 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', result.totalInput, 'slate'), toMetric('良品數', result.totalGood, 'green'), toMetric('不良數', result.totalDefects, 'red'), { label: '良率', value: result.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單投入', 'fa-file-alt', (result.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' }))), makeDistributionSection('不良原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))] });
         };
         const assemblyReasonDetail = row => {
-            const note = assemblyDefectNotes?.value?.[row.name] || '';
-            return { title: `${row.name} 停機明細`, subtitle: `${dashDate.value} · ${row.qty} 次`, metrics: [toMetric('發生次數', row.qty, 'red')], allowNote: true, noteKey: row.name, note, sections: [makeDistributionSection('每小時發生次數', 'fa-clock', (row.hourly || []).map(item => ({ label: item.label, qty: item.qty, ratio: row.qty ? (item.qty / row.qty * 100).toFixed(1) + '%' : '0.0%' }))), makeDistributionSection('LOG 原始細項', 'fa-list-ul', (row.sourceItems || []).map(item => ({ label: item.message, qty: item.qty, ratio: item.ratio + '%' })))] };
+            return { title: `${row.name} 停機明細`, subtitle: `${dashDate.value} · ${row.qty} 次`, metrics: [toMetric('發生次數', row.qty, 'red')], allowNote: false, sections: [makeDistributionSection('每小時發生次數', 'fa-clock', (row.hourly || []).map(item => {
+                const note = assemblyHourlyNotes?.value?.[hourlyNoteKey(row.name, item.hour)] || '';
+                return { label: item.label, qty: item.qty, ratio: row.qty ? (item.qty / row.qty * 100).toFixed(1) + '%' : '0.0%', isHourlyNote: true, noteCategory: row.name, noteHour: item.hour, note, draftNote: note };
+            })), makeDistributionSection('LOG 原始細項', 'fa-list-ul', (row.sourceItems || []).map(item => ({ label: item.message, qty: item.qty, ratio: item.ratio + '%' })))] };
         };
         const openAssemblyReasonDashboard = row => openDashboardDetail(assemblyReasonDetail(row));
         const openAssemblyInputDetail = () => openDashboardDetail({ title: `${dashDate.value} Mylar 產出`, subtitle: '依每小時查看生產成功數量', metrics: [toMetric('產出成功', assemblyDashboardResult.value?.totalSuccess, 'green')], sections: [makeDistributionSection('每小時產出', 'fa-clock', (assemblyDashboardResult.value?.hourly || []).filter(row => row.total > 0).map(row => ({ label: row.label, qty: row.production, ratio: '', meta: `NG ${row.ng}` })))] });
@@ -525,7 +534,7 @@ SMT.dashboard = function (ctx) {
             dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
             dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays,
             changeDashDate, refreshDashboard, initDashboardCharts,
-            openDashboardDetail, openDashboardDetailItem, closeDashboardDetail, saveDashboardNote,
+            openDashboardDetail, openDashboardDetailItem, closeDashboardDetail, saveDashboardNote, saveDashboardHourNote,
             openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail,
             openDafInputDetail, openDafYieldDetail, openDafDefectDashboardDetail, openDafWeekDetail,
             openDafModelDetail, openDafWorkOrderDetail,

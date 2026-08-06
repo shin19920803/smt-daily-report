@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.report = function (ctx) {
-        const { data, toast, loading, loadBaseData, activeWoNumbers, currentLine } = ctx;
+        const { data, toast, loading, loadBaseData, activeWoNumbers, currentLine, currentTab } = ctx;
         const report = ref({ date: new Date().toISOString().split('T')[0], wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
@@ -22,6 +22,13 @@ SMT.report = function (ctx) {
         const backToWoList = () => {
             if (report.value.isEditing) cancelEdit();
             else onWoNumberChange();
+        };
+        const backFromReport = () => {
+            if (currentLine.value === 'SMT') {
+                currentTab.value = 'orders';
+                return;
+            }
+            backToWoList();
         };
         
         // 日期變更處理：編輯模式下不重新查詢，僅記錄新日期待儲存時一併更新
@@ -185,7 +192,7 @@ SMT.report = function (ctx) {
         });
         return {
             report, defectForm, historyList, reportHistoryList, rawExportFilter,
-            availableModelsForSelectedWo, reportWoList, onWoNumberChange, selectReportWo, backToWoList,
+            availableModelsForSelectedWo, reportWoList, onWoNumberChange, selectReportWo, backToWoList, backFromReport,
             onDateChange, cancelEdit, loadHistory, loadRecordForEdit, fetchDailyRecord,
             saveDailyInput, addDefect, deleteDefect, importDefectCsv,
             editingDefect, startEditDefect, saveEditDefect, deleteDailyRecord, exportRawData

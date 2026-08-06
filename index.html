@@ -269,10 +269,7 @@
                             <h4 class="font-black text-gray-700 mb-3"><i class="fas mr-2 text-blue-500" :class="section.icon"></i>{{ section.title }}</h4>
                             <div class="space-y-1.5 max-h-64 overflow-y-auto">
                                 <template v-for="item in section.items" :key="item.label">
-                                    <div v-if="item.isHourlyNote" class="rounded-lg p-2 bg-blue-50 border border-blue-100">
-                                        <div class="flex items-center gap-2"><span class="flex-1 min-w-0 truncate text-sm font-bold text-blue-900">{{ item.label }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><span v-if="item.note" class="text-[10px] text-blue-600 whitespace-nowrap">有備註</span><button type="button" @click.stop="item.noteOpen = !item.noteOpen" class="px-2 py-1 rounded border border-blue-200 bg-white text-blue-700 text-xs font-bold whitespace-nowrap" :aria-expanded="item.noteOpen">{{ item.noteOpen ? '收合' : item.note ? '查看備註' : '備註' }}</button></div>
-                                        <div v-if="item.noteOpen" class="mt-2"><textarea v-model="item.draftNote" rows="2" class="w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea><div class="flex justify-end mt-1"><button @click="saveDashboardHourNote(item)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存備註</button></div></div>
-                                    </div>
+                                    <div v-if="item.isHourlyNote" class="rounded-lg p-2 bg-blue-50 border border-blue-100"><div class="flex items-center gap-2"><span class="flex-1 min-w-0 truncate text-sm font-bold text-blue-900">{{ item.label }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div><div v-if="item.note" class="mt-1 text-xs leading-5 text-blue-900 whitespace-pre-wrap break-words">{{ item.note }}</div></div>
                                     <button v-else-if="item.detail" @click="openDashboardDetailItem(item)" class="w-full flex items-center gap-2 rounded-lg p-2 text-left hover:bg-blue-50 transition"><span class="flex-1 min-w-0 truncate text-sm font-bold">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><i class="fas fa-chevron-right text-gray-300 text-xs"></i></button>
                                     <div v-else class="flex items-center gap-2 rounded-lg p-2 bg-gray-50"><span class="flex-1 min-w-0 truncate text-sm">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div>
                                 </template>
@@ -328,6 +325,20 @@
                         <button @click="refreshAssemblyReport" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
                     </div>
                     <div v-if="assemblyLastFile" class="mt-3 text-xs text-gray-500"><i class="fas fa-file-lines mr-1 text-orange-500"></i>最近上傳：<b>{{ assemblyLastFile }}</b></div>
+                    <div class="mt-4 border-t border-orange-100 pt-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div><h4 class="font-bold text-sm text-orange-800"><i class="fas fa-comment-medical mr-1"></i>機況備註</h4><p class="text-xs text-gray-400 mt-1">依日期與 24 小時時段記錄機台狀況，內容不限制字數。</p></div>
+                            <button @click="toggleAssemblyStatusNoteEditor" class="btn-ghost text-xs whitespace-nowrap"><i class="fas fa-pen-to-square mr-1"></i>{{ assemblyStatusNoteEditorOpen ? '收合' : '新增／查看備註' }}</button>
+                        </div>
+                        <div v-if="assemblyStatusNoteEditorOpen" class="mt-3 rounded-xl bg-orange-50/70 border border-orange-100 p-3 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+                                <label class="flex-1"><span class="block text-xs font-bold text-gray-500 mb-1">選擇時間區間</span><select v-model="assemblyStatusNoteHour" class="w-full border border-orange-200 rounded-lg p-2 bg-white text-sm"><option v-for="item in assemblyStatusNoteHours" :key="item.value" :value="item.value">{{ item.label }}{{ item.hasNote ? '（已有備註）' : '' }}</option></select></label>
+                                <span v-if="assemblyStatusNoteCurrent" class="text-xs text-green-700 font-bold pb-2"><i class="fas fa-circle-check mr-1"></i>此時段已有備註</span>
+                            </div>
+                            <textarea v-model="assemblyStatusNoteDraft" rows="4" class="w-full border border-orange-200 rounded-lg p-3 bg-white text-sm leading-6 resize-y break-words" placeholder="輸入此時段的機況備註，字數不限"></textarea>
+                            <div class="flex justify-end"><button @click="saveAssemblyStatusNote" class="btn-primary text-xs"><i class="fas fa-save mr-1"></i>儲存機況備註</button></div>
+                        </div>
+                    </div>
                     <div v-if="!assemblyCloudReady" class="mt-2 text-xs text-orange-600"><i class="fas fa-circle-info mr-1"></i>跨電腦同步尚未完整啟用，請在 Supabase SQL Editor 執行最新的組裝 LOG 資料表 SQL。</div>
                     <div v-if="assemblyBatchesForDate.length" class="mt-4 border-t border-orange-100 pt-3 space-y-2">
                         <div class="text-xs font-bold text-gray-500"><i class="fas fa-clock-rotate-left mr-1 text-orange-500"></i>{{ assemblyUploadDateLabel }} 已上傳紀錄</div>
@@ -981,8 +992,7 @@
                                 <h4 class="font-black text-blue-800 mb-2"><i class="fas fa-clock mr-2"></i>每小時發生次數</h4>
                                 <div v-if="assemblySourceDetail.hourly.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     <div v-for="hour in assemblySourceDetail.hourly" :key="hour.hour" class="rounded-lg bg-blue-50 border border-blue-100 p-2 text-sm">
-                                        <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="flex items-center gap-2"><div class="font-black text-blue-900">{{ hour.qty }} 次</div><span v-if="hour.note" class="text-[10px] text-blue-600 whitespace-nowrap">有備註</span><button type="button" @click.stop="hour.noteOpen = !hour.noteOpen" class="px-2 py-1 rounded border border-blue-200 bg-white text-blue-700 text-xs font-bold whitespace-nowrap" :aria-expanded="hour.noteOpen">{{ hour.noteOpen ? '收合' : hour.note ? '查看備註' : '備註' }}</button></div></div>
-                                        <div v-if="hour.noteOpen" class="mt-2"><textarea v-model="hour.draftNote" rows="2" class="w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea><div class="flex justify-end mt-1"><button @click="saveAssemblyHourNote(assemblySourceDetail.category, hour.hour, hour.draftNote)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存備註</button></div></div>
+                                        <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="font-black text-blue-900">{{ hour.qty }} 次 <span v-if="hour.ratio" class="font-normal text-gray-500">{{ hour.ratio }}%</span></div></div><div v-if="hour.note" class="mt-1 text-xs leading-5 text-blue-900 whitespace-pre-wrap break-words">{{ hour.note }}</div>
                                     </div>
                                 </div>
                                 <div v-else class="text-xs text-gray-400">沒有可用的小時資料。</div>
@@ -1692,11 +1702,11 @@
 <script src="js/core.js?v=202608062130"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
-<script src="js/assembly.js?v=202608062600"></script>
+<script src="js/assembly.js?v=202608062700"></script>
 <script src="js/daf.js?v=202608062500"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608062600"></script>
+<script src="js/dashboard.js?v=202608062700"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>

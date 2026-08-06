@@ -11,6 +11,7 @@ SMT.assembly = function (ctx) {
     const MAPPING_MIGRATED_KEY = 'koya_assy_log_mapping_migrated_v1';
     const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
     const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
+    const STATUS_NOTES_STORAGE_KEY = 'koya_assy_log_status_notes_v1';
     const today = () => new Date().toISOString().split('T')[0];
 
     const assemblyUploadDate = ref(today());
@@ -26,6 +27,10 @@ SMT.assembly = function (ctx) {
     const assemblyMappings = ref([]);
     const assemblyDefectNotes = ref({});
     const assemblyHourlyNotes = ref({});
+    const assemblyStatusNotes = ref({});
+    const assemblyStatusNoteEditorOpen = ref(false);
+    const assemblyStatusNoteHour = ref('09');
+    const assemblyStatusNoteDraft = ref('');
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' });
@@ -152,7 +157,41 @@ SMT.assembly = function (ctx) {
     const persistHourlyNotes = () => {
         try { localStorage.setItem(HOURLY_NOTES_STORAGE_KEY, JSON.stringify(assemblyHourlyNotes.value)); } catch (e) {}
     };
+    const readStatusNotes = () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(STATUS_NOTES_STORAGE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (e) { return {}; }
+    };
+    const persistStatusNotes = () => {
+        try { localStorage.setItem(STATUS_NOTES_STORAGE_KEY, JSON.stringify(assemblyStatusNotes.value)); } catch (e) {}
+    };
     const hourlyNoteKey = (category, hour) => `${category}::${String(hour).padStart(2, '0')}`;
+    const statusNoteKey = (date, hour) => `${date}::${String(hour).padStart(2, '0')}`;
+    const assemblyStatusNoteHours = computed(() => Array.from({ length: 24 }, (_, hour) => {
+        const value = String(hour).padStart(2, '0');
+        return { value, label: `${value}:00–${value}:59`, hasNote: !!assemblyStatusNotes.value[statusNoteKey(assemblyUploadDate.value, value)] };
+    }));
+    const assemblyStatusNoteCurrent = computed(() => assemblyStatusNotes.value[statusNoteKey(assemblyUploadDate.value, assemblyStatusNoteHour.value)] || '');
+    const syncAssemblyStatusNoteDraft = () => {
+        assemblyStatusNoteDraft.value = assemblyStatusNoteCurrent.value;
+    };
+    const toggleAssemblyStatusNoteEditor = () => {
+        assemblyStatusNoteEditorOpen.value = !assemblyStatusNoteEditorOpen.value;
+        if (assemblyStatusNoteEditorOpen.value) syncAssemblyStatusNoteDraft();
+    };
+    const saveAssemblyStatusNote = () => {
+        const value = String(assemblyStatusNoteDraft.value || '').trim();
+        const key = statusNoteKey(assemblyUploadDate.value, assemblyStatusNoteHour.value);
+        const next = { ...assemblyStatusNotes.value };
+        if (value) next[key] = value;
+        else delete next[key];
+        assemblyStatusNotes.value = next;
+        persistStatusNotes();
+        assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
+        if (assemblyStatsResult.value) assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        toast(value ? '機況備註已儲存' : '機況備註已清除', 'success');
+    };
 
     const toRemoteBatch = (batch) => ({
         id: batch.id,
@@ -354,6 +393,16 @@ SMT.assembly = function (ctx) {
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
     const aggregate = (batches, start = '', end = '') => {
         const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {}, hourlyByType = {};
+        const statusNotesByHour = {};
+        Object.entries(assemblyStatusNotes.value).forEach(([key, note]) => {
+            const separator = key.indexOf('::');
+            if (separator < 0 || !note) return;
+            const date = key.slice(0, separator);
+            const hour = key.slice(separator + 2);
+            if (!inRange(date, start, end)) return;
+            (statusNotesByHour[hour] || (statusNotesByHour[hour] = [])).push({ date, note: String(note) });
+        });
+        Object.values(statusNotesByHour).forEach(items => items.sort((a, b) => a.date.localeCompare(b.date)));
         let success = 0, ng = 0, ignored = 0, unclassified = 0, parsedLines = 0;
         (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, source]) => {
             if (!inRange(date, start, end)) return;
@@ -387,7 +436,14 @@ SMT.assembly = function (ctx) {
                 .map(([message, sourceQty]) => ({ message, qty: sourceQty, ratio: qty ? (sourceQty / qty * 100).toFixed(1) : '0.0' }))
                 .sort((a, b) => b.qty - a.qty),
             hourly: Object.entries(hourlyByType[name] || {})
-                .map(([hour, hourlyQty]) => ({ hour, label: hour + ':00–' + hour + ':59', qty: hourlyQty }))
+                .map(([hour, hourlyQty]) => {
+                    const notes = statusNotesByHour[hour] || [];
+                    return {
+                        hour, label: hour + ':00–' + hour + ':59', qty: hourlyQty,
+                        ratio: qty ? (hourlyQty / qty * 100).toFixed(1) : '0.0',
+                        note: notes.map(item => notes.length > 1 ? `${item.date}：${item.note}` : item.note).join('\n')
+                    };
+                })
                 .sort((a, b) => a.hour.localeCompare(b.hour))
         })).sort((a, b) => b.qty - a.qty);
         const daily = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({
@@ -788,8 +844,8 @@ SMT.assembly = function (ctx) {
             category,
             items: row?.sourceItems || [],
             hourly: (row?.hourly || []).map(item => {
-                const note = assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
-                return { ...item, note, draftNote: note, noteOpen: false };
+                const note = item.note || assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
+                return { ...item, note };
             }),
             total: row?.qty || 0,
             note: assemblyDefectNotes.value[category] || '',
@@ -944,8 +1000,15 @@ SMT.assembly = function (ctx) {
     assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
     assemblyDefectNotes.value = readDefectNotes();
     assemblyHourlyNotes.value = readHourlyNotes();
+    assemblyStatusNotes.value = readStatusNotes();
     refreshAssemblyReport();
-    watch(assemblyUploadDate, refreshAssemblyReport);
+    watch(assemblyUploadDate, () => {
+        refreshAssemblyReport();
+        if (assemblyStatusNoteEditorOpen.value) syncAssemblyStatusNoteDraft();
+    });
+    watch(assemblyStatusNoteHour, () => {
+        if (assemblyStatusNoteEditorOpen.value) syncAssemblyStatusNoteDraft();
+    });
     watch(assemblyReportResult, renderAssemblyReportChart);
     watch(assemblyStatsResult, renderAssemblyStatsCharts);
     watch(currentTab, tab => {
@@ -970,11 +1033,11 @@ SMT.assembly = function (ctx) {
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
         assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
-        assemblyDefectNotes, assemblyHourlyNotes,
+        assemblyDefectNotes, assemblyHourlyNotes, assemblyStatusNotes, assemblyStatusNoteHours, assemblyStatusNoteEditorOpen, assemblyStatusNoteHour, assemblyStatusNoteDraft, assemblyStatusNoteCurrent,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote, saveAssemblyHourNote,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

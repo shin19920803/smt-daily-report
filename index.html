@@ -149,7 +149,7 @@
                         <div class="kpi-card cursor-pointer" @click="openDafWeekDetail"><div class="kpi-icon purple"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-success">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均良率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-column text-xs"></i></div>近 14 個有資料日期產能</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-line text-xs"></i></div>近 14 日良率趨勢</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-bar text-xs"></i></div>當日不良原因排行</div><div id="dashDafReasonChart" style="width:100%;height:240px;"></div><div v-if="!dafDashboardResult.byType.length" class="empty-state py-5"><div class="hint">當日沒有不良資料</div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -218,7 +218,7 @@
                 <div class="section-card">
                     <div class="card-header">
                         <div class="card-header-icon" style="background:#dcfce7;color:#16a34a"><i class="fas fa-chart-bar text-xs"></i></div>
-                        近 14 日每日投入量
+                        當日不良原因排行
                     </div>
                     <div id="dashInputChart" style="width:100%;height:220px;"></div>
                 </div>
@@ -963,15 +963,17 @@
                         <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ assemblyStatsResult.downtimeRate }}%</div><div class="kpi-label">停機率</div></div>
                         <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ assemblyStatsResult.totalDays }}</div><div class="kpi-label">統計天數</div></div>
                     </div>
-                    <div class="section-card p-4">
-                        <h3 class="card-title"><i class="fas fa-chart-column text-red-600"></i>停機／不良原因 Pareto 圖<span v-if="assemblyStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊不良柱狀查看 LOG 原始細項</span></h3>
-                        <div v-if="assemblyStatsResult.byType.length" id="assemblyStatsChart" style="width:100%;height:340px;"></div>
-                        <div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="title">此區間沒有停機／不良</div></div>
-                    </div>
-                    <div class="section-card p-4">
-                        <h3 class="card-title"><i class="fas fa-chart-column text-blue-600"></i>每日產出</h3>
-                        <div v-if="assemblyStatsResult.daily.length" id="assemblyDailyChart" style="width:100%;height:320px;"></div>
-                        <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card p-4">
+                            <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>良率趨勢（產出成功率）</h3>
+                            <div v-if="assemblyStatsResult.daily.length" id="assemblyDailyChart" style="width:100%;height:340px;"></div>
+                            <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
+                        </div>
+                        <div class="section-card p-4">
+                            <h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>停機／不良現象 Pareto 圖分析<span v-if="assemblyStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 LOG 原始細項</span></h3>
+                            <div v-if="assemblyStatsResult.byType.length" id="assemblyStatsChart" style="width:100%;height:340px;"></div>
+                            <div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="title">此區間沒有停機／不良</div></div>
+                        </div>
                     </div>
                     <div v-if="assemblySourceDetail.show" class="fixed inset-0 bg-black/50 modal-backdrop flex items-center justify-center z-50 p-4" @click.self="closeAssemblySourceDetail">
                         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-5 md:p-6 max-h-[85vh] overflow-y-auto animate-fade-in">
@@ -1001,27 +1003,13 @@
                             </div>
                         </div>
                     </div>
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4">
-                            <h3 class="card-title"><i class="fas fa-chart-pie text-orange-500"></i>原因比例排行</h3>
-                            <div v-if="assemblyStatsResult.byType.length" id="assemblyStatsPieChart" style="width:100%;height:300px;"></div>
-                            <div v-if="assemblyStatsResult.byType.length" class="space-y-2">
-                                <div v-for="(row, idx) in assemblyStatsResult.byType" :key="row.name" class="flex items-center gap-2">
-                                    <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'">{{ idx + 1 }}</span>
-                                    <span class="flex-1 text-sm font-bold truncate">{{ row.name }}</span>
-                                    <span class="font-mono text-sm text-red-600">{{ row.qty }}</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span>
-                                </div>
-                            </div>
-                            <div v-else class="empty-state py-8"><div class="hint">無資料</div></div>
-                        </div>
-                        <div class="section-card p-4">
+                    <div class="section-card p-4">
                             <h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>每小時統計（每日平均）</h3>
                             <div class="table-wrap max-h-80">
                                 <table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">平均成功</th><th class="text-right">平均 NG</th><th class="text-right">停機率</th></tr></thead>
                                     <tbody><tr v-for="row in assemblyStatsResult.hourly.filter(item => item.total > 0)" :key="row.hour"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyStatsResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody>
                                 </table>
                             </div>
-                        </div>
                     </div>
                     <div class="section-card p-4" v-if="assemblyStatsResult.daily.length">
                         <h3 class="card-title"><i class="fas fa-calendar-days text-blue-600"></i>每日明細</h3>
@@ -1065,8 +1053,8 @@
                     </div>
                     <div v-if="dafStatsResult.unknownStatusCount" class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ dafStatsResult.unknownStatusCount }} 筆：{{ dafStatsResult.unknownStatusText }}；不列入投入、良品與不良統計。</div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-column text-red-600"></i>不良原因排行 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊查看機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-column text-blue-600"></i>每日產能</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>良率趨勢</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>不良現象 Pareto 圖分析 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
                     </div>
                     <div class="section-card p-4">
                         <h3 class="card-title"><i class="fas fa-bug text-red-600"></i>不良原因明細</h3>
@@ -1155,22 +1143,25 @@
                 <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ statsResult.totalDays }}</div><div class="kpi-label">統計天數</div></div>
             </div>
 
-            <!-- Pareto Chart Panel -->
-            <div v-if="statsResult" class="section-card mb-5 animate-fade-in">
-                <div class="card-header">
-                    <div class="card-header-icon" style="background:var(--danger-soft);color:var(--danger)"><i class="fas fa-sort-amount-down text-xs"></i></div>
-                    不良現象 Pareto 圖分析
-                    <span v-if="hasDefects" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 位置 × 機種 × 工單 分佈</span>
-                </div>
-                <div v-if="hasDefects" id="paretoChart" style="width:100%;height:340px;"></div>
-                <div v-else class="empty-state" style="padding:48px 20px">
-                    <i class="fas fa-circle-check" style="color:var(--success);opacity:0.35"></i>
-                    <div class="title">此區間無不良紀錄</div>
-                    <div class="hint">投入 {{ statsResult.totalInput.toLocaleString() }} pcs · 良率 {{ statsResult.yieldRate }}%</div>
-                </div>
-            </div>
-
             <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-5 animate-fade-in">
+                <div class="section-card p-4 col-span-1 md:col-span-2 lg:col-span-1">
+                    <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>良率趨勢 <span class="text-xs font-normal text-gray-400">（依生產日彙總）</span></h3>
+                    <div v-if="statsResult.trend && statsResult.trend.length" id="statsYieldTrend" style="width:100%;height:340px;"></div>
+                    <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
+                </div>
+                <div class="section-card p-4 col-span-1 md:col-span-2 lg:col-span-1">
+                    <div class="card-header">
+                        <div class="card-header-icon" style="background:var(--danger-soft);color:var(--danger)"><i class="fas fa-sort-amount-down text-xs"></i></div>
+                        不良現象 Pareto 圖分析
+                        <span v-if="hasDefects" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 位置 × 機種 × 工單 分佈</span>
+                    </div>
+                    <div v-if="hasDefects" id="paretoChart" style="width:100%;height:340px;"></div>
+                    <div v-else class="empty-state" style="padding:48px 20px">
+                        <i class="fas fa-circle-check" style="color:var(--success);opacity:0.35"></i>
+                        <div class="title">此區間無不良紀錄</div>
+                        <div class="hint">投入 {{ statsResult.totalInput.toLocaleString() }} pcs · 良率 {{ statsResult.yieldRate }}%</div>
+                    </div>
+                </div>
                 <div v-if="hasDefects" class="section-card p-4 col-span-1 md:col-span-2">
                     <h3 class="card-title">位置異常統計 <span class="badge-hint"><i class="fas fa-hand-pointer"></i>點擊查看 工單 × 機種 × 現象 分佈</span></h3>
                     <div class="flex flex-wrap gap-2">
@@ -1295,7 +1286,7 @@
 
                 <!-- FPY 直通率趨勢 -->
                 <div class="section-card p-4 col-span-1 md:col-span-2" v-if="statsResult.fpyTrend && statsResult.fpyTrend.length > 0">
-                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-wave-square mr-1 text-teal-500"></i>SPI / AOI 直通率趨勢 <span class="text-xs font-normal text-gray-400">(區間內每日平均，虛線為目標值)</span></h3>
+                    <h3 class="font-bold border-b pb-2 mb-4 text-gray-700"><i class="fas fa-wave-square mr-1 text-teal-500"></i>SPI / AOI 直通率補充分析 <span class="text-xs font-normal text-gray-400">(區間內每日平均，虛線為目標值)</span></h3>
                     <div id="statsFpyTrend" style="width:100%;height:300px;"></div>
                 </div>
             </div>
@@ -1704,12 +1695,12 @@
 <script src="js/core.js?v=202608062140"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
-<script src="js/assembly.js?v=202608062810"></script>
-<script src="js/daf.js?v=202608062520"></script>
+<script src="js/assembly.js?v=202608062930"></script>
+<script src="js/daf.js?v=202608062930"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608062820"></script>
-<script src="js/stats.js?v=202608041323"></script>
+<script src="js/dashboard.js?v=202608062930"></script>
+<script src="js/stats.js?v=202608062930"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>
 <script src="js/app.js?v=202608062810"></script>

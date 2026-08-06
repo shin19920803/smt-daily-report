@@ -894,12 +894,23 @@ SMT.assembly = function (ctx) {
         ];
         const daily = [['日期', '生產成功', 'NG 次數', '停機率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.downtimeRate + '%'])];
+        const paretoTotal = result.byType.reduce((sum, row) => sum + row.qty, 0);
+        let paretoAccumulated = 0;
+        const pareto = [['停機／不良現象', '次數', '佔 NG 比例', '累積佔比'],
+            ...result.byType.map(row => {
+                paretoAccumulated += row.qty;
+                return [row.name, row.qty, row.ratio + '%', paretoTotal ? (paretoAccumulated / paretoTotal * 100).toFixed(1) + '%' : '0.0%'];
+            })];
+        const yieldTrend = [['日期', '產出成功', '停機／不良', '良率'],
+            ...result.daily.map(row => [row.date, row.success, row.ng, row.successRate + '%'])];
         const hourly = [['時段', '平均每日生產成功', '平均每日 NG', '平均每日紀錄', '停機率'],
             ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
         const sourceDetails = [['停機／不良項目', 'LOG 原始訊息', '次數', '占該分類比例'],
             ...result.byType.flatMap(row => (row.sourceItems || []).map(item => [row.name, item.message, item.qty, item.ratio + '%']))];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrend), '良率趨勢');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pareto), 'Pareto分析');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceDetails), 'LOG原始細項');
@@ -907,7 +918,7 @@ SMT.assembly = function (ctx) {
         toast('Mylar LOG 報表已導出');
     };
 
-    let reportChart = null, statsChart = null, statsPieChart = null, statsDailyChart = null;
+    let reportChart = null, statsChart = null, statsDailyChart = null;
     const renderChart = (id, result, previous, setPrevious, onClick) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
@@ -939,7 +950,7 @@ SMT.assembly = function (ctx) {
         });
     };
     const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; });
-    const renderPieChart = (id, result, previous, setPrevious, onClick) => {
+    const renderParetoChart = (id, result, previous, setPrevious, onClick) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
             if (!result || !result.byType.length || !el) {
@@ -952,15 +963,28 @@ SMT.assembly = function (ctx) {
                 previous = echarts.init(el);
                 setPrevious(previous);
             }
+            const rows = result.byType.slice(0, 12);
+            const names = rows.map(row => row.name);
+            const quantities = rows.map(row => row.qty);
+            const total = quantities.reduce((sum, value) => sum + value, 0);
+            let accumulated = 0;
+            const accumulatedRates = quantities.map(value => {
+                accumulated += value;
+                return total ? parseFloat((accumulated / total * 100).toFixed(1)) : 0;
+            });
             previous.setOption({
-                tooltip: { trigger: 'item', formatter: '{b}<br/>數量：{c}<br/>比例：{d}%' },
-                legend: { show: false },
-                series: [{ type: 'pie', radius: ['38%', '68%'], center: ['50%', '50%'], avoidLabelOverlap: true,
-                    itemStyle: { borderColor: '#fff', borderWidth: 2 },
-                    label: { show: false },
-                    labelLine: { show: false },
-                    data: result.byType.map(row => ({ name: row.name, value: row.qty }))
-                }]
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                legend: { data: ['停機／不良次數', '累積佔比'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                grid: { top: 40, right: 58, bottom: 64, left: 48 },
+                xAxis: { type: 'category', data: names, triggerEvent: true, axisLabel: { rotate: names.some(name => name.length > 5) ? 20 : 0, fontSize: 10, color: '#374151' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
+                yAxis: [
+                    { type: 'value', name: '次數', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                    { type: 'value', name: '累積%', min: 0, max: 100, nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }
+                ],
+                series: [
+                    { name: '停機／不良次數', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } },
+                    { name: '累積佔比', type: 'line', yAxisIndex: 1, data: accumulatedRates, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { color: '#2563eb', width: 2 }, itemStyle: { color: '#2563eb' }, label: { show: true, position: 'top', fontSize: 9, color: '#2563eb', formatter: '{c}%' }, markLine: { silent: true, lineStyle: { color: '#d97706', type: 'dashed', width: 1.5 }, data: [{ yAxis: 80, label: { formatter: '80%', position: 'start', fontSize: 10, color: '#d97706' } }] } }
+                ]
             });
             if (previous.off) previous.off('click');
             if (onClick && previous.on) {
@@ -971,8 +995,7 @@ SMT.assembly = function (ctx) {
         });
     };
     const renderAssemblyStatsCharts = () => {
-        renderChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
-        renderPieChart('assemblyStatsPieChart', assemblyStatsResult.value, statsPieChart, value => { statsPieChart = value; }, openAssemblySourceDetail);
+        renderParetoChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
         Vue.nextTick(() => {
             const el = document.getElementById('assemblyDailyChart');
             const result = assemblyStatsResult.value;
@@ -990,11 +1013,8 @@ SMT.assembly = function (ctx) {
                 legend: { top: 0, right: 0, textStyle: { fontSize: 11 } },
                 grid: { top: 32, right: 20, bottom: 44, left: 48 },
                 xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } },
-                yAxis: { type: 'value', name: '數量', minInterval: 1, axisLabel: { fontSize: 10 } },
-                series: [
-                    { name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 30, itemStyle: { color: '#2563eb' } },
-                    { name: '停機／不良', type: 'bar', data: result.daily.map(row => row.ng), barMaxWidth: 30, itemStyle: { color: '#dc2626' } }
-                ]
+                yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 } },
+                series: [{ name: '良率', type: 'line', data: result.daily.map(row => Number(row.successRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
             });
         });
     };
@@ -1026,7 +1046,6 @@ SMT.assembly = function (ctx) {
     window.addEventListener('resize', () => {
         if (reportChart) reportChart.resize();
         if (statsChart) statsChart.resize();
-        if (statsPieChart) statsPieChart.resize();
         if (statsDailyChart) statsDailyChart.resize();
     });
 

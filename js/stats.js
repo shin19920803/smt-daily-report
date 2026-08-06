@@ -329,6 +329,7 @@ SMT.stats = function (ctx) {
                 const trend = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({
                     date: d.date, input: d.input, defects: d.defects,
                     defectRate: d.input ? ((d.defects / d.input) * 100).toFixed(2) : '0.00',
+                    yieldRate: d.input ? (((d.input - d.defects) / d.input) * 100).toFixed(2) : '100.00',
                     byType: d.byType
                 }));
                 const topTypeNames = byType.slice(0, 5).map(t => t.name);
@@ -375,6 +376,16 @@ SMT.stats = function (ctx) {
                 const wb = XLSX.utils.book_new();
                 const wsYield = XLSX.utils.aoa_to_sheet(combinedData);
                 XLSX.utils.book_append_sheet(wb, wsYield, "良率報告");
+
+                const trendTotal = statsResult.value.trend.reduce((sum, row) => sum + row.defects, 0);
+                let trendAccumulated = 0;
+                const paretoData = [["不良現象", "數量", "佔比", "累積佔比"], ...statsResult.value.byType.map(row => {
+                    trendAccumulated += row.qty;
+                    return [row.name, row.qty, `${row.ratio}%`, trendTotal ? `${(trendAccumulated / trendTotal * 100).toFixed(1)}%` : '0.0%'];
+                })];
+                const yieldTrendData = [["日期", "投入", "不良", "良率"], ...statsResult.value.trend.map(row => [row.date, row.input, row.defects, `${row.yieldRate}%`])];
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrendData), "良率趨勢");
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(paretoData), "Pareto分析");
 
                 // === 每日明細分頁 ===
                 let dailyQuery = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
@@ -461,12 +472,14 @@ SMT.stats = function (ctx) {
         // ==================== ECHARTS ====================
         let paretoChartInst = null;
         let heatmapChartInst = null;
+        let yieldTrendChartInst = null;
         let fpyTrendChartInst = null;
 
         // 無資料時必須銷毀實例：否則舊圖表會殘留在畫面上，
         // 且容器被 v-if 移除後實例仍指向已卸離的 DOM，下次有資料時會渲染不出來。
         const disposePareto = () => { if (paretoChartInst) { paretoChartInst.dispose(); paretoChartInst = null; } };
         const disposeHeatmap = () => { if (heatmapChartInst) { heatmapChartInst.dispose(); heatmapChartInst = null; } };
+        const disposeYieldTrend = () => { if (yieldTrendChartInst) { yieldTrendChartInst.dispose(); yieldTrendChartInst = null; } };
         const disposeFpyTrend = () => { if (fpyTrendChartInst) { fpyTrendChartInst.dispose(); fpyTrendChartInst = null; } };
 
         const renderParetoChart = () => {
@@ -558,13 +571,30 @@ SMT.stats = function (ctx) {
             });
         };
 
+        const renderYieldTrendChart = () => {
+            Vue.nextTick(() => {
+                const el = document.getElementById('statsYieldTrend');
+                const r = statsResult.value;
+                if (!r || !r.trend || r.trend.length === 0) { disposeYieldTrend(); return; }
+                if (!el) return;
+                if (!yieldTrendChartInst || yieldTrendChartInst.getDom() !== el) { disposeYieldTrend(); yieldTrendChartInst = echarts.init(el); }
+                yieldTrendChartInst.setOption({
+                    tooltip: { trigger: 'axis', formatter: params => `${params[0].name}<br/><b>良率 ${params[0].value}%</b>` },
+                    grid: { top: 28, right: 20, bottom: 44, left: 50 },
+                    xAxis: { type: 'category', data: r.trend.map(row => row.date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
+                    yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                    series: [{ name: '良率', type: 'line', data: r.trend.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
+                });
+            });
+        };
+
         // 容器剛插入 DOM 時寬度可能尚未完成 layout，ECharts 會以預設寬度初始化；
         // 因此每次渲染後於下一動畫影格強制 resize 一次。
         const resizeStatsCharts = () => {
-            [paretoChartInst, heatmapChartInst, fpyTrendChartInst].forEach(inst => { if (inst) inst.resize(); });
+            [paretoChartInst, heatmapChartInst, yieldTrendChartInst, fpyTrendChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
         const renderStatsCharts = () => {
-            renderParetoChart(); renderHeatmap(); renderFpyTrendChart();
+            renderParetoChart(); renderHeatmap(); renderYieldTrendChart(); renderFpyTrendChart();
             requestAnimationFrame(() => requestAnimationFrame(resizeStatsCharts));
         };
         window.addEventListener('resize', () => { if (currentTab.value === 'stats') resizeStatsCharts(); });

@@ -899,12 +899,19 @@ SMT.daf = function (ctx) {
         const models = [['機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byModel.map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
+        const paretoTotal = result.byType.reduce((sum, row) => sum + row.qty, 0);
+        let paretoAccumulated = 0;
+        const pareto = [['不良現象', '不良數量', '占不良比例', '累積占比'], ...result.byType.map(row => {
+            paretoAccumulated += row.qty;
+            return [row.name, row.qty, row.ratio + '%', paretoTotal ? (paretoAccumulated / paretoTotal * 100).toFixed(1) + '%' : '0.0%'];
+        })];
+        const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
         const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
         const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
         const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
-        [['生產統計', summary], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
+        [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
         const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
         const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
         XLSX.writeFile(wb, `DAF_${modelPart}_${woPart}_${safeFilename(range, '不限日期')}_統計結果.xlsx`);
@@ -921,14 +928,32 @@ SMT.daf = function (ctx) {
             const trendEl = document.getElementById('dafTrendChart');
             if (reasonEl && result?.byType?.length) {
                 if (!reasonChart || reasonChart.getDom() !== reasonEl) { reasonChart = disposeChart(reasonChart); reasonChart = echarts.init(reasonEl); }
-                const rows = result.byType.slice(0, 12).reverse();
-                reasonChart.setOption({ grid: { top: 20, right: 40, bottom: 28, left: 120 }, tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => `${params[0].name}<br/><b>${params[0].value} 件</b>` }, xAxis: { type: 'value', axisLabel: { fontSize: 10 } }, yAxis: { type: 'category', data: rows.map(row => row.name), axisLabel: { fontSize: 10 } }, series: [{ type: 'bar', data: rows.map(row => row.qty), barMaxWidth: 20, itemStyle: { color: '#dc2626', borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right', fontSize: 10 } }] });
+                const rows = result.byType.slice(0, 12);
+                const names = rows.map(row => row.name);
+                const quantities = rows.map(row => row.qty);
+                const total = quantities.reduce((sum, value) => sum + value, 0);
+                let accumulated = 0;
+                const accumulatedRates = quantities.map(value => { accumulated += value; return total ? parseFloat((accumulated / total * 100).toFixed(1)) : 0; });
+                reasonChart.setOption({
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                    legend: { data: ['不良數量', '累積佔比'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                    grid: { top: 40, right: 58, bottom: 64, left: 48 },
+                    xAxis: { type: 'category', data: names, triggerEvent: true, axisLabel: { rotate: names.some(name => name.length > 5) ? 20 : 0, fontSize: 10, color: '#374151' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
+                    yAxis: [
+                        { type: 'value', name: '數量', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                        { type: 'value', name: '累積%', min: 0, max: 100, nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }
+                    ],
+                    series: [
+                        { name: '不良數量', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } },
+                        { name: '累積佔比', type: 'line', yAxisIndex: 1, data: accumulatedRates, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { color: '#2563eb', width: 2 }, itemStyle: { color: '#2563eb' }, label: { show: true, position: 'top', fontSize: 9, color: '#2563eb', formatter: '{c}%' }, markLine: { silent: true, lineStyle: { color: '#d97706', type: 'dashed', width: 1.5 }, data: [{ yAxis: 80, label: { formatter: '80%', position: 'start', fontSize: 10, color: '#d97706' } }] } }
+                    ]
+                });
                 if (reasonChart.off) reasonChart.off('click');
-                if (reasonChart.on) reasonChart.on('click', params => { if (params?.componentType === 'series' && params.name) openDafDefectDetail(params.name); });
+                if (reasonChart.on) reasonChart.on('click', params => { const name = params?.componentType === 'xAxis' ? params.value : params?.name; if (name) openDafDefectDetail(name); });
             } else reasonChart = disposeChart(reasonChart);
             if (trendEl && result?.daily?.length) {
                 if (!trendChart || trendChart.getDom() !== trendEl) { trendChart = disposeChart(trendChart); trendChart = echarts.init(trendEl); }
-                trendChart.setOption({ grid: { top: 32, right: 24, bottom: 44, left: 48 }, tooltip: { trigger: 'axis' }, legend: { top: 0, right: 0, textStyle: { fontSize: 11 } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: { type: 'value', name: '數量', minInterval: 1, axisLabel: { fontSize: 10 } }, series: [{ name: '投入數', type: 'bar', data: result.daily.map(row => row.input), barMaxWidth: 28, itemStyle: { color: '#7c3aed' } }, { name: '良品數', type: 'bar', data: result.daily.map(row => row.good), barMaxWidth: 28, itemStyle: { color: '#16a34a' } }, { name: '不良數', type: 'bar', data: result.daily.map(row => row.defects), barMaxWidth: 28, itemStyle: { color: '#dc2626' } }] });
+                trendChart.setOption({ grid: { top: 32, right: 24, bottom: 44, left: 48 }, tooltip: { trigger: 'axis', formatter: params => `${params[0].name}<br/><b>良率 ${params[0].value}%</b>` }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 } }, series: [{ name: '良率', type: 'line', data: result.daily.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }] });
             } else trendChart = disposeChart(trendChart);
         });
     };

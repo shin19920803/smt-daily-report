@@ -453,15 +453,10 @@ SMT.dashboard = function (ctx) {
                 dashDafDailyChartInst = ensureDashboardChart(dashDafDailyChartInst, dailyEl);
                 setDashboardOption(dashDafDailyChartInst, {
                     grid: { top: 30, right: 20, bottom: 36, left: 48 },
-                    tooltip: { trigger: 'axis' },
-                    legend: { top: 0, right: 0, textStyle: { fontSize: 11 } },
+                    tooltip: { trigger: 'axis', formatter: params => `${params[0].name}<br/><b>良率 ${params[0].value}%</b>` },
                     xAxis: { type: 'category', data: dates.map(date => date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' } },
-                    yAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
-                    series: [
-                        { name: '投入數', type: 'bar', data: reports.map(row => row.totalInput), barMaxWidth: 24, itemStyle: { color: '#7c3aed' } },
-                        { name: '良品數', type: 'bar', data: reports.map(row => row.totalGood), barMaxWidth: 24, itemStyle: { color: '#16a34a' } },
-                        { name: '不良數', type: 'bar', data: reports.map(row => row.totalDefects), barMaxWidth: 24, itemStyle: { color: '#dc2626' } }
-                    ]
+                    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' } },
+                    series: [{ name: '良率', type: 'line', data: reports.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#7c3aed', width: 2.5 }, itemStyle: { color: '#7c3aed' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(124,58,237,0.16)' }, { offset: 1, color: 'rgba(124,58,237,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
                 });
                 if (dashDafDailyChartInst.off) dashDafDailyChartInst.off('click');
                 if (dashDafDailyChartInst.on) dashDafDailyChartInst.on('click', params => { if (dates[params.dataIndex]) openDafDateDetail(dates[params.dataIndex]); });
@@ -508,7 +503,7 @@ SMT.dashboard = function (ctx) {
             const days = (smtDashboardData.value.trendDays || []).map(row => row.date);
             const labels = days.map(d => d.slice(5));
             const yields = (smtDashboardData.value.trendDays || []).map(row => parseFloat(row.yieldRate));
-            const inputs = (smtDashboardData.value.trendDays || []).map(row => row.input);
+            const currentTypeRows = (smtDashboardData.value.byType || []).slice(0, 10).reverse();
             const yieldEl = document.getElementById('dashYieldChart');
             if (yieldEl) {
                 dashYieldChartInst = ensureDashboardChart(dashYieldChartInst, yieldEl);
@@ -526,14 +521,14 @@ SMT.dashboard = function (ctx) {
             if (inputEl) {
                 dashInputChartInst = ensureDashboardChart(dashInputChartInst, inputEl);
                 setDashboardOption(dashInputChartInst, {
-                    grid:{top:28,right:20,bottom:36,left:48},
-                    tooltip:{trigger:'axis',formatter:p=>p[0].name+'<br/><b>'+p[0].value+' pcs</b>'},
-                    xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
-                    yAxis:{type:'value',axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
-                    series:[{type:'bar',data:inputs,barMaxWidth:28,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#1E40AF'},{offset:1,color:'#93C5FD'}]},borderRadius:[4,4,0,0]},emphasis:{itemStyle:{color:'#17318A'}}}]
+                    grid:{top:12,right:24,bottom:24,left:112},
+                    tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>p[0].name+'<br/><b>'+p[0].value+' 件</b>'},
+                    xAxis:{type:'value',minInterval:1,axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
+                    yAxis:{type:'category',data:currentTypeRows.map(row=>row.label),axisLabel:{fontSize:10,color:'#6b7280'}},
+                    series:[{type:'bar',data:currentTypeRows.map(row=>row.qty),barMaxWidth:18,itemStyle:{color:'#dc2626',borderRadius:[0,4,4,0]},label:{show:true,position:'right',fontSize:10}}]
                 });
                 if (dashInputChartInst.off) dashInputChartInst.off('click');
-                if (dashInputChartInst.on) dashInputChartInst.on('click', params => { if (days[params.dataIndex]) openSmtDateDetail(days[params.dataIndex]); });
+                if (dashInputChartInst.on) dashInputChartInst.on('click', params => { const row = currentTypeRows.find(item => item.label === params.name); if (row?.detail) openDashboardDetail(row.detail); });
             }
             requestAnimationFrame(() => requestAnimationFrame(() => {
                 if (dashYieldChartInst) dashYieldChartInst.resize();

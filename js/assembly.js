@@ -9,6 +9,7 @@ SMT.assembly = function (ctx) {
     const MAPPING_STORAGE_KEY = 'koya_assy_log_mappings_v1';
     const MAPPING_TABLE = 'assembly_log_mappings';
     const MAPPING_MIGRATED_KEY = 'koya_assy_log_mapping_migrated_v1';
+    const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
     const today = () => new Date().toISOString().split('T')[0];
 
     const assemblyUploadDate = ref(today());
@@ -22,9 +23,10 @@ SMT.assembly = function (ctx) {
     const assemblyMappingRemoteReady = ref(false);
     const assemblyCloudReady = computed(() => assemblyRemoteReady.value && assemblyMappingRemoteReady.value);
     const assemblyMappings = ref([]);
+    const assemblyDefectNotes = ref({});
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
-    const assemblySourceDetail = ref({ show: false, category: '', items: [], total: 0 });
+    const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' });
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
     let applyingAssemblyQuick = false;
@@ -129,6 +131,15 @@ SMT.assembly = function (ctx) {
     };
     const persistMappingStorage = (mappings = assemblyMappings.value) => {
         try { localStorage.setItem(MAPPING_STORAGE_KEY, JSON.stringify(mappings)); } catch (e) {}
+    };
+    const readDefectNotes = () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(NOTES_STORAGE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (e) { return {}; }
+    };
+    const persistDefectNotes = () => {
+        try { localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(assemblyDefectNotes.value)); } catch (e) {}
     };
 
     const toRemoteBatch = (batch) => ({
@@ -274,7 +285,7 @@ SMT.assembly = function (ctx) {
 
     const emptyBucket = () => ({
         success: 0, ng: 0, ignored: 0, unclassified: 0, parsedLines: 0,
-        byType: {}, sourceByType: {}, hourlySuccess: {}, hourlyNg: {}
+        byType: {}, sourceByType: {}, hourlySuccess: {}, hourlyNg: {}, hourlyByType: {}
     });
     const increment = (map, key, amount = 1) => { if (key) map[key] = (map[key] || 0) + amount; };
 
@@ -315,7 +326,10 @@ SMT.assembly = function (ctx) {
                 const sourceMessage = normalizeMessage(parsed.message);
                 const sourceMap = bucket.sourceByType[result.category] || (bucket.sourceByType[result.category] = {});
                 increment(sourceMap, sourceMessage);
-                increment(bucket.hourlyNg, parsed.time.slice(0, 2));
+                const hour = parsed.time.slice(0, 2);
+                increment(bucket.hourlyNg, hour);
+                const categoryHours = bucket.hourlyByType[result.category] || (bucket.hourlyByType[result.category] = {});
+                increment(categoryHours, hour);
             }
         });
         return { buckets, parsedLineCount, ignoredCount, unclassifiedCount, lineCount: lines.length, unknownMessages: [...unknownMap.values()] };
@@ -323,7 +337,7 @@ SMT.assembly = function (ctx) {
 
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
     const aggregate = (batches, start = '', end = '') => {
-        const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {};
+        const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {}, hourlyByType = {};
         let success = 0, ng = 0, ignored = 0, unclassified = 0, parsedLines = 0;
         (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, source]) => {
             if (!inRange(date, start, end)) return;
@@ -345,13 +359,20 @@ SMT.assembly = function (ctx) {
             });
             Object.entries(source.hourlySuccess || {}).forEach(([hour, qty]) => increment(hourlySuccess, hour, qty));
             Object.entries(source.hourlyNg || {}).forEach(([hour, qty]) => increment(hourlyNg, hour, qty));
+            Object.entries(source.hourlyByType || {}).forEach(([category, hours]) => {
+                const categoryHours = hourlyByType[category] || (hourlyByType[category] = {});
+                Object.entries(hours || {}).forEach(([hour, qty]) => increment(categoryHours, hour, qty));
+            });
         }));
         const totalRecords = success + ng;
         const byTypeList = Object.entries(byType).map(([name, qty]) => ({
             name, qty, ratio: ng ? (qty / ng * 100).toFixed(1) : '0.0',
             sourceItems: Object.entries(sourceByType[name] || {})
                 .map(([message, sourceQty]) => ({ message, qty: sourceQty, ratio: qty ? (sourceQty / qty * 100).toFixed(1) : '0.0' }))
-                .sort((a, b) => b.qty - a.qty)
+                .sort((a, b) => b.qty - a.qty),
+            hourly: Object.entries(hourlyByType[name] || {})
+                .map(([hour, hourlyQty]) => ({ hour, label: hour + ':00–' + hour + ':59', qty: hourlyQty }))
+                .sort((a, b) => a.hour.localeCompare(b.hour))
         })).sort((a, b) => b.qty - a.qty);
         const daily = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({
             ...day,
@@ -722,7 +743,7 @@ SMT.assembly = function (ctx) {
         if (assemblyStatsFilter.value.start && assemblyStatsFilter.value.end && assemblyStatsFilter.value.start > assemblyStatsFilter.value.end) {
             return toast('開始日期不能晚於結束日期', 'warning');
         }
-        assemblySourceDetail.value = { show: false, category: '', items: [], total: 0 };
+        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' };
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
     };
@@ -732,11 +753,21 @@ SMT.assembly = function (ctx) {
             show: true,
             category,
             items: row?.sourceItems || [],
-            total: row?.qty || 0
+            hourly: row?.hourly || [],
+            total: row?.qty || 0,
+            note: assemblyDefectNotes.value[category] || '',
+            draftNote: assemblyDefectNotes.value[category] || ''
         };
     };
     const closeAssemblySourceDetail = () => {
-        assemblySourceDetail.value = { show: false, category: '', items: [], total: 0 };
+        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' };
+    };
+    const saveAssemblyDefectNote = (category, note) => {
+        const value = String(note || '').trim();
+        assemblyDefectNotes.value = { ...assemblyDefectNotes.value, [category]: value };
+        persistDefectNotes();
+        assemblySourceDetail.value = { ...assemblySourceDetail.value, note: value, draftNote: value };
+        toast('停機原因備註已儲存', 'success');
     };
     watch(() => [assemblyStatsFilter.value.start, assemblyStatsFilter.value.end], () => {
         if (!applyingAssemblyQuick) assemblyQuickMode.value = null;
@@ -861,6 +892,7 @@ SMT.assembly = function (ctx) {
     };
 
     assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
+    assemblyDefectNotes.value = readDefectNotes();
     refreshAssemblyReport();
     watch(assemblyUploadDate, refreshAssemblyReport);
     watch(assemblyReportResult, renderAssemblyReportChart);
@@ -887,10 +919,11 @@ SMT.assembly = function (ctx) {
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
         assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
+        assemblyDefectNotes,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

@@ -251,6 +251,10 @@ SMT.assembly = function (ctx) {
         return m ? m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0') : fallback;
     };
     const normalizeMessage = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const hourKey = value => {
+        const match = String(value || '').match(/^(\d{1,2})/);
+        return match ? String(Math.min(23, Number(match[1]))).padStart(2, '0') : '';
+    };
 
     const parseLogLine = (line, fallbackDate) => {
         const original = String(line || '').trim().replace(/\0/g, '');
@@ -319,14 +323,14 @@ SMT.assembly = function (ctx) {
             }
             if (result.type === 'SUCCESS') {
                 bucket.success++;
-                increment(bucket.hourlySuccess, parsed.time.slice(0, 2));
+                increment(bucket.hourlySuccess, hourKey(parsed.time));
             } else {
                 bucket.ng++;
                 increment(bucket.byType, result.category);
                 const sourceMessage = normalizeMessage(parsed.message);
                 const sourceMap = bucket.sourceByType[result.category] || (bucket.sourceByType[result.category] = {});
                 increment(sourceMap, sourceMessage);
-                const hour = parsed.time.slice(0, 2);
+                const hour = hourKey(parsed.time);
                 increment(bucket.hourlyNg, hour);
                 const categoryHours = bucket.hourlyByType[result.category] || (bucket.hourlyByType[result.category] = {});
                 increment(categoryHours, hour);
@@ -528,13 +532,16 @@ SMT.assembly = function (ctx) {
                 assemblyUnknownModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedDefectName: '', newDefectName: '' };
                 return;
             }
-            const pending = pendingAssemblyUpload.value;
+            const pendingState = pendingAssemblyUpload.value;
             pendingAssemblyUpload.value = null;
             assemblyUnknownModal.value = { show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' };
-            if (pending) {
-                const parsed = parseText(pending.text, pending.fallbackDate, assemblyMappings.value);
+            if (pendingState) {
+                const parsed = parseText(pendingState.pending.text, pendingState.pending.fallbackDate, assemblyMappings.value);
                 if (parsed.unknownMessages.length) return toast('仍有未分類 LOG，請重新上傳處理', 'warning');
-                await saveAssemblyBatch(pending, parsed);
+                await saveAssemblyBatch(pendingState.pending, parsed);
+                pendingState.queue.success++;
+                pendingState.queue.index++;
+                await processAssemblyUploadQueue(pendingState.queue);
             }
         } finally {
             loading.value = false;
@@ -637,7 +644,8 @@ SMT.assembly = function (ctx) {
     const getAssemblyUploadedDates = (limit = 14) => {
         const dates = new Set();
         assemblyBatches.value.forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, bucket]) => {
-            if ((bucket.parsedLines || 0) > 0) dates.add(date);
+            const hasData = (bucket.parsedLines || 0) > 0 || (bucket.success || 0) + (bucket.ng || 0) + (bucket.ignored || 0) + (bucket.unclassified || 0) > 0;
+            if (hasData) dates.add(date);
         }));
         return [...dates].sort().slice(-limit);
     };
@@ -713,27 +721,42 @@ SMT.assembly = function (ctx) {
         }
     };
 
-    const uploadAssemblyLog = async (event) => {
-        const file = event.target.files && event.target.files[0];
-        if (!file) return;
-        loading.value = true;
-        try {
-            const decoded = decodeBytes(await file.arrayBuffer());
-            const fallbackDate = today();
-            const parsed = parseText(decoded.text, fallbackDate, assemblyMappings.value);
-            setAssemblyDateFromParsedLog(parsed, fallbackDate);
-            const pending = { text: decoded.text, fallbackDate, encoding: decoded.encoding, fileName: file.name };
-            if (parsed.unknownMessages.length) {
-                pendingAssemblyUpload.value = pending;
-                assemblyUnknownModal.value = { show: true, items: parsed.unknownMessages, currentIndex: 0, selectedDefectName: '', newDefectName: '' };
-                toast('發現 ' + parsed.unknownMessages.length + ' 個尚未分類的 LOG 訊息，請逐筆設定不良項目', 'warning');
-            } else {
+    const finishAssemblyUploadQueue = queue => {
+        if (queue.success) toast(`Mylar 完成 ${queue.success} 個檔案上傳${queue.failed.length ? `，失敗 ${queue.failed.length} 個` : ''}`, queue.failed.length ? 'warning' : 'success');
+        else if (queue.failed.length) toast('Mylar 檔案全部處理失敗', 'error');
+    };
+    const processAssemblyUploadQueue = async queue => {
+        for (let index = queue.index; index < queue.files.length; index++) {
+            const file = queue.files[index];
+            try {
+                const decoded = decodeBytes(await file.arrayBuffer());
+                const fallbackDate = today();
+                const parsed = parseText(decoded.text, fallbackDate, assemblyMappings.value);
+                setAssemblyDateFromParsedLog(parsed, fallbackDate);
+                const pending = { text: decoded.text, fallbackDate, encoding: decoded.encoding, fileName: file.name };
+                if (parsed.unknownMessages.length) {
+                    queue.index = index;
+                    pendingAssemblyUpload.value = { queue, pending };
+                    assemblyUnknownModal.value = { show: true, items: parsed.unknownMessages, currentIndex: 0, selectedDefectName: '', newDefectName: '' };
+                    toast('發現 ' + parsed.unknownMessages.length + ' 個尚未分類的 LOG 訊息，請逐筆設定不良項目', 'warning');
+                    return false;
+                }
                 await saveAssemblyBatch(pending, parsed);
+                queue.success++;
+            } catch (error) {
+                queue.failed.push(`${file.name}：${error.message}`);
             }
-        } catch (e) {
-            console.error(e);
-            toast('LOG 分析失敗：' + e.message, 'error');
-        } finally {
+        }
+        finishAssemblyUploadQueue(queue);
+        return true;
+    };
+    const uploadAssemblyLog = async (event) => {
+        const files = [...(event.target.files || [])].filter(file => /\.(txt|log|csv)$/i.test(file.name || ''));
+        if (!files.length) return;
+        const queue = { files, index: 0, success: 0, failed: [] };
+        loading.value = true;
+        try { await processAssemblyUploadQueue(queue); }
+        finally {
             loading.value = false;
             event.target.value = '';
         }

@@ -199,6 +199,11 @@ SMT.dashboard = function (ctx) {
         const refreshDashboard = async () => {
             if (currentLine.value === 'ASSY') {
                 assemblyDashboardResult.value = getAssemblyReportForDate(dashDate.value);
+                const uploadedDates = getAssemblyUploadedDates ? getAssemblyUploadedDates(200) : [];
+                if (!assemblyDashboardResult.value.totalRecords && dashDate.value === new Date().toISOString().split('T')[0] && uploadedDates.length) {
+                    dashDate.value = uploadedDates[uploadedDates.length - 1];
+                    return;
+                }
                 const weekRange = getWeekRange(dashDate.value);
                 assemblyWeekDays.value = (getAssemblyUploadedDates ? getAssemblyUploadedDates(200) : [])
                     .filter(date => date >= weekRange.start && date <= weekRange.end)

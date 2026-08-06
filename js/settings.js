@@ -18,7 +18,7 @@ SMT.settings = function (ctx) {
                 ? Object.fromEntries(Object.entries(settingConfig.value).filter(([key]) => !hiddenKeys.has(key)))
                 : settingConfig.value;
         });
-        const showEquipmentModelSettings = computed(() => currentLine.value !== 'ASSY');
+        const showEquipmentModelSettings = computed(() => currentLine.value === 'SMT');
         const editingId = ref(null); const editingValue = ref('');
         const sortedList = (key) => { 
             let list = [];

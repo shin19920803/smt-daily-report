@@ -80,19 +80,11 @@
             <a v-if="!hideLineTools" @click="currentTab = 'equipment'" :class="{'active': currentTab === 'equipment'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-tools w-5 text-center mr-3 text-sm"></i> <span class="text-sm">設備管理</span>
             </a>
-            <a @click="currentTab = 'settings'" :class="{'active': currentTab === 'settings'}" class="sidebar-link rounded-lg">
+            <a v-if="!hideSettings" @click="currentTab = 'settings'" :class="{'active': currentTab === 'settings'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-cog w-5 text-center mr-3 text-sm"></i> <span class="text-sm">基礎設定</span>
             </a>
         </nav>
-        <div class="p-4 border-t border-slate-700/50">
-            <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">OP</div>
-                <div>
-                    <div class="text-xs text-white font-bold">操作員</div>
-                    <div class="text-[10px] text-slate-500">{{ currentLineMeta.label }} 產線</div>
-                </div>
-            </div>
-        </div>
+        <div class="h-20 border-t border-slate-700/50"></div>
     </aside>
 
     <!-- Main Content -->
@@ -331,10 +323,16 @@
                                 <button @click="shiftAssemblyUploadDate(1)" class="quick-arrow" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right"></i></button>
                             </div>
                         </div>
-                        <label class="btn-primary cursor-pointer text-center">
-                            <i class="fas fa-upload mr-1"></i>選擇 LOG 檔案
-                            <input type="file" accept=".txt,.log,.csv" @change="uploadAssemblyLog" class="hidden">
-                        </label>
+                        <div class="flex flex-wrap gap-2">
+                            <label class="btn-primary cursor-pointer text-center">
+                                <i class="fas fa-upload mr-1"></i>選擇多個 LOG 檔案
+                                <input type="file" accept=".txt,.log,.csv" multiple @change="uploadAssemblyLog" class="hidden">
+                            </label>
+                            <label class="btn-ghost cursor-pointer text-center">
+                                <i class="fas fa-folder-open mr-1"></i>選擇 LOG 資料夾
+                                <input type="file" accept=".txt,.log,.csv" webkitdirectory directory multiple @change="uploadAssemblyLog" class="hidden">
+                            </label>
+                        </div>
                         <button @click="refreshAssemblyReport" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
                     </div>
                     <div v-if="assemblyLastFile" class="mt-3 text-xs text-gray-500"><i class="fas fa-file-lines mr-1 text-orange-500"></i>最近上傳：<b>{{ assemblyLastFile }}</b></div>
@@ -348,7 +346,7 @@
                             <button @click="deleteAssemblyBatch(batch.id)" class="text-red-400 hover:text-red-600 px-1" title="刪除此上傳統計"><i class="fas fa-trash-alt"></i></button>
                         </div>
                     </div>
-                    <div class="mt-3 text-xs text-gray-400">上傳後會自動切換到 LOG 內最新日期；沒有日期的行會歸到今天。可用左右箭頭查看其他日期。</div>
+                    <div class="mt-3 text-xs text-gray-400">可一次選擇多個檔案，或選擇整個資料夾批次上傳；系統會依 LOG 內日期整理，可用左右箭頭查看其他日期。</div>
                 </div>
 
                 <div v-if="assemblyUnknownModal.show" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4">
@@ -431,6 +429,7 @@
                     <div class="mt-3 text-xs text-gray-400">可一次上傳多個工單檔案；每個檔案會獨立保存，統計時可依日期、機種與工單篩選。</div>
                     <div v-if="dafUploadSummary.files" class="mt-3 p-3 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-800">
                         <i class="fas fa-circle-check mr-1"></i>本次完成 {{ dafUploadSummary.files }} 個檔案，共 {{ dafUploadSummary.rows.toLocaleString() }} 列
+                        <span v-if="dafUploadSummary.duplicates" class="text-orange-700 ml-2">已排除重複 {{ dafUploadSummary.duplicates.toLocaleString() }} 列</span>
                         <span v-if="dafUploadSummary.failed.length" class="text-red-600 ml-2">失敗 {{ dafUploadSummary.failed.length }} 個：{{ dafUploadSummary.failed.join('；') }}</span>
                     </div>
                 </div>
@@ -1592,7 +1591,7 @@
             </div>
         </div>
         <!-- ==================== SETTINGS ==================== -->
-        <div v-if="currentTab === 'settings'" class="animate-fade-in">
+        <div v-if="currentTab === 'settings' && !hideSettings" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-cog mr-2 text-gray-500"></i>系統基礎設定</h2>
             
             <!-- FPY Target Settings -->
@@ -1688,7 +1687,7 @@
                 <a v-if="!hideOoc" @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
                 <a v-if="!hideLineTools" @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
-                <a @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
+                <a v-if="!hideSettings" @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
                 <div class="border-t border-gray-100 mt-2 pt-2">
                     <div class="px-4 pb-1 text-[10px] font-bold text-gray-400">切換產線</div>
                     <a v-for="l in lines" :key="l.id" @click="switchLine(l.id); showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentLine===l.id ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas w-5 mr-2" :class="l.icon"></i>{{ l.label }}<i v-if="currentLine===l.id" class="fas fa-check ml-auto text-xs"></i></a>
@@ -1700,17 +1699,17 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608061700"></script>
+<script src="js/core.js?v=202608061900"></script>
 <script src="js/orders.js?v=202608061700"></script>
 <script src="js/report.js?v=202608052100"></script>
-<script src="js/assembly.js?v=202608061700"></script>
-<script src="js/daf.js?v=202608061700"></script>
+<script src="js/assembly.js?v=202608061900"></script>
+<script src="js/daf.js?v=202608061900"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608061700"></script>
+<script src="js/dashboard.js?v=202608061900"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
-<script src="js/settings.js?v=202608052100"></script>
+<script src="js/settings.js?v=202608061900"></script>
 <script src="js/app.js?v=202608051600"></script>
 </body>
 </html>

@@ -269,7 +269,12 @@
                             <h4 class="font-black text-gray-700 mb-3"><i class="fas mr-2 text-blue-500" :class="section.icon"></i>{{ section.title }}</h4>
                             <div class="space-y-1.5 max-h-64 overflow-y-auto">
                                 <template v-for="item in section.items" :key="item.label">
-                                    <button v-if="item.detail" @click="openDashboardDetailItem(item)" class="w-full flex items-center gap-2 rounded-lg p-2 text-left hover:bg-blue-50 transition"><span class="flex-1 min-w-0 truncate text-sm font-bold">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><i class="fas fa-chevron-right text-gray-300 text-xs"></i></button>
+                                    <div v-if="item.isHourlyNote" class="rounded-lg p-2 bg-blue-50 border border-blue-100">
+                                        <div class="flex items-center gap-2"><span class="flex-1 min-w-0 truncate text-sm font-bold text-blue-900">{{ item.label }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div>
+                                        <textarea v-model="item.draftNote" rows="2" class="mt-2 w-full border border-blue-200 rounded p-2 text-xs bg-white" placeholder="填寫此時段備註"></textarea>
+                                        <div class="flex justify-end mt-1"><button @click="saveDashboardHourNote(item)" class="px-2 py-1 rounded bg-blue-600 text-white text-xs font-bold"><i class="fas fa-save mr-1"></i>儲存此時段備註</button></div>
+                                    </div>
+                                    <button v-else-if="item.detail" @click="openDashboardDetailItem(item)" class="w-full flex items-center gap-2 rounded-lg p-2 text-left hover:bg-blue-50 transition"><span class="flex-1 min-w-0 truncate text-sm font-bold">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><i class="fas fa-chevron-right text-gray-300 text-xs"></i></button>
                                     <div v-else class="flex items-center gap-2 rounded-lg p-2 bg-gray-50"><span class="flex-1 min-w-0 truncate text-sm">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div>
                                 </template>
                                 <div v-if="!section.items || section.items.length === 0" class="text-xs text-gray-400 py-3 text-center">無資料</div>
@@ -287,7 +292,7 @@
 
         <!-- ==================== REPORT ==================== -->
         <div v-if="currentTab === 'report'" class="space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex items-center gap-2"><button v-if="currentLine === 'SMT'" @click="currentTab = 'orders'" class="btn-ghost text-sm"><i class="fas fa-arrow-left mr-1"></i>返回工單管理</button><h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>每日生產日報表</h2></div>
+            <div class="flex items-center gap-2"><button v-if="currentLine === 'SMT'" @click="backFromReport" class="btn-ghost text-sm"><i class="fas fa-arrow-left mr-1"></i>返回工單管理</button><h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>每日生產日報表</h2></div>
             <div v-if="currentLine === 'ASSY'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4 md:p-6 border-l-4 border-orange-500">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -505,7 +510,7 @@
                     <!-- Step 1 -->
                     <div class="section-card p-4 md:p-6 border-l-4 border-blue-500 relative">
                         <div class="flex items-center gap-2 mb-4">
-                            <button v-if="report.selectedWoNumber && report.wo_id" @click="backToWoList" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-blue-500 hover:text-white text-gray-600 flex items-center justify-center transition" title="返回工單選擇"><i class="fas fa-arrow-left text-sm"></i></button>
+                            <button v-if="report.selectedWoNumber && report.wo_id" @click="backFromReport" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-blue-500 hover:text-white text-gray-600 flex items-center justify-center transition" title="返回工單管理"><i class="fas fa-arrow-left text-sm"></i></button>
                             <h3 class="font-bold text-lg text-blue-800">步驟 1: 設定生產數據</h3>
                             <span v-if="report.currentId" class="bg-yellow-50 text-yellow-700 text-xs px-2 py-0.5 rounded-full font-bold ml-auto"><i class="fas fa-pen mr-1"></i>編輯模式</span>
                         </div>
@@ -1687,13 +1692,13 @@
 
 <script src="js/supabase-client.js?v=202608041323"></script>
 <script src="js/core.js?v=202608062130"></script>
-<script src="js/orders.js?v=202608062300"></script>
-<script src="js/report.js?v=202608062300"></script>
-<script src="js/assembly.js?v=202608062330"></script>
-<script src="js/daf.js?v=202608062300"></script>
+<script src="js/orders.js?v=202608062500"></script>
+<script src="js/report.js?v=202608062500"></script>
+<script src="js/assembly.js?v=202608062500"></script>
+<script src="js/daf.js?v=202608062500"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608061900"></script>
+<script src="js/dashboard.js?v=202608062500"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>

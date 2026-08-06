@@ -789,7 +789,7 @@ SMT.assembly = function (ctx) {
             items: row?.sourceItems || [],
             hourly: (row?.hourly || []).map(item => {
                 const note = assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
-                return { ...item, note, draftNote: note, editing: false };
+                return { ...item, note, draftNote: note };
             }),
             total: row?.qty || 0,
             note: assemblyDefectNotes.value[category] || '',
@@ -806,14 +806,6 @@ SMT.assembly = function (ctx) {
         assemblySourceDetail.value = { ...assemblySourceDetail.value, note: value, draftNote: value };
         toast('停機原因備註已儲存', 'success');
     };
-    const toggleAssemblyHourNote = hour => {
-        assemblySourceDetail.value = {
-            ...assemblySourceDetail.value,
-            hourly: assemblySourceDetail.value.hourly.map(item => item.hour === hour
-                ? { ...item, editing: !item.editing, draftNote: item.note || '' }
-                : item)
-        };
-    };
     const saveAssemblyHourNote = (category, hour, note) => {
         const value = String(note || '').trim();
         const key = hourlyNoteKey(category, hour);
@@ -822,7 +814,7 @@ SMT.assembly = function (ctx) {
         assemblySourceDetail.value = {
             ...assemblySourceDetail.value,
             hourly: assemblySourceDetail.value.hourly.map(item => item.hour === hour
-                ? { ...item, note: value, draftNote: value, editing: false }
+                ? { ...item, note: value, draftNote: value }
                 : item)
         };
         toast(value ? '每小時備註已儲存' : '每小時備註已清除', 'success');
@@ -982,7 +974,7 @@ SMT.assembly = function (ctx) {
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote, toggleAssemblyHourNote, saveAssemblyHourNote,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote, saveAssemblyHourNote,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

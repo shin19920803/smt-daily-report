@@ -41,7 +41,11 @@ SMT.orders = function (ctx) {
         const selectWoForCalendar = (wo) => { selectedWoId.value = selectedWoId.value === wo.id ? null : wo.id; };
         const openDayDetail = (day) => { dayDetailModal.value = { show: true, date: day.dateStr, list: day.productions }; };
         const openWoModal = (wo = null) => { if (wo) { isEditingWo.value = true; woForm.value = { id: wo.id, number: wo.wo_number, modelId: wo.model_id, selectedModelIds: [], targetQty: wo.target_quantity }; } else { isEditingWo.value = false; woForm.value = { id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' }; } showWoModal.value = true; };
-        const openDailyReport = () => { currentTab.value = 'report'; };
+        const openDailyReport = () => {
+            const selected = data.value.workOrders.find(wo => wo.id === selectedWoId.value);
+            currentTab.value = 'report';
+            if (selected && ctx.selectReportWo) ctx.selectReportWo(selected.wo_number, selected.id);
+        };
         const saveWorkOrder = async () => { const { id, number, modelId, selectedModelIds, targetQty } = woForm.value; if (!number || !targetQty) return toast("請填寫工單號碼與數量", "warning"); loading.value = true; try { if (isEditingWo.value && id) { if (!modelId) return toast("請選擇機種", "warning"); await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty }).eq('id', id); } else { if (selectedModelIds.length === 0) return toast("請至少勾選一個機種", "warning"); for (const mId of selectedModelIds) { const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === mId); if (!isDuplicate) await _supabase.from('work_orders').insert({ wo_number: number, model_id: mId, target_quantity: targetQty, is_closed: false, line: currentLine.value }); } } showWoModal.value = false; loadBaseData(); toast(isEditingWo.value ? "更新成功" : "工單已建立"); } catch (e) { toast("操作失敗", "error"); } finally { loading.value = false; } };
         const deleteWorkOrder = async (id) => { if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return; loading.value = true; await _supabase.from('work_orders').delete().eq('id', id); loadBaseData(); loading.value = false; toast("工單已刪除", "info"); };
         

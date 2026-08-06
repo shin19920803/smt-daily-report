@@ -614,7 +614,7 @@
                 <div class="section-card flex flex-col h-[400px] md:h-[600px]">
                     <div class="p-4 bg-gray-50/50 border-b font-bold text-gray-600 flex justify-between items-center text-sm"><span><i class="fas fa-history mr-2 text-blue-500"></i>近期生產紀錄</span><button @click="loadHistory" class="text-blue-600 text-xs hover:underline"><i class="fas fa-sync"></i></button></div>
                     <div class="overflow-y-auto flex-1 p-2 space-y-2">
-                        <div v-for="rec in historyList" :key="rec.id" @click="loadRecordForEdit(rec)" class="p-3 border rounded-lg cursor-pointer hover:shadow-sm transition text-sm group relative" :class="report.currentId === rec.id ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-400' : 'bg-white border-gray-100'">
+                        <div v-for="rec in reportHistoryList" :key="rec.id" @click="loadRecordForEdit(rec)" class="p-3 border rounded-lg cursor-pointer hover:shadow-sm transition text-sm group relative" :class="report.currentId === rec.id ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-400' : 'bg-white border-gray-100'">
                             <div class="flex justify-between items-start mb-1"><span class="font-bold text-gray-700">{{ rec.production_date }}</span><span class="text-[10px] text-gray-400 font-mono">ID:{{ rec.id }}</span></div>
                             <div class="text-blue-600 font-bold mb-0.5 font-mono text-xs">{{ rec.work_orders?.wo_number }}</div>
                             <div class="text-gray-400 text-xs mb-2">{{ rec.work_orders?.models?.name }}</div>
@@ -625,7 +625,7 @@
                             </div>
                             <button @click.stop="deleteDailyRecord(rec.id)" class="absolute top-2 right-2 opacity-100 md:opacity-0 group-hover:opacity-100 bg-white text-red-300 hover:text-red-600 shadow-sm border px-2 py-0.5 rounded transition"><i class="fas fa-trash text-xs"></i></button>
                         </div>
-                        <div v-if="historyList.length === 0" class="empty-state py-10">
+                        <div v-if="reportHistoryList.length === 0" class="empty-state py-10">
                             <i class="fas fa-clipboard"></i>
                             <div class="title">尚無紀錄</div>
                             <div class="hint">完成步驟 1 後紀錄會出現在這裡</div>
@@ -1696,10 +1696,10 @@
 
 <script src="js/supabase-client.js?v=202608041323"></script>
 <script src="js/core.js?v=202608062130"></script>
-<script src="js/orders.js?v=202608061700"></script>
-<script src="js/report.js?v=202608052100"></script>
+<script src="js/orders.js?v=202608062300"></script>
+<script src="js/report.js?v=202608062300"></script>
 <script src="js/assembly.js?v=202608062130"></script>
-<script src="js/daf.js?v=202608062130"></script>
+<script src="js/daf.js?v=202608062300"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608061900"></script>

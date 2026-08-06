@@ -9,6 +9,7 @@ SMT.daf = function (ctx) {
     const MODEL_MAPPING_STORAGE_KEY = 'koya_daf_model_mappings_v1';
     const COL_WORK_ORDER = 2;
     const COL_PRODUCT_CODE = 4;
+    const COL_DEDUP_KEY = 5;
     const COL_DATE = 6;
     const COL_DEFECT = 8;
     const COL_STATUS = 9;
@@ -41,7 +42,7 @@ SMT.daf = function (ctx) {
     const dafRemoteReady = ref(false);
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
-    const dafUploadSummary = ref({ files: 0, rows: 0, failed: [] });
+    const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, failed: [] });
     const dafModelMappings = ref({});
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
@@ -92,12 +93,12 @@ SMT.daf = function (ctx) {
         if (!parts || !parts.y || !parts.m || !parts.d) return null;
         return new Date(parts.y, parts.m - 1, parts.d, parts.H || 0, parts.M || 0, parts.S || 0);
     };
-    const parseDate = (value) => {
-        if (value instanceof Date && validDate(value)) return fmtDate(value);
+    const parseDateTime = (value) => {
+        if (value instanceof Date && validDate(value)) return value;
         const serialDate = excelDate(value);
-        if (serialDate) return fmtDate(serialDate);
+        if (serialDate) return serialDate;
         let text = cleanText(value);
-        if (!text) return '';
+        if (!text) return null;
         const isPm = /下午|PM/i.test(text);
         const isAm = /上午|AM/i.test(text);
         text = text.replace(/上午|下午|AM|PM/ig, ' ').replace(/\s+/g, ' ').trim();
@@ -109,10 +110,29 @@ SMT.daf = function (ctx) {
             if (isPm && hour < 12) hour += 12;
             if (isAm && hour === 12) hour = 0;
             const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), hour, minute, second);
-            if (validDate(date) && date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3])) return fmtDate(date);
+            if (validDate(date) && date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3])) return date;
         }
         const fallback = new Date(text);
-        return validDate(fallback) ? fmtDate(fallback) : '';
+        return validDate(fallback) ? fallback : null;
+    };
+    const parseDate = value => { const parsed = parseDateTime(value); return parsed ? fmtDate(parsed) : ''; };
+    const deduplicateRows = rows => {
+        const grouped = new Map();
+        const passthrough = [];
+        rows.forEach((row, index) => {
+            const key = normalizeText(row[COL_DEDUP_KEY]);
+            if (!key) {
+                passthrough.push({ row, index });
+                return;
+            }
+            const parsedTime = parseDateTime(row[COL_DATE]);
+            const timestamp = parsedTime ? parsedTime.getTime() : Number.MAX_SAFE_INTEGER;
+            const previous = grouped.get(key);
+            if (!previous || timestamp < previous.timestamp) grouped.set(key, { row, index, timestamp });
+        });
+        return [...passthrough, ...grouped.values()]
+            .sort((a, b) => a.index - b.index)
+            .map(item => item.row);
     };
     const decodeBytes = (bytes) => {
         const attempts = ['utf-8', 'big5', 'windows-1252', 'gb18030'];
@@ -184,7 +204,9 @@ SMT.daf = function (ctx) {
         return { display: start === end ? start : `${start}～${end}`, start, end, dates: [...new Set(dates)] };
     };
     const analyzeFile = async (file) => {
-        const { rows, columnCount } = await readFileRows(file);
+        const { rows: sourceRows, columnCount } = await readFileRows(file);
+        const rows = deduplicateRows(sourceRows);
+        const duplicateCount = sourceRows.length - rows.length;
         const model = detectModel(rows);
         const dateRange = detectDateRange(rows);
         const statuses = rows.map(row => normalizeText(row[COL_STATUS]));
@@ -234,6 +256,8 @@ SMT.daf = function (ctx) {
             rawColumnCount: columnCount,
             unknownProductCodes: model.unknownProductCodes,
             unknownProductDetails: model.unknownProductDetails,
+            duplicateCount,
+            rawRowCount: sourceRows.length,
             records
         };
     };
@@ -574,9 +598,9 @@ SMT.daf = function (ctx) {
     };
     const finishDafUploadQueue = queue => {
         persistStorage();
-        dafUploadSummary.value = { files: queue.success, rows: queue.rows, failed: queue.failed };
+        dafUploadSummary.value = { files: queue.success, rows: queue.rows, duplicates: queue.duplicates, failed: queue.failed };
         if (dafStatsResult.value) dafStatsResult.value = buildDafStats();
-        if (queue.success) toast(`DAF 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
+        if (queue.success) toast(`DAF 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
         else toast('DAF 檔案全部處理失敗', 'error');
     };
     const processDafUploadQueue = async queue => {
@@ -600,6 +624,7 @@ SMT.daf = function (ctx) {
                 dafLastUpload.value = batch;
                 learnModelMappings([batch]);
                 queue.rows += batch.rowCount;
+                queue.duplicates += batch.duplicateCount || 0;
                 queue.success++;
                 if (dafRemoteReady.value && !remoteSaved) queue.failed.push(`${file.name}：共用資料庫寫入失敗`);
             } catch (error) { queue.failed.push(`${file.name}：${error.message}`); }
@@ -610,7 +635,7 @@ SMT.daf = function (ctx) {
     const uploadDafFiles = async event => {
         const files = [...(event.target.files || [])];
         if (!files.length) return;
-        const queue = { files, index: 0, success: 0, rows: 0, failed: [] };
+        const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, failed: [] };
         loading.value = true;
         try { await processDafUploadQueue(queue); }
         finally {

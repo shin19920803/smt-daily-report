@@ -26,6 +26,7 @@ SMT.core = function (ctx) {
         const hideOrders = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
         const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
         const hideDailyReport = computed(() => currentLine.value === 'SMT');
+        const hideSettings = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -117,8 +118,7 @@ SMT.core = function (ctx) {
             const target = validLine(lineId);
             if (target === currentLine.value) return;
             if ((target === 'SMT' && ['report', 'ooc'].includes(currentTab.value)) ||
-                (target === 'ASSY' && ['fpy', 'ooc', 'equipment', 'orders'].includes(currentTab.value)) ||
-                (target === 'DAF' && ['fpy', 'ooc', 'equipment', 'orders'].includes(currentTab.value))) {
+                (['ASSY', 'DAF'].includes(target) && ['fpy', 'ooc', 'equipment', 'orders', 'settings'].includes(currentTab.value))) {
                 currentTab.value = target === 'SMT' ? 'orders' : 'dashboard';
             }
             currentLine.value = target;
@@ -153,7 +153,7 @@ SMT.core = function (ctx) {
             getWoColor, fpyTargets, saveFpyTargets, loadFpyTargets, isFpyBelowTarget, todayStr,
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
-            lines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, canImport, switchLine,
+            lines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, hideSettings, canImport, switchLine,
             permissionModal, requestPermission, submitPermission, cancelPermission
         };
 };

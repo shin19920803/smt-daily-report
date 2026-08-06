@@ -62,13 +62,13 @@
             <a @click="currentTab = 'dashboard'" :class="{'active': currentTab === 'dashboard'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-th-large w-5 text-center mr-3 text-sm"></i> <span class="text-sm">總覽儀表板</span>
             </a>
-            <a @click="currentTab = 'report'" :class="{'active': currentTab === 'report'}" class="sidebar-link rounded-lg">
+            <a v-if="!hideDailyReport" @click="currentTab = 'report'" :class="{'active': currentTab === 'report'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-edit w-5 text-center mr-3 text-sm"></i> <span class="text-sm">每日報工</span>
             </a>
             <a v-if="!hideLineTools" @click="currentTab = 'fpy'" :class="{'active': currentTab === 'fpy'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-check-double w-5 text-center mr-3 text-sm"></i> <span class="text-sm">直通率管理</span>
             </a>
-            <a v-if="!hideLineTools" @click="currentTab = 'ooc'" :class="{'active': currentTab === 'ooc'}" class="sidebar-link rounded-lg">
+            <a v-if="!hideOoc" @click="currentTab = 'ooc'" :class="{'active': currentTab === 'ooc'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-exclamation-triangle w-5 text-center mr-3 text-sm"></i> <span class="text-sm">OOC 紀錄</span>
             </a>
             <a v-if="!hideOrders" @click="currentTab = 'orders'" :class="{'active': currentTab === 'orders'}" class="sidebar-link rounded-lg">
@@ -126,19 +126,20 @@
                 </div>
                 <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} Mylar 概況</p>
                 <div v-if="assemblyDashboardResult" class="space-y-5">
-                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyDashboardResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
-                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ assemblyDashboardResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">停機／不良</div></div>
-                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ assemblyDashboardResult.downtimeRate }}%</div><div class="kpi-label">停機率</div></div>
-                        <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-list-ol"></i></div><div class="kpi-value">{{ assemblyDashboardResult.totalRecords.toLocaleString() }}</div><div class="kpi-label">有效紀錄</div></div>
+                    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                        <div class="kpi-card cursor-pointer" @click="openAssemblyInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyDashboardResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openAssemblyDefectDashboardDetail"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ assemblyDashboardResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">停機／不良</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openAssemblyRateDetail"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ assemblyDashboardResult.downtimeRate }}%</div><div class="kpi-label">停機率</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openAssemblyInputDetail"><div class="kpi-icon cyan"><i class="fas fa-list-ol"></i></div><div class="kpi-value">{{ assemblyDashboardResult.totalRecords.toLocaleString() }}</div><div class="kpi-label">有效紀錄</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openAssemblyWeekDetail"><div class="kpi-icon cyan"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-danger">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均停機率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-line text-xs"></i></div>近 14 日停機率趨勢</div><div id="dashAssemblyDowntimeChart" style="width:100%;height:220px;"></div></div>
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ffedd5;color:#ea580c"><i class="fas fa-chart-bar text-xs"></i></div>當日停機原因排行</div><div id="dashAssemblyReasonChart" style="width:100%;height:220px;"></div><div v-if="assemblyDashboardResult.byType.length === 0" class="empty-state py-5"><div class="hint">當日沒有停機／不良</div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-ranking-star text-orange-500"></i>當日不良比例</h3><div v-if="assemblyDashboardResult.byType.length" class="space-y-2"><div v-for="(row, idx) in assemblyDashboardResult.byType" :key="row.name" class="flex items-center gap-2"><span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'">{{ idx + 1 }}</span><span class="flex-1 text-sm font-bold truncate">{{ row.name }}</span><span class="font-mono text-sm text-red-600">{{ row.qty }}</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></div></div><div v-else class="empty-state py-8"><div class="hint">無資料</div></div></div>
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>當日每小時停機</h3><div class="table-wrap max-h-80"><table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyDashboardResult.hourly.filter(item => item.total > 0)" :key="row.hour"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyDashboardResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody></table></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-ranking-star text-orange-500"></i>當日不良比例</h3><div v-if="assemblyDashboardResult.byType.length" class="space-y-2"><button v-for="(row, idx) in assemblyDashboardResult.byType" :key="row.name" @click="openAssemblyReasonDashboard(row)" class="w-full flex items-center gap-2 text-left hover:bg-orange-50 rounded-lg p-1"><span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'">{{ idx + 1 }}</span><span class="flex-1 text-sm font-bold truncate">{{ row.name }}</span><span class="font-mono text-sm text-red-600">{{ row.qty }}</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>當日每小時停機</h3><div class="table-wrap max-h-80"><table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyDashboardResult.hourly.filter(item => item.total > 0)" :key="row.hour" @click="openAssemblyDateDetail(dashDate)" class="cursor-pointer hover:bg-blue-50"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyDashboardResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody></table></div></div>
                     </div>
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 Mylar LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
@@ -158,19 +159,20 @@
                 </div>
                 <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} DAF 生產概況</p>
                 <div v-if="dafDashboardResult && dafDashboardResult.sourceFiles.length" class="space-y-5">
-                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
-                        <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafDashboardResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
-                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">不良數</div></div>
-                        <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.defectRate }}%</div><div class="kpi-label">不良率</div></div>
+                    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                        <div class="kpi-card cursor-pointer" @click="openDafInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openDafYieldDetail"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafDashboardResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openDafDefectDashboardDetail"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">不良數</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openDafYieldDetail"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ dafDashboardResult.defectRate }}%</div><div class="kpi-label">不良率</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openDafWeekDetail"><div class="kpi-icon purple"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-success">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均良率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-column text-xs"></i></div>近 14 個有資料日期產能</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-bar text-xs"></i></div>當日不良原因排行</div><div id="dashDafReasonChart" style="width:100%;height:240px;"></div><div v-if="!dafDashboardResult.byType.length" class="empty-state py-5"><div class="hint">當日沒有不良資料</div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>當日機種分佈</h3><div v-if="dafDashboardResult.byModel.length" class="space-y-2"><div v-for="row in dafDashboardResult.byModel" :key="row.name" class="flex items-center gap-2 text-sm"><span class="flex-1 truncate font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></div></div><div v-else class="empty-state py-8"><div class="hint">無機種資料</div></div></div>
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="dafDashboardResult.byWorkOrder.length" class="space-y-2"><div v-for="row in dafDashboardResult.byWorkOrder" :key="row.name" class="flex items-center gap-2 text-sm"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></div></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>當日機種分佈</h3><div v-if="dafDashboardResult.byModel.length" class="space-y-2"><button v-for="row in dafDashboardResult.byModel" :key="row.name" @click="openDafModelDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-purple-50 rounded-lg p-1"><span class="flex-1 truncate font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無機種資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="dafDashboardResult.byWorkOrder.length" class="space-y-2"><button v-for="row in dafDashboardResult.byWorkOrder" :key="row.name" @click="openDafWorkOrderDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-blue-50 rounded-lg p-1"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
                     </div>
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 DAF LOG</div><div class="hint">前往「每日報工」上傳檔案；系統會自動切換到最新資料日期</div></div></div>
@@ -195,32 +197,27 @@
 
             <!-- KPI Cards -->
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <div class="kpi-card">
+                <div class="kpi-card cursor-pointer" @click="openSmtActiveWoDetail">
                     <div class="kpi-icon blue"><i class="fas fa-layer-group"></i></div>
                     <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.activeWoCount }}</div>
                     <div class="text-xs text-gray-400 font-medium">進行中工單</div>
                 </div>
-                <div class="kpi-card">
+                <div class="kpi-card cursor-pointer" @click="openSmtInputDetail">
                     <div class="kpi-icon green"><i class="fas fa-cubes"></i></div>
                     <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.todayInput }}</div>
                     <div class="text-xs text-gray-400 font-medium">當日投入</div>
                 </div>
-                <div class="kpi-card">
+                <div class="kpi-card cursor-pointer" @click="openSmtYieldDetail">
                     <div class="kpi-icon purple"><i class="fas fa-chart-pie"></i></div>
                     <div class="text-2xl font-black mb-0.5" :class="dashboard.todayYield >= 98 ? 'text-green-600' : dashboard.todayYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.todayYield }}%</div>
                     <div class="text-xs text-gray-400 font-medium">當日良率</div>
                 </div>
-                <div class="kpi-card">
+                <div class="kpi-card cursor-pointer" @click="openSmtDefectDetail">
                     <div class="kpi-icon red"><i class="fas fa-times-circle"></i></div>
                     <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.todayDefects }}</div>
                     <div class="text-xs text-gray-400 font-medium">當日不良</div>
                 </div>
-                <div class="kpi-card">
-                    <div class="kpi-icon yellow"><i class="fas fa-exclamation-triangle"></i></div>
-                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.monthOocCount }}</div>
-                    <div class="text-xs text-gray-400 font-medium">本月 OOC</div>
-                </div>
-                <div class="kpi-card">
+                <div class="kpi-card cursor-pointer" @click="openSmtWeekDetail">
                     <div class="kpi-icon cyan"><i class="fas fa-chart-line"></i></div>
                     <div class="text-2xl font-black mb-0.5" :class="dashboard.weekAvgYield >= 98 ? 'text-green-600' : dashboard.weekAvgYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.weekAvgYield }}%</div>
                     <div class="text-xs text-gray-400 font-medium">本週均良率</div>
@@ -250,20 +247,20 @@
                 <div class="section-card">
                     <div class="card-header"><div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-clock text-xs"></i></div>近期生產動態</div>
                     <div class="p-3 space-y-2 max-h-64 overflow-y-auto">
-                        <div v-for="rec in dashboardRecentProds" :key="rec.id" class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm border border-transparent hover:border-gray-100 transition">
+                        <button v-for="rec in dashboardRecentProds" :key="rec.id" @click="openDashboardDetail(rec.detail)" class="w-full flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm border border-transparent hover:border-gray-100 transition text-left">
                             <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">{{ rec.production_date.slice(8) }}</div>
+                                <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">{{ rec.date.slice(8) }}</div>
                                 <div>
-                                    <div class="font-bold text-gray-700">{{ rec.work_orders?.wo_number }}</div>
-                                    <div class="text-xs text-gray-400">{{ rec.work_orders?.models?.name }}</div>
+                                    <div class="font-bold text-gray-700">{{ rec.workOrder }}</div>
+                                    <div class="text-xs text-gray-400">{{ rec.model }}</div>
                                 </div>
                             </div>
                             <div class="text-right">
-                                <div class="font-bold font-mono">{{ rec.input_quantity }}</div>
-                                <div v-if="rec.defect_count > 0" class="text-xs text-red-500">不良 {{ rec.defect_count }}</div>
+                                <div class="font-bold font-mono">{{ rec.input }}</div>
+                                <div v-if="rec.defects > 0" class="text-xs text-red-500">不良 {{ rec.defects }}</div>
                                 <div v-else class="text-xs text-green-500">無不良</div>
                             </div>
-                        </div>
+                        </button>
                         <div v-if="dashboardRecentProds.length === 0" class="empty-state py-8">
                             <i class="fas fa-inbox"></i>
                             <div class="title">尚無生產紀錄</div>
@@ -272,37 +269,45 @@
                     </div>
                 </div>
 
-                <!-- Recent OOC -->
-                <div class="section-card">
-                    <div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-exclamation-circle text-xs"></i></div>近期品質異常</div>
-                    <div class="p-3 space-y-2 max-h-64 overflow-y-auto">
-                        <div v-for="rec in dashboardRecentOoc" :key="rec.id" class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm border border-transparent hover:border-gray-100 transition">
-                            <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-red-500"><i class="fas fa-exclamation"></i></div>
-                                <div>
-                                    <div class="font-bold text-red-600">{{ rec.ooc_causes?.name }}</div>
-                                    <div class="text-xs text-gray-400">{{ rec.work_orders?.wo_number }} · {{ rec.machines?.name }}</div>
-                                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- 共用儀表板細項彈窗：SMT／DAF／Mylar 所有可連動區塊共用 -->
+        <div v-if="dashboardDetail.show" class="fixed inset-0 bg-black/50 modal-backdrop flex items-center justify-center z-[65] p-4" @click.self="closeDashboardDetail">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] overflow-y-auto animate-fade-in">
+                <div class="p-5 border-b bg-gray-50/80 flex items-start justify-between gap-3">
+                    <div><h3 class="text-lg font-black text-gray-800"><i class="fas fa-magnifying-glass-chart mr-2 text-blue-600"></i>{{ dashboardDetail.title }}</h3><p class="text-xs text-gray-500 mt-1">{{ dashboardDetail.subtitle }}</p></div>
+                    <button @click="closeDashboardDetail" class="btn-ghost text-xs whitespace-nowrap">關閉</button>
+                </div>
+                <div class="p-5 space-y-5">
+                    <div v-if="dashboardDetail.metrics.length" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div v-for="metric in dashboardDetail.metrics" :key="metric.label" class="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center"><div class="text-xl font-black" :class="metric.tone === 'red' ? 'text-red-600' : metric.tone === 'green' ? 'text-green-600' : 'text-gray-800'">{{ metric.value.toLocaleString() }}</div><div class="text-xs text-gray-500 mt-1">{{ metric.label }}</div></div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <section v-for="section in dashboardDetail.sections" :key="section.title" class="border border-gray-100 rounded-xl p-4">
+                            <h4 class="font-black text-gray-700 mb-3"><i class="fas mr-2 text-blue-500" :class="section.icon"></i>{{ section.title }}</h4>
+                            <div class="space-y-1.5 max-h-64 overflow-y-auto">
+                                <template v-for="item in section.items" :key="item.label">
+                                    <button v-if="item.detail" @click="openDashboardDetailItem(item)" class="w-full flex items-center gap-2 rounded-lg p-2 text-left hover:bg-blue-50 transition"><span class="flex-1 min-w-0 truncate text-sm font-bold">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span><i class="fas fa-chevron-right text-gray-300 text-xs"></i></button>
+                                    <div v-else class="flex items-center gap-2 rounded-lg p-2 bg-gray-50"><span class="flex-1 min-w-0 truncate text-sm">{{ item.label }}</span><span v-if="item.meta" class="text-xs text-gray-400 truncate max-w-[38%]">{{ item.meta }}</span><span class="font-mono text-sm text-blue-700 whitespace-nowrap">{{ item.qty }}</span><span v-if="item.ratio" class="font-mono text-xs text-gray-500 whitespace-nowrap">{{ item.ratio }}</span></div>
+                                </template>
+                                <div v-if="!section.items || section.items.length === 0" class="text-xs text-gray-400 py-3 text-center">無資料</div>
                             </div>
-                            <div class="text-right text-xs text-gray-400">
-                                <div>{{ rec.production_date }}</div>
-                                <div v-if="rec.occurrence_time">{{ rec.occurrence_time.slice(0,5) }}</div>
-                            </div>
-                        </div>
-                        <div v-if="dashboardRecentOoc.length === 0" class="empty-state py-8">
-                            <i class="fas fa-shield-alt"></i>
-                            <div class="title">近期無異常</div>
-                            <div class="hint">品質狀態良好</div>
-                        </div>
+                        </section>
+                    </div>
+                    <div v-if="dashboardDetail.allowNote" class="border-t pt-4">
+                        <label class="block text-xs font-bold text-gray-500 mb-1">停機原因備註</label>
+                        <textarea v-model="dashboardDetail.note" rows="2" class="w-full border border-gray-200 rounded-lg p-2 text-sm" placeholder="補充此停機原因的處置或常見原因"></textarea>
+                        <div class="flex justify-end mt-2"><button @click="saveDashboardNote" class="btn-primary text-xs"><i class="fas fa-save mr-1"></i>儲存備註</button></div>
                     </div>
                 </div>
-            </div>
             </div>
         </div>
 
         <!-- ==================== REPORT ==================== -->
         <div v-if="currentTab === 'report'" class="space-y-4 md:space-y-6 animate-fade-in">
-            <h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>每日生產日報表</h2>
+            <div class="flex items-center gap-2"><button v-if="currentLine === 'SMT'" @click="currentTab = 'orders'" class="btn-ghost text-sm"><i class="fas fa-arrow-left mr-1"></i>返回工單管理</button><h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>每日生產日報表</h2></div>
             <div v-if="currentLine === 'ASSY'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4 md:p-6 border-l-4 border-orange-500">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -817,7 +822,7 @@
                 <h2 class="text-xl md:text-2xl font-black text-gray-800 self-start md:self-center"><i class="fas fa-clipboard-list mr-2 text-indigo-500"></i>工單管理</h2>
                 <div class="flex gap-2 w-full md:w-auto">
                     <div class="relative flex-1 md:w-64"><i class="fas fa-search absolute left-3 top-3 text-gray-300"></i><input v-model="orderSearch" placeholder="搜尋工單號或機種..." class="w-full border border-gray-200 p-2 pl-10 rounded-lg shadow-sm text-sm"></div>
-                    <button @click="openWoModal()" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-plus mr-1"></i> 新增工單</button>
+                    <div class="flex gap-2"><button v-if="currentLine === 'SMT'" @click="openDailyReport" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-edit mr-1"></i> 每日報工</button><button @click="openWoModal()" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-plus mr-1"></i> 新增工單</button></div>
                 </div>
             </div>
             <div class="section-card overflow-x-auto max-h-[400px] overflow-y-auto">
@@ -981,6 +986,18 @@
                                 </div>
                             </div>
                             <div v-else class="text-xs text-gray-500 bg-orange-50 border border-orange-100 rounded-lg p-3">此筆歷史資料尚未保存 LOG 原始細項；重新上傳檔案後即可查看。</div>
+                            <div class="mt-4 border-t pt-4">
+                                <h4 class="font-black text-blue-800 mb-2"><i class="fas fa-clock mr-2"></i>每小時發生次數</h4>
+                                <div v-if="assemblySourceDetail.hourly.length" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                    <div v-for="hour in assemblySourceDetail.hourly" :key="hour.hour" class="rounded-lg bg-blue-50 border border-blue-100 p-2 text-sm"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="font-black text-blue-900">{{ hour.qty }} 次</div></div>
+                                </div>
+                                <div v-else class="text-xs text-gray-400">沒有可用的小時資料。</div>
+                            </div>
+                            <div class="mt-4 border-t pt-4">
+                                <label class="block text-xs font-bold text-gray-500 mb-1">停機原因備註</label>
+                                <textarea v-model="assemblySourceDetail.draftNote" rows="2" class="w-full border border-gray-200 rounded-lg p-2 text-sm" placeholder="例如：吸嘴真空不足，常發生於換料後"></textarea>
+                                <div class="flex justify-end mt-2"><button @click="saveAssemblyDefectNote(assemblySourceDetail.category, assemblySourceDetail.draftNote)" class="btn-primary text-xs"><i class="fas fa-save mr-1"></i>儲存備註</button></div>
+                            </div>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1655,7 +1672,7 @@
         <a @click="currentTab = 'dashboard'" :class="currentTab === 'dashboard' ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item">
             <i class="fas fa-th-large text-base"></i><span class="text-[10px] mt-0.5 font-bold">總覽</span>
         </a>
-        <a @click="currentTab = 'report'" :class="currentTab === 'report' ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item">
+        <a v-if="!hideDailyReport" @click="currentTab = 'report'" :class="currentTab === 'report' ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item">
             <i class="fas fa-edit text-base"></i><span class="text-[10px] mt-0.5 font-bold">報工</span>
         </a>
         <a v-if="!hideLineTools" @click="currentTab = 'fpy'" :class="currentTab === 'fpy' ? 'active text-purple-600' : 'text-gray-400'" class="mobile-nav-item">
@@ -1668,7 +1685,7 @@
             <i class="fas fa-ellipsis-h text-base"></i><span class="text-[10px] mt-0.5 font-bold">更多</span>
             <!-- Popup -->
             <div v-if="showMobileMore" class="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl py-2 w-40 animate-fade-in">
-                <a v-if="!hideLineTools" @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
+                <a v-if="!hideOoc" @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
                 <a v-if="!hideLineTools" @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
                 <a @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
@@ -1683,14 +1700,14 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608052300"></script>
-<script src="js/orders.js?v=202608052100"></script>
+<script src="js/core.js?v=202608061700"></script>
+<script src="js/orders.js?v=202608061700"></script>
 <script src="js/report.js?v=202608052100"></script>
-<script src="js/assembly.js?v=202608060900"></script>
-<script src="js/daf.js?v=202608052100"></script>
+<script src="js/assembly.js?v=202608061700"></script>
+<script src="js/daf.js?v=202608061700"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608051800"></script>
+<script src="js/dashboard.js?v=202608061700"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608052100"></script>

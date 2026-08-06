@@ -419,17 +419,46 @@ SMT.daf = function (ctx) {
             const total = Object.values(map).reduce((sum, qty) => sum + qty, 0);
             return Object.entries(map).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, total) })).sort((a, b) => b.qty - a.qty);
         };
-        const defectMap = {}, modelMap = {}, workOrderMap = {};
+        const defectMap = {}, defectModelMap = {}, defectWorkOrderMap = {};
+        const modelMap = {}, workOrderMap = {};
         failRows.forEach(row => {
             const defect = row.defect || '未填寫不良原因';
+            const model = row.model || '未識別機種';
+            const workOrder = row.workOrder || '未識別工單';
             defectMap[defect] = (defectMap[defect] || 0) + 1;
+            if (!defectModelMap[defect]) defectModelMap[defect] = {};
+            if (!defectWorkOrderMap[defect]) defectWorkOrderMap[defect] = {};
+            defectModelMap[defect][model] = (defectModelMap[defect][model] || 0) + 1;
+            defectWorkOrderMap[defect][workOrder] = (defectWorkOrderMap[defect][workOrder] || 0) + 1;
         });
         inputRows.forEach(row => {
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
-            modelMap[model] = (modelMap[model] || 0) + 1;
-            workOrderMap[workOrder] = (workOrderMap[workOrder] || 0) + 1;
+            if (!modelMap[model]) modelMap[model] = { input: 0, good: 0, defects: 0, byWorkOrder: {} };
+            if (!workOrderMap[workOrder]) workOrderMap[workOrder] = { input: 0, good: 0, defects: 0, models: new Set(), byModel: {} };
+            modelMap[model].input++;
+            workOrderMap[workOrder].input++;
+            workOrderMap[workOrder].models.add(model);
+            modelMap[model].byWorkOrder[workOrder] = (modelMap[model].byWorkOrder[workOrder] || 0) + 1;
+            workOrderMap[workOrder].byModel[model] = (workOrderMap[workOrder].byModel[model] || 0) + 1;
+            if (row.status === 'GOOD') { modelMap[model].good++; workOrderMap[workOrder].good++; }
+            if (row.status === 'FAIL') { modelMap[model].defects++; workOrderMap[workOrder].defects++; }
         });
+        const byType = Object.entries(defectMap).map(([name, qty]) => ({
+            name, qty, ratio: mapRate(qty, failRows.length),
+            byModel: toList(defectModelMap[name]),
+            byWorkOrder: toList(defectWorkOrderMap[name])
+        })).sort((a, b) => b.qty - a.qty);
+        const byModel = Object.entries(modelMap).map(([name, value]) => ({
+            name, qty: value.input, input: value.input, good: value.good, defects: value.defects,
+            yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input),
+            ratio: mapRate(value.input, inputRows.length), byWorkOrder: toList(value.byWorkOrder)
+        })).sort((a, b) => b.input - a.input || b.defects - a.defects);
+        const byWorkOrder = Object.entries(workOrderMap).map(([name, value]) => ({
+            name, qty: value.input, input: value.input, good: value.good, defects: value.defects,
+            model: [...value.models].join(' / '), yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input),
+            ratio: mapRate(value.input, inputRows.length), byModel: toList(value.byModel)
+        })).sort((a, b) => b.input - a.input || b.defects - a.defects);
         return {
             date,
             totalInput: inputRows.length,
@@ -437,9 +466,9 @@ SMT.daf = function (ctx) {
             totalDefects: failRows.length,
             yieldRate: mapRate(goodRows.length, inputRows.length),
             defectRate: mapRate(failRows.length, inputRows.length),
-            byType: toList(defectMap),
-            byModel: toList(modelMap),
-            byWorkOrder: toList(workOrderMap),
+            byType,
+            byModel,
+            byWorkOrder,
             sourceFiles: [...new Set(rows.map(row => row.fileName).filter(Boolean))]
         };
     };

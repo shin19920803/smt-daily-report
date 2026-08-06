@@ -24,6 +24,8 @@ SMT.core = function (ctx) {
         // DAF／組裝測試先保留功能模組，但操作入口暫不顯示；SMT 維持原有入口。
         const hideLineTools = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
         const hideOrders = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
+        const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
+        const hideDailyReport = computed(() => currentLine.value === 'SMT');
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -114,9 +116,10 @@ SMT.core = function (ctx) {
         const switchLine = async (lineId) => {
             const target = validLine(lineId);
             if (target === currentLine.value) return;
-            if ((target === 'ASSY' && ['fpy', 'ooc', 'equipment', 'orders'].includes(currentTab.value)) ||
+            if ((target === 'SMT' && ['report', 'ooc'].includes(currentTab.value)) ||
+                (target === 'ASSY' && ['fpy', 'ooc', 'equipment', 'orders'].includes(currentTab.value)) ||
                 (target === 'DAF' && ['fpy', 'ooc', 'equipment', 'orders'].includes(currentTab.value))) {
-                currentTab.value = 'dashboard';
+                currentTab.value = target === 'SMT' ? 'orders' : 'dashboard';
             }
             currentLine.value = target;
             try { localStorage.setItem(SMT.LINE_KEY, target); } catch(e) {}
@@ -150,7 +153,7 @@ SMT.core = function (ctx) {
             getWoColor, fpyTargets, saveFpyTargets, loadFpyTargets, isFpyBelowTarget, todayStr,
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
-            lines, currentLine, currentLineMeta, hideLineTools, hideOrders, canImport, switchLine,
+            lines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, canImport, switchLine,
             permissionModal, requestPermission, submitPermission, cancelPermission
         };
 };

@@ -725,8 +725,13 @@ SMT.assembly = function (ctx) {
             refreshAssemblyReport();
             return;
         }
-        const { data: remoteRows, error } = await _supabase.from(REMOTE_TABLE)
-            .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100);
+        const localMappings = readMappingStorage();
+        const [{ data: remoteRows, error }, { data: remoteMappingRows, error: mappingError }] = await Promise.all([
+            _supabase.from(REMOTE_TABLE)
+                .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100),
+            _supabase.from(MAPPING_TABLE)
+                .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500)
+        ]);
         if (error) {
             assemblyRemoteReady.value = false;
             assemblyRemoteError.value = error.code === 'PGRST205'
@@ -757,9 +762,6 @@ SMT.assembly = function (ctx) {
             assemblyBatches.value = remoteBatches.slice(0, 100);
             persistStorage();
         }
-        const localMappings = readMappingStorage();
-        const { data: remoteMappingRows, error: mappingError } = await _supabase.from(MAPPING_TABLE)
-            .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500);
         if (mappingError) {
             assemblyMappingRemoteReady.value = false;
             assemblyMappings.value = localMappings;

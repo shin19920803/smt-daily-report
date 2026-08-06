@@ -101,7 +101,7 @@
                         <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5"><i class="fas fa-calendar-day text-orange-500 text-sm"></i><input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;"></div>
                         <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-right text-xs"></i></button>
                         <button @click="dashDate = new Date().toISOString().split('T')[0]" class="px-2 py-1.5 rounded-lg text-xs font-bold bg-orange-50 text-orange-600 hover:bg-orange-100 transition">今天</button>
-                        <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
+                        <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
                 </div>
                 <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} Mylar 概況</p>
@@ -134,11 +134,11 @@
                         <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left text-xs"></i></button>
                         <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5"><i class="fas fa-calendar-day text-purple-500 text-sm"></i><input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;"></div>
                         <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right text-xs"></i></button>
-                        <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
+                        <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
                 </div>
                 <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} DAF 生產概況</p>
-                <div v-if="dafDashboardResult && dafDashboardResult.sourceFiles.length" class="space-y-5">
+                <div v-if="dafDashboardResult" class="space-y-5">
                     <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
                         <div class="kpi-card cursor-pointer" @click="openDafInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
                         <div class="kpi-card cursor-pointer" @click="openDafYieldDetail"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafDashboardResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
@@ -166,11 +166,11 @@
                     <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-left text-xs"></i></button>
                     <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
                         <i class="fas fa-calendar-day text-blue-500 text-sm"></i>
-                        <input type="date" v-model="dashDate" @change="refreshDashboard" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;">
+                        <input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;">
                     </div>
                     <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-right text-xs"></i></button>
-                    <button @click="dashDate = new Date().toISOString().split('T')[0]; refreshDashboard()" class="px-2 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition">今天</button>
-                    <button @click="refreshDashboard" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
+                    <button @click="dashDate = new Date().toISOString().split('T')[0]" class="px-2 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition">今天</button>
+                    <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                 </div>
             </div>
             <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} — {{ dashDate === new Date().toISOString().split('T')[0] ? '今日' : '' }}生產概況</p>
@@ -1699,17 +1699,17 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608062130"></script>
+<script src="js/core.js?v=202608062140"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
-<script src="js/assembly.js?v=202608062800"></script>
-<script src="js/daf.js?v=202608062500"></script>
+<script src="js/assembly.js?v=202608062810"></script>
+<script src="js/daf.js?v=202608062510"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608062800"></script>
+<script src="js/dashboard.js?v=202608062810"></script>
 <script src="js/stats.js?v=202608041323"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>
-<script src="js/app.js?v=202608051600"></script>
+<script src="js/app.js?v=202608062810"></script>
 </body>
 </html>

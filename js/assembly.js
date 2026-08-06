@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 
 // Mylar 機台 LOG：瀏覽器版的 Python LOG 自動統計工具
 SMT.assembly = function (ctx) {
-    const { toast, loading, currentLine, currentTab, data, loadBaseData, requestPermission } = ctx;
+    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_assy_log_batches_v1';
     const REMOTE_TABLE = 'assembly_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_assy_log_remote_migrated_v1';
@@ -10,6 +10,7 @@ SMT.assembly = function (ctx) {
     const MAPPING_TABLE = 'assembly_log_mappings';
     const MAPPING_MIGRATED_KEY = 'koya_assy_log_mapping_migrated_v1';
     const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
+    const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
     const today = () => new Date().toISOString().split('T')[0];
 
     const assemblyUploadDate = ref(today());
@@ -24,6 +25,7 @@ SMT.assembly = function (ctx) {
     const assemblyCloudReady = computed(() => assemblyRemoteReady.value && assemblyMappingRemoteReady.value);
     const assemblyMappings = ref([]);
     const assemblyDefectNotes = ref({});
+    const assemblyHourlyNotes = ref({});
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' });
@@ -141,6 +143,16 @@ SMT.assembly = function (ctx) {
     const persistDefectNotes = () => {
         try { localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(assemblyDefectNotes.value)); } catch (e) {}
     };
+    const readHourlyNotes = () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(HOURLY_NOTES_STORAGE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (e) { return {}; }
+    };
+    const persistHourlyNotes = () => {
+        try { localStorage.setItem(HOURLY_NOTES_STORAGE_KEY, JSON.stringify(assemblyHourlyNotes.value)); } catch (e) {}
+    };
+    const hourlyNoteKey = (category, hour) => `${category}::${String(hour).padStart(2, '0')}`;
 
     const toRemoteBatch = (batch) => ({
         id: batch.id,
@@ -557,7 +569,6 @@ SMT.assembly = function (ctx) {
     const deleteAssemblyBatch = async (id) => {
         const batch = assemblyBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 LOG 統計？`)) return;
-        if (!(await requestPermission('刪除 Mylar LOG'))) return;
         if (!(await deleteBatchRemote(id))) return;
         assemblyBatches.value = assemblyBatches.value.filter(item => item.id !== id);
         persistStorage();
@@ -776,7 +787,10 @@ SMT.assembly = function (ctx) {
             show: true,
             category,
             items: row?.sourceItems || [],
-            hourly: row?.hourly || [],
+            hourly: (row?.hourly || []).map(item => {
+                const note = assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
+                return { ...item, note, draftNote: note, editing: false };
+            }),
             total: row?.qty || 0,
             note: assemblyDefectNotes.value[category] || '',
             draftNote: assemblyDefectNotes.value[category] || ''
@@ -791,6 +805,27 @@ SMT.assembly = function (ctx) {
         persistDefectNotes();
         assemblySourceDetail.value = { ...assemblySourceDetail.value, note: value, draftNote: value };
         toast('停機原因備註已儲存', 'success');
+    };
+    const toggleAssemblyHourNote = hour => {
+        assemblySourceDetail.value = {
+            ...assemblySourceDetail.value,
+            hourly: assemblySourceDetail.value.hourly.map(item => item.hour === hour
+                ? { ...item, editing: !item.editing, draftNote: item.note || '' }
+                : item)
+        };
+    };
+    const saveAssemblyHourNote = (category, hour, note) => {
+        const value = String(note || '').trim();
+        const key = hourlyNoteKey(category, hour);
+        assemblyHourlyNotes.value = { ...assemblyHourlyNotes.value, [key]: value };
+        persistHourlyNotes();
+        assemblySourceDetail.value = {
+            ...assemblySourceDetail.value,
+            hourly: assemblySourceDetail.value.hourly.map(item => item.hour === hour
+                ? { ...item, note: value, draftNote: value, editing: false }
+                : item)
+        };
+        toast(value ? '每小時備註已儲存' : '每小時備註已清除', 'success');
     };
     watch(() => [assemblyStatsFilter.value.start, assemblyStatsFilter.value.end], () => {
         if (!applyingAssemblyQuick) assemblyQuickMode.value = null;
@@ -916,6 +951,7 @@ SMT.assembly = function (ctx) {
 
     assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
     assemblyDefectNotes.value = readDefectNotes();
+    assemblyHourlyNotes.value = readHourlyNotes();
     refreshAssemblyReport();
     watch(assemblyUploadDate, refreshAssemblyReport);
     watch(assemblyReportResult, renderAssemblyReportChart);
@@ -942,11 +978,11 @@ SMT.assembly = function (ctx) {
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
         assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
-        assemblyDefectNotes,
+        assemblyDefectNotes, assemblyHourlyNotes,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote, toggleAssemblyHourNote, saveAssemblyHourNote,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

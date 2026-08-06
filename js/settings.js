@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.settings = function (ctx) {
-        const { data, toast, loadBaseData, currentLine, requestPermission } = ctx;
+        const { data, toast, loadBaseData, currentLine } = ctx;
         const settingConfig = ref({
             models: { title: '機種清單', colorClass: 'text-indigo-600', btnColor: 'bg-indigo-600', input: '', placeholder: '新機種名稱', field: 'name' },
             defect_types: { title: '不良項目', colorClass: 'text-red-600', btnColor: 'bg-red-600', input: '', placeholder: '不良現象', field: 'name' },
@@ -28,7 +28,7 @@ SMT.settings = function (ctx) {
             return [...list].sort((a, b) => a[field].localeCompare(b[field], 'zh-Hant')); 
         };
         const addSettingItem = async (key) => { const cfg = settingConfig.value[key]; const val = cfg.input.trim(); if (!val) return; await _supabase.from(key).insert({ [cfg.field]: val, line: currentLine.value }); cfg.input = ''; loadBaseData(); toast("已新增"); };
-        const deleteSettingItem = async (key, id) => { if(!confirm("確定刪除？")) return; if (!(await requestPermission('刪除基礎設定'))) return; await _supabase.from(key).delete().eq('id', id); loadBaseData(); toast("已刪除", "info"); };
+        const deleteSettingItem = async (key, id) => { if(!confirm("確定刪除？")) return; await _supabase.from(key).delete().eq('id', id); loadBaseData(); toast("已刪除", "info"); };
         const startEdit = (id, val) => { editingId.value = id; editingValue.value = val; };
         const saveEdit = async (key, id, field) => { if (!editingValue.value.trim()) return; await _supabase.from(key).update({ [field]: editingValue.value }).eq('id', id); editingId.value = null; loadBaseData(); toast("已更新"); };
         return {

@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.fpy = function (ctx) {
-        const { data, toast, loading, activeWoNumbers, uniqueWoNumbers, calendarYear, calendarMonth, currentLine, requestPermission } = ctx;
+        const { data, toast, loading, activeWoNumbers, uniqueWoNumbers, calendarYear, calendarMonth, currentLine } = ctx;
         const fpyForm = ref({ id: null, date: new Date().toISOString().split('T')[0], selectedWoNumber: null, wo_id: null, spi: '', aoi: '', showAllWo: false });
         const fpyHistory = ref([]);
         const fpyFilter = ref({ start: '', end: '' });
@@ -106,7 +106,7 @@ SMT.fpy = function (ctx) {
         };
 
         const loadFpyHistory = async () => { const { data: list } = await _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').eq('line', currentLine.value).order('production_date', {ascending:false}).limit(200); if (list) fpyHistory.value = list; };
-        const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; if (!(await requestPermission('刪除 FPY 紀錄'))) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); toast("已刪除", "info"); };
+        const deleteFpy = async (id) => { if(!confirm("確定刪除？")) return; await _supabase.from('daily_fpy').delete().eq('id', id); loadFpyHistory(); toast("已刪除", "info"); };
         const exportFpyData = async () => { loading.value = true; try { let query = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').eq('line', currentLine.value); if (fpyFilter.value.start) query = query.gte('production_date', fpyFilter.value.start); if (fpyFilter.value.end) query = query.lte('production_date', fpyFilter.value.end); const { data: rows } = await query; rows.sort((a, b) => { const woA = a.work_orders.wo_number; const woB = b.work_orders.wo_number; if (woA.localeCompare(woB) !== 0) return woA.localeCompare(woB); return new Date(a.production_date) - new Date(b.production_date); }); const excelData = [["日期", "工單號碼", "機種", "SPI 直通率", "AOI 直通率"]]; rows.forEach(r => { excelData.push([r.production_date, r.work_orders.wo_number, r.work_orders.models.name, r.spi_rate ? `${r.spi_rate}%` : '0%', r.aoi_rate ? `${r.aoi_rate}%` : '0%']); }); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(excelData), "FPY Report"); XLSX.writeFile(wb, `KOYA_${currentLine.value}_FPY_Report_${new Date().toISOString().slice(0,10)}.xlsx`); toast("FPY 報表已導出"); } catch(e) { toast("導出失敗", "error"); } finally { loading.value = false; } };
         return {
             fpyForm, fpyHistory, fpyFilter, showFpyModal, showFpyExportModal, selectedFpyId,

@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 
 // DAF 檔案統計：依 Google Colab 版本的 C／E／G／I／J 欄位規則分析。
 SMT.daf = function (ctx) {
-    const { toast, loading, currentLine, currentTab, data, loadBaseData, requestPermission } = ctx;
+    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
@@ -57,20 +57,32 @@ SMT.daf = function (ctx) {
         return String(value).replace(/\u00a0/g, ' ').replace(/[\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
     };
     const normalizeText = (value) => cleanText(value).toUpperCase();
+    const normalizeModelName = value => normalizeText(value) || '未識別機種';
+    const normalizeBatchModels = batch => ({
+        ...batch,
+        modelName: normalizeModelName(batch.modelName),
+        records: (batch.records || []).map(record => ({ ...record, model: normalizeModelName(record.model) }))
+    });
     const readModelMappings = () => {
         try {
             const parsed = JSON.parse(localStorage.getItem(MODEL_MAPPING_STORAGE_KEY) || '{}');
-            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? Object.fromEntries(Object.entries(parsed).map(([code, model]) => [normalizeText(code), normalizeModelName(model)]))
+                : {};
         } catch (e) { return {}; }
     };
     const persistModelMappings = () => {
-        try { localStorage.setItem(MODEL_MAPPING_STORAGE_KEY, JSON.stringify(dafModelMappings.value)); } catch (e) {}
+        try {
+            const normalized = Object.fromEntries(Object.entries(dafModelMappings.value).map(([code, model]) => [normalizeText(code), normalizeModelName(model)]));
+            dafModelMappings.value = normalized;
+            localStorage.setItem(MODEL_MAPPING_STORAGE_KEY, JSON.stringify(normalized));
+        } catch (e) {}
     };
     const learnModelMappings = (batches) => {
         let changed = false;
         (batches || []).forEach(batch => (batch.records || []).forEach(record => {
             const code = normalizeText(record.productCode);
-            const model = cleanText(record.model);
+            const model = normalizeModelName(record.model);
             if (code && model && model !== '未識別機種' && !dafModelMappings.value[code]) {
                 dafModelMappings.value[code] = model;
                 changed = true;
@@ -175,7 +187,7 @@ SMT.daf = function (ctx) {
             const staticMatch = MAPPING_ENTRIES.find(([productCode]) => value.includes(productCode));
             const dynamicMatch = dynamicEntries.find(([productCode]) => value.includes(productCode));
             const match = staticMatch || dynamicMatch;
-            if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: match[1] });
+            if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: normalizeModelName(match[1]) });
             if (!match) unknownProductCodes.push(raw);
         });
         const unknownWorkOrders = new Map(unknownProductCodes.map(code => [normalizeText(code), new Set()]));
@@ -190,7 +202,7 @@ SMT.daf = function (ctx) {
         }));
         const models = [...new Set(matched.map(item => item.model).filter(Boolean))];
         return {
-            model: models.length ? models.join('、') : '未識別機種',
+            model: models.length ? models.map(normalizeModelName).join('、') : '未識別機種',
             productCode: matched.length ? [...new Set(matched.map(item => item.productCode))].join('、') : (unknownProductCodes.join('、') || '未識別產品代碼'),
             unknownProductCodes,
             unknownProductDetails
@@ -227,7 +239,7 @@ SMT.daf = function (ctx) {
                 date: parsedDate,
                 defect: isDefect ? (cleanText(row[COL_DEFECT]) || '未填寫不良原因') : '',
                 status,
-                model: model.model,
+                model: normalizeModelName(model.model),
                 inputIncluded: ['GOOD', 'FAIL'].includes(status),
                 isDefect,
                 raw: Array.from({ length: columnCount }, (_, index) => displayCell(row[index]))
@@ -238,7 +250,7 @@ SMT.daf = function (ctx) {
             line: 'DAF',
             fileName: file.name,
             uploadedAt: new Date().toISOString(),
-            modelName: model.model,
+            modelName: normalizeModelName(model.model),
             productCode: model.productCode,
             workOrder: workOrderDisplay,
             workOrderFileName,
@@ -265,7 +277,7 @@ SMT.daf = function (ctx) {
     const readStorage = () => {
         try {
             const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-            return Array.isArray(parsed) ? parsed : [];
+            return Array.isArray(parsed) ? parsed.map(normalizeBatchModels) : [];
         } catch (e) { return []; }
     };
     const persistStorage = () => {
@@ -288,12 +300,13 @@ SMT.daf = function (ctx) {
     });
     const fromRemote = (row) => ({
         id: row.id, line: row.line || 'DAF', fileName: row.file_name, uploadedAt: row.uploaded_at,
-        modelName: row.model_name, productCode: row.product_code, workOrder: row.work_order,
+        modelName: normalizeModelName(row.model_name), productCode: row.product_code, workOrder: row.work_order,
         workOrderFileName: row.work_order, reportDate: row.report_date, dateStart: row.date_start || '', dateEnd: row.date_end || '',
         inputCount: row.input_count || 0, goodCount: row.good_count || 0, failCount: row.fail_count || 0,
         yieldRate: Number(row.yield_rate || 0).toFixed(2), defectRate: Number(row.defect_rate || 0).toFixed(2),
         unknownStatusCount: row.unknown_status_count || 0, unknownStatusText: row.unknown_status_text || '無',
-        rowCount: row.row_count || 0, rawColumnCount: row.raw_column_count || 10, records: row.records || []
+        rowCount: row.row_count || 0, rawColumnCount: row.raw_column_count || 10,
+        records: (row.records || []).map(record => ({ ...record, model: normalizeModelName(record.model) }))
     });
     const saveRemote = async (batch) => {
         if (!dafRemoteReady.value) return false;
@@ -358,10 +371,10 @@ SMT.daf = function (ctx) {
         return Object.values(groups).sort((a, b) => String(b.date).localeCompare(String(a.date)));
     });
     const dafModelOptions = computed(() => [...new Set([
-        ...allRecords().map(row => row.model),
-        ...(data?.value?.models || []).map(model => model.name),
-        ...Object.values(dafModelMappings.value),
-        ...Object.values(MODEL_MAPPING)
+        ...allRecords().map(row => normalizeModelName(row.model)),
+        ...(data?.value?.models || []).map(model => normalizeModelName(model.name)),
+        ...Object.values(dafModelMappings.value).map(normalizeModelName),
+        ...Object.values(MODEL_MAPPING).map(normalizeModelName)
     ].filter(model => model && model !== '未識別機種'))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const dafWorkOrderOptions = computed(() => [...new Set(allRecords().map(row => row.workOrder).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const filterRecords = () => allRecords().filter(row => {
@@ -652,7 +665,7 @@ SMT.daf = function (ctx) {
         if (selected && created) return toast('請選擇既有機種或新增機種其中一種', 'warning');
         if (!selected && !created) return toast('請選擇既有機種或輸入新的機種名稱', 'warning');
         const modelName = created || selected;
-        dafModelMappings.value = { ...dafModelMappings.value, [normalizeText(code)]: modelName };
+        dafModelMappings.value = { ...dafModelMappings.value, [normalizeText(code)]: normalizeModelName(modelName) };
         persistModelMappings();
         if (modal.currentIndex < modal.items.length - 1) {
             dafUnknownModelModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedModel: '', newModel: '' };
@@ -674,7 +687,6 @@ SMT.daf = function (ctx) {
     const deleteDafBatch = async (id) => {
         const batch = dafBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 DAF 統計？`)) return;
-        if (!(await requestPermission('刪除 DAF 檔案'))) return;
         if (!(await deleteRemote(id))) return;
         dafBatches.value = dafBatches.value.filter(item => item.id !== id);
         dafLastUpload.value = dafBatches.value[0] || null;

@@ -496,8 +496,8 @@ SMT.stats = function (ctx) {
                 let cum=0; const cumPct=qtys.map(q=>{cum+=q;return parseFloat((cum/total*100).toFixed(1));});
                 paretoChartInst.setOption({
                     tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
-                    legend:{data:['不良數量','累積佔比'],top:4,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
-                    grid:{top:40,right:60,bottom:60,left:50},
+                    legend:{data:['不良數量','累積佔比'],top:8,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
+                    grid:{top:64,right:60,bottom:60,left:50},
                     xAxis:{type:'category',data:names,triggerEvent:true,axisLabel:{fontSize:10,color:'#374151',rotate:names.some(n=>n.length>4)?20:0},axisLine:{lineStyle:{color:'#e5e7eb'}}},
                     yAxis:[{type:'value',name:'數量',nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'累積%',min:0,max:100,nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
                     series:[
@@ -561,8 +561,8 @@ SMT.stats = function (ctx) {
                 const dates = r.fpyTrend.map(d => d.date.slice(5));
                 fpyTrendChartInst.setOption({
                     tooltip:{trigger:'axis',formatter:p=>{let s=p[0].name;p.forEach(v=>{s+=`<br/>${v.marker}${v.seriesName}: <b>${v.value!==null&&v.value!==undefined?v.value+'%':'無資料'}</b>`;});return s;}},
-                    legend:{data:['SPI 直通率','AOI 直通率'],top:4,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
-                    grid:{top:36,right:20,bottom:40,left:50},
+                    legend:{data:['SPI 直通率','AOI 直通率'],top:8,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
+                    grid:{top:56,right:20,bottom:40,left:50},
                     xAxis:{type:'category',data:dates,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}}},
                     yAxis:{type:'value',min:v=>Math.floor(Math.min(v.min-0.5, (fpyTargets.value.aoi||98)-1)),max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
                     series:[
@@ -581,9 +581,9 @@ SMT.stats = function (ctx) {
                 if (!el) return;
                 if (!yieldTrendChartInst || yieldTrendChartInst.getDom() !== el) { disposeYieldTrend(); yieldTrendChartInst = echarts.init(el); }
                 yieldTrendChartInst.setOption({
-                    legend: { data: ['投入數', '良率'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                    legend: { data: ['投入數', '良率'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
                     tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } },
-                    grid: { top: 36, right: 58, bottom: 44, left: 50 },
+                    grid: { top: 64, right: 58, bottom: 44, left: 50 },
                     xAxis: { type: 'category', data: r.trend.map(row => row.date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
                     yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }],
                     series: [{ name: '投入數', type: 'bar', data: r.trend.map(row => row.input), barMaxWidth: 24, itemStyle: { color: '#bfdbfe', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: r.trend.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]

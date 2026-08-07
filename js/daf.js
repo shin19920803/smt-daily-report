@@ -52,6 +52,7 @@ SMT.daf = function (ctx) {
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
     const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] });
+    const dafModelDetail = ref({ show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] });
     const dafOutputDetail = ref({ show: false, title: '', subtitle: '', machineRows: [] });
     const dafQuickMode = ref(null);
     const dafQuickOffset = ref(0);
@@ -598,6 +599,7 @@ SMT.daf = function (ctx) {
         const defectMap = {};
         const defectModelMap = {};
         const defectWorkOrderMap = {};
+        const modelDefectMap = {};
         const modelMap = {};
         const workOrderMap = {};
         const dayMap = {};
@@ -608,8 +610,10 @@ SMT.daf = function (ctx) {
             defectMap[defect] = (defectMap[defect] || 0) + 1;
             if (!defectModelMap[defect]) defectModelMap[defect] = {};
             if (!defectWorkOrderMap[defect]) defectWorkOrderMap[defect] = {};
+            if (!modelDefectMap[model]) modelDefectMap[model] = {};
             defectModelMap[defect][model] = (defectModelMap[defect][model] || 0) + 1;
             defectWorkOrderMap[defect][workOrder] = (defectWorkOrderMap[defect][workOrder] || 0) + 1;
+            modelDefectMap[model][defect] = (modelDefectMap[model][defect] || 0) + 1;
         });
         inputRows.forEach(row => {
             const model = row.model || '未識別機種';
@@ -636,7 +640,7 @@ SMT.daf = function (ctx) {
             byModel: detailRows(defectModelMap[name]),
             byWorkOrder: detailRows(defectWorkOrderMap[name])
         })).sort((a, b) => b.qty - a.qty);
-        const byModel = Object.entries(modelMap).map(([name, value]) => ({ name, input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects), byWorkOrder: detailRows(value.byWorkOrder) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
+        const byModel = Object.entries(modelMap).map(([name, value]) => ({ name, input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects), byType: detailRows(modelDefectMap[name]), byWorkOrder: detailRows(value.byWorkOrder) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
         const byWorkOrder = Object.entries(workOrderMap).map(([workOrder, value]) => ({ workOrder, name: workOrder, model: [...value.models].join(' / '), input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects), byModel: detailRows(value.byModel) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
         const daily = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({ ...day, total: day.input, yieldRate: mapRate(day.good, day.input), defectRate: mapRate(day.defects, day.input) }));
         const unknownStatuses = [...new Set((rows || []).map(row => row.status).filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
@@ -740,6 +744,7 @@ SMT.daf = function (ctx) {
     const calculateDafStats = (showToast = true) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] };
+        dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] };
         dafStatsResult.value = buildDafStats();
         renderDafCharts();
         if (showToast) toast(`DAF 統計完成，共 ${dafStatsResult.value.sourceFiles.length} 個檔案`);
@@ -752,6 +757,15 @@ SMT.daf = function (ctx) {
     };
     const closeDafDefectDetail = () => {
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] };
+    };
+    const openDafModelStatsDetail = name => {
+        const row = (dafStatsResult.value?.byModel || []).find(item => item.name === name);
+        dafModelDetail.value = row
+            ? { show: true, name: row.name, input: row.input, good: row.good, defects: row.defects, yieldRate: row.yieldRate, byType: row.byType || [], byMachine: row.byMachine || [] }
+            : { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] };
+    };
+    const closeDafModelStatsDetail = () => {
+        dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] };
     };
     const openDafOutputDetail = () => {
         const result = dafStatsResult.value;
@@ -890,6 +904,7 @@ SMT.daf = function (ctx) {
         const defects = [['不良原因', '不良數量', '占投入比例', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.inputRatio + '%', row.ratio + '%'])];
         const defectModels = [['不良原因', '機種', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byModel || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
         const defectWorkOrders = [['不良原因', '工單', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byWorkOrder || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
+        const modelDefects = [['機種', 'NG項目', '數量', '占該機種NG比例'], ...result.byModel.flatMap(row => (row.byType || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
         const models = [['機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byModel.map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const machines = [['機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byMachine.map(row => [row.machineLabel, row.totalInput, row.totalGood, row.totalDefects, row.yieldRate + '%', row.defectRate + '%'])];
@@ -897,12 +912,7 @@ SMT.daf = function (ctx) {
         const modelMachines = [['機種', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byModel.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))];
         const workOrderMachines = [['工單', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byWorkOrder.flatMap(row => (row.byMachine || []).map(item => [row.workOrder, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))];
         const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
-        const paretoTotal = result.byType.reduce((sum, row) => sum + row.qty, 0);
-        let paretoAccumulated = 0;
-        const pareto = [['不良現象', '不良數量', '占不良比例', '累積占比'], ...result.byType.map(row => {
-            paretoAccumulated += row.qty;
-            return [row.name, row.qty, row.ratio + '%', paretoTotal ? (paretoAccumulated / paretoTotal * 100).toFixed(1) + '%' : '0.0%'];
-        })];
+        const pareto = [['不良現象', '不良數量', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
         const rawHeader = ['機台', '系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
@@ -910,7 +920,7 @@ SMT.daf = function (ctx) {
         const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
-        [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
+        [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
         const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
         const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
@@ -931,29 +941,20 @@ SMT.daf = function (ctx) {
                 const rows = result.byType.slice(0, 12);
                 const names = rows.map(row => row.name);
                 const quantities = rows.map(row => row.qty);
-                const total = quantities.reduce((sum, value) => sum + value, 0);
-                let accumulated = 0;
-                const accumulatedRates = quantities.map(value => { accumulated += value; return total ? parseFloat((accumulated / total * 100).toFixed(1)) : 0; });
                 reasonChart.setOption({
                     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                    legend: { data: ['不良數量', '累積佔比'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
-                    grid: { top: 40, right: 58, bottom: 64, left: 48 },
+                    legend: { data: ['不良數量'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                    grid: { top: 64, right: 58, bottom: 64, left: 48 },
                     xAxis: { type: 'category', data: names, triggerEvent: true, axisLabel: { rotate: names.some(name => name.length > 5) ? 20 : 0, fontSize: 10, color: '#374151' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-                    yAxis: [
-                        { type: 'value', name: '數量', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-                        { type: 'value', name: '累積%', min: 0, max: 100, nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }
-                    ],
-                    series: [
-                        { name: '不良數量', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } },
-                        { name: '累積佔比', type: 'line', yAxisIndex: 1, data: accumulatedRates, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { color: '#2563eb', width: 2 }, itemStyle: { color: '#2563eb' }, label: { show: true, position: 'top', fontSize: 9, color: '#2563eb', formatter: '{c}%' }, markLine: { silent: true, lineStyle: { color: '#d97706', type: 'dashed', width: 1.5 }, data: [{ yAxis: 80, label: { formatter: '80%', position: 'start', fontSize: 10, color: '#d97706' } }] } }
-                    ]
+                    yAxis: { type: 'value', name: '數量', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                    series: [{ name: '不良數量', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } }]
                 });
                 if (reasonChart.off) reasonChart.off('click');
                 if (reasonChart.on) reasonChart.on('click', params => { const name = params?.componentType === 'xAxis' ? params.value : params?.name; if (name) openDafDefectDetail(name); });
             } else reasonChart = disposeChart(reasonChart);
             if (trendEl && result?.daily?.length) {
                 if (!trendChart || trendChart.getDom() !== trendEl) { trendChart = disposeChart(trendChart); trendChart = echarts.init(trendEl); }
-                trendChart.setOption({ legend: { data: ['投入數', '良率'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } }, grid: { top: 36, right: 58, bottom: 44, left: 48 }, tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 }, splitLine: { show: false } }], series: [{ name: '投入數', type: 'bar', data: result.daily.map(row => row.input), barMaxWidth: 24, itemStyle: { color: '#c4b5fd', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: result.daily.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }] });
+                trendChart.setOption({ legend: { data: ['投入數', '良率'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } }, grid: { top: 64, right: 58, bottom: 44, left: 48 }, tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 }, splitLine: { show: false } }], series: [{ name: '投入數', type: 'bar', data: result.daily.map(row => row.input), barMaxWidth: 24, itemStyle: { color: '#c4b5fd', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: result.daily.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }] });
             } else trendChart = disposeChart(trendChart);
         });
     };
@@ -979,7 +980,7 @@ SMT.daf = function (ctx) {
         dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadMachine,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
-        openDafDefectDetail, closeDafDefectDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
+        openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate,
         renderDafCharts
     };

@@ -34,6 +34,7 @@ SMT.assembly = function (ctx) {
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' });
+    const assemblyDailyDetail = ref({ show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] });
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
     let applyingAssemblyQuick = false;
@@ -836,6 +837,7 @@ SMT.assembly = function (ctx) {
             return toast('開始日期不能晚於結束日期', 'warning');
         }
         assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' };
+        assemblyDailyDetail.value = { show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] };
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
     };
@@ -856,6 +858,21 @@ SMT.assembly = function (ctx) {
     };
     const closeAssemblySourceDetail = () => {
         assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' };
+    };
+    const openAssemblyDailyDetail = date => {
+        const result = aggregate(assemblyBatches.value, date, date);
+        const daily = result.daily.find(row => row.date === date);
+        assemblyDailyDetail.value = {
+            show: true,
+            date,
+            success: daily?.success || 0,
+            ng: daily?.ng || 0,
+            downtimeRate: daily?.downtimeRate || '0.00',
+            byType: result.byType || []
+        };
+    };
+    const closeAssemblyDailyDetail = () => {
+        assemblyDailyDetail.value = { show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] };
     };
     const saveAssemblyDefectNote = (category, note) => {
         const value = String(note || '').trim();
@@ -894,13 +911,8 @@ SMT.assembly = function (ctx) {
         ];
         const daily = [['日期', '生產成功', 'NG 次數', '停機率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.downtimeRate + '%'])];
-        const paretoTotal = result.byType.reduce((sum, row) => sum + row.qty, 0);
-        let paretoAccumulated = 0;
-        const pareto = [['停機／不良現象', '次數', '佔 NG 比例', '累積佔比'],
-            ...result.byType.map(row => {
-                paretoAccumulated += row.qty;
-                return [row.name, row.qty, row.ratio + '%', paretoTotal ? (paretoAccumulated / paretoTotal * 100).toFixed(1) + '%' : '0.0%'];
-            })];
+        const pareto = [['停機／不良現象', '次數', '佔 NG 比例'],
+            ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '產出成功', '停機／不良', '良率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.successRate + '%'])];
         const outputTrend = [['日期', '產出成功', '停機／不良'],
@@ -909,6 +921,8 @@ SMT.assembly = function (ctx) {
             ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
         const sourceDetails = [['停機／不良項目', 'LOG 原始訊息', '次數', '占該分類比例'],
             ...result.byType.flatMap(row => (row.sourceItems || []).map(item => [row.name, item.message, item.qty, item.ratio + '%']))];
+        const dailyDefects = [['日期', 'NG 項目', '數量', '占當日 NG 比例'],
+            ...result.daily.flatMap(day => Object.entries(day.byType || {}).map(([name, qty]) => [day.date, name, qty, day.ng ? (qty / day.ng * 100).toFixed(1) + '%' : '0.0%']))];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrend), '良率趨勢');
@@ -916,6 +930,7 @@ SMT.assembly = function (ctx) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pareto), 'Pareto分析');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dailyDefects), '每日NG細項');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceDetails), 'LOG原始細項');
         XLSX.writeFile(wb, 'KOYA_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');
         toast('Mylar LOG 報表已導出');
@@ -969,25 +984,13 @@ SMT.assembly = function (ctx) {
             const rows = result.byType.slice(0, 12);
             const names = rows.map(row => row.name);
             const quantities = rows.map(row => row.qty);
-            const total = quantities.reduce((sum, value) => sum + value, 0);
-            let accumulated = 0;
-            const accumulatedRates = quantities.map(value => {
-                accumulated += value;
-                return total ? parseFloat((accumulated / total * 100).toFixed(1)) : 0;
-            });
             previous.setOption({
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                legend: { data: ['停機／不良次數', '累積佔比'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
-                grid: { top: 40, right: 58, bottom: 64, left: 48 },
+                legend: { data: ['停機／不良次數'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                grid: { top: 64, right: 58, bottom: 64, left: 48 },
                 xAxis: { type: 'category', data: names, triggerEvent: true, axisLabel: { rotate: names.some(name => name.length > 5) ? 20 : 0, fontSize: 10, color: '#374151' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-                yAxis: [
-                    { type: 'value', name: '次數', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-                    { type: 'value', name: '累積%', min: 0, max: 100, nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }
-                ],
-                series: [
-                    { name: '停機／不良次數', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } },
-                    { name: '累積佔比', type: 'line', yAxisIndex: 1, data: accumulatedRates, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { color: '#2563eb', width: 2 }, itemStyle: { color: '#2563eb' }, label: { show: true, position: 'top', fontSize: 9, color: '#2563eb', formatter: '{c}%' }, markLine: { silent: true, lineStyle: { color: '#d97706', type: 'dashed', width: 1.5 }, data: [{ yAxis: 80, label: { formatter: '80%', position: 'start', fontSize: 10, color: '#d97706' } }] } }
-                ]
+                yAxis: { type: 'value', name: '次數', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                series: [{ name: '停機／不良次數', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } }]
             });
             if (previous.off) previous.off('click');
             if (onClick && previous.on) {
@@ -1013,8 +1016,8 @@ SMT.assembly = function (ctx) {
             }
             statsDailyChart.setOption({
                 tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params[0]?.marker || ''}產出成功: <b>${Number(params[0]?.value || 0).toLocaleString()}</b>` },
-                legend: { data: ['產出成功'], top: 0, right: 0, textStyle: { fontSize: 11 } },
-                grid: { top: 32, right: 20, bottom: 44, left: 48 },
+                legend: { data: ['產出成功'], top: 8, right: 0, textStyle: { fontSize: 11 } },
+                grid: { top: 56, right: 20, bottom: 44, left: 48 },
                 xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } },
                 yAxis: { type: 'value', name: '產出', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
                 series: [{ name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 24, itemStyle: { color: '#fed7aa', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', formatter: '{c}', fontSize: 9 } }]
@@ -1055,13 +1058,13 @@ SMT.assembly = function (ctx) {
     return {
         assemblyUploadDate, assemblyUploadDateLabel, assemblyUploadDateRelative, assemblyBatchesForDate,
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
-        assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail,
+        assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail, assemblyDailyDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectNotes, assemblyHourlyNotes, assemblyStatusNotes, assemblyStatusNoteHours, assemblyStatusNoteEditorOpen, assemblyStatusNoteHour, assemblyStatusNoteDraft, assemblyStatusNoteCurrent,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

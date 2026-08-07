@@ -1012,12 +1012,12 @@ SMT.assembly = function (ctx) {
                 statsDailyChart = echarts.init(el);
             }
             statsDailyChart.setOption({
-                tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '成功率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } },
-                legend: { data: ['產出成功', '成功率'], top: 0, right: 0, textStyle: { fontSize: 11 } },
-                grid: { top: 32, right: 58, bottom: 44, left: 48 },
+                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params[0]?.marker || ''}產出成功: <b>${Number(params[0]?.value || 0).toLocaleString()}</b>` },
+                legend: { data: ['產出成功'], top: 0, right: 0, textStyle: { fontSize: 11 } },
+                grid: { top: 32, right: 20, bottom: 44, left: 48 },
                 xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } },
-                yAxis: [{ type: 'value', name: '產出', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '成功率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 }, splitLine: { show: false } }],
-                series: [{ name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 24, itemStyle: { color: '#fed7aa', borderRadius: [4, 4, 0, 0] } }, { name: '成功率', type: 'line', yAxisIndex: 1, data: result.daily.map(row => Number(row.successRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
+                yAxis: { type: 'value', name: '產出', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                series: [{ name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 24, itemStyle: { color: '#fed7aa', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', formatter: '{c}', fontSize: 9 } }]
             });
         });
     };

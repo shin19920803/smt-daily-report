@@ -38,6 +38,23 @@ SMT.dashboard = function (ctx) {
             sections: [{ title: '不良項目', icon: 'fa-bug', items: listFromMap(row.byType, row.defects) }]
         });
         const makeDistributionSection = (title, icon, items) => ({ title, icon, items: items || [] });
+        const buildDafMachineDetail = (machine, title, subtitle) => ({
+            title: `${machine.machineLabel} ${title}`,
+            subtitle,
+            metrics: [toMetric('投入數', machine.totalInput, 'slate'), toMetric('良品數', machine.totalGood, 'green'), toMetric('不良數', machine.totalDefects, 'red'), { label: '良率', value: machine.yieldRate + '%', tone: 'green' }],
+            sections: [
+                makeDistributionSection('機種分佈', 'fa-microchip', (machine.byModel || []).map(item => ({ label: item.name, qty: item.input, ratio: item.yieldRate + '%', meta: `不良 ${item.defects}` }))),
+                makeDistributionSection('工單分佈', 'fa-file-alt', (machine.byWorkOrder || []).map(item => ({ label: item.workOrder || item.name, qty: item.input, ratio: item.yieldRate + '%', meta: `不良 ${item.defects}` }))),
+                makeDistributionSection('不良原因', 'fa-bug', (machine.byType || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))
+            ]
+        });
+        const buildDafMachineItems = (result, amount = 'totalInput', title = 'DAF 機台明細') => (result?.byMachine || []).map(machine => ({
+            label: machine.machineLabel,
+            qty: Number(machine[amount]) || 0,
+            ratio: Number(result?.[amount] ?? result?.qty) ? ((Number(machine[amount]) || 0) / Number(result?.[amount] ?? result?.qty) * 100).toFixed(1) + '%' : '',
+            meta: `良率 ${machine.yieldRate}%`,
+            detail: buildDafMachineDetail(machine, title, dashDate.value)
+        }));
 
         // 良率一律無條件捨去至小數 2 位：只要有不良就不會被進位成 100%
         const calcYield = (input, defects) => {
@@ -324,12 +341,13 @@ SMT.dashboard = function (ctx) {
             title: `${getWeekRange(dashDate.value).start} ～ ${getWeekRange(dashDate.value).end} DAF 週平均良率`,
             subtitle: `週日到週六；只平均實際有資料的 ${dafWeekDays.value.length} 天`,
             metrics: [{ label: '週平均良率', value: dashboard.value.weekAvgYield + '%', tone: 'green' }],
-            sections: [makeDistributionSection('每日良率', 'fa-calendar-days', dafWeekDays.value.map(day => ({ label: day.date, qty: day.report.totalInput, ratio: day.report.yieldRate + '%', meta: `不良 ${day.report.totalDefects}`, detail: { title: `${day.date} DAF 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', day.report.totalInput, 'slate'), toMetric('良品數', day.report.totalGood, 'green'), toMetric('不良數', day.report.totalDefects, 'red'), { label: '良率', value: day.report.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單投入', 'fa-file-alt', (day.report.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' })))] } })))]
+            sections: [makeDistributionSection('每日良率', 'fa-calendar-days', dafWeekDays.value.map(day => ({ label: day.date, qty: day.report.totalInput, ratio: day.report.yieldRate + '%', meta: `不良 ${day.report.totalDefects}`, detail: { title: `${day.date} DAF 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', day.report.totalInput, 'slate'), toMetric('良品數', day.report.totalGood, 'green'), toMetric('不良數', day.report.totalDefects, 'red'), { label: '良率', value: day.report.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(day.report)), makeDistributionSection('工單投入', 'fa-file-alt', (day.report.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' })))] } })))]
         });
         const buildDafReasonDetail = row => ({
             title: `${row.name} 不良明細`, subtitle: `${dashDate.value} · ${row.qty} 件`,
             metrics: [toMetric('不良數', row.qty, 'red')],
             sections: [
+                makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row, 'totalDefects', `${row.name} 不良明細`)),
                 makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' }))),
                 makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))
             ]
@@ -337,15 +355,15 @@ SMT.dashboard = function (ctx) {
         const openDafInputDetail = () => openDashboardDetail({
             title: `${dashDate.value} DAF 當日投入`, subtitle: '依工單查看投入數量',
             metrics: [toMetric('投入總數', dafDashboardResult.value?.totalInput, 'slate')],
-            sections: [makeDistributionSection('工單投入數量', 'fa-file-alt', (dafDashboardResult.value?.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%', meta: row.model, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
+            sections: [makeDistributionSection('機台產出', 'fa-microchip', buildDafMachineItems(dafDashboardResult.value, 'totalInput', 'DAF 產出明細')), makeDistributionSection('工單投入數量', 'fa-file-alt', (dafDashboardResult.value?.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%', meta: row.model, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
         });
         const openDafYieldDetail = () => openDashboardDetail({
             title: `${dashDate.value} DAF 當日良率`, subtitle: '每個機種／工單的良率明細',
             metrics: [toMetric('投入數', dafDashboardResult.value?.totalInput, 'slate'), toMetric('不良數', dafDashboardResult.value?.totalDefects, 'red'), { label: '良率', value: (dafDashboardResult.value?.yieldRate || '0') + '%', tone: 'green' }],
-            sections: [makeDistributionSection('機種良率', 'fa-microchip', (dafDashboardResult.value?.byModel || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.yieldRate + '%', meta: `不良 ${row.defects}`, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
+            sections: [makeDistributionSection('機台良率', 'fa-microchip', buildDafMachineItems(dafDashboardResult.value, 'totalInput', 'DAF 良率明細')), makeDistributionSection('機種良率', 'fa-microchip', (dafDashboardResult.value?.byModel || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.yieldRate + '%', meta: `不良 ${row.defects}`, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
         });
-        const openDafModelDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
-        const openDafWorkOrderDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
+        const openDafModelDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
+        const openDafWorkOrderDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
         const openDafDefectDashboardDetail = () => openDashboardDetail({
             title: `${dashDate.value} DAF 不良`, subtitle: '點擊不良項目可查看機種與工單',
             metrics: [toMetric('不良總數', dafDashboardResult.value?.totalDefects, 'red')],
@@ -353,7 +371,7 @@ SMT.dashboard = function (ctx) {
         });
         const openDafDateDetail = date => {
             const result = getDafDashboardForDate(date);
-            openDashboardDetail({ title: `${date} DAF 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', result.totalInput, 'slate'), toMetric('良品數', result.totalGood, 'green'), toMetric('不良數', result.totalDefects, 'red'), { label: '良率', value: result.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單投入', 'fa-file-alt', (result.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' }))), makeDistributionSection('不良原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))] });
+            openDashboardDetail({ title: `${date} DAF 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', result.totalInput, 'slate'), toMetric('良品數', result.totalGood, 'green'), toMetric('不良數', result.totalDefects, 'red'), { label: '良率', value: result.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台投入', 'fa-microchip', buildDafMachineItems(result)), makeDistributionSection('工單投入', 'fa-file-alt', (result.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' }))), makeDistributionSection('不良原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))] });
         };
         const assemblyReasonDetail = row => {
             return { title: `${row.name} 停機明細`, subtitle: `${dashDate.value} · ${row.qty} 次`, metrics: [toMetric('發生次數', row.qty, 'red')], allowNote: false, sections: [makeDistributionSection('每小時發生次數', 'fa-clock', (row.hourly || []).map(item => {
@@ -365,6 +383,28 @@ SMT.dashboard = function (ctx) {
         const openAssemblyInputDetail = () => openDashboardDetail({ title: `${dashDate.value} Mylar 產出`, subtitle: '依每小時查看生產成功數量', metrics: [toMetric('產出成功', assemblyDashboardResult.value?.totalSuccess, 'green')], sections: [makeDistributionSection('每小時產出', 'fa-clock', (assemblyDashboardResult.value?.hourly || []).filter(row => row.total > 0).map(row => ({ label: row.label, qty: row.production, ratio: '', meta: `NG ${row.ng}` })))] });
         const openAssemblyRateDetail = () => openDashboardDetail({ title: `${dashDate.value} Mylar 停機率`, subtitle: '依 LOG 分類查看停機原因', metrics: [toMetric('產出成功', assemblyDashboardResult.value?.totalSuccess, 'green'), toMetric('停機／不良', assemblyDashboardResult.value?.totalDefects, 'red'), { label: '停機率', value: (assemblyDashboardResult.value?.downtimeRate || '0') + '%', tone: 'red' }], sections: [makeDistributionSection('停機原因', 'fa-bug', (assemblyDashboardResult.value?.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: assemblyReasonDetail(row) })))] });
         const openAssemblyDefectDashboardDetail = () => openAssemblyRateDetail();
+        const openAssemblyHourDetail = row => {
+            const hourMatch = String(row?.hour || row?.label || '').match(/\d{1,2}/);
+            const hour = hourMatch ? String(hourMatch[0]).padStart(2, '0') : '';
+            const statusNote = assemblyStatusNotes?.value?.[statusNoteKey(dashDate.value, hour)] || '';
+            const reasons = (assemblyDashboardResult.value?.byType || []).map(reason => {
+                const hourly = (reason.hourly || []).find(item => String(item.hour).padStart(2, '0') === hour);
+                if (hourly?.qty) {
+                    return { label: reason.name, qty: hourly.qty, ratio: reason.qty ? (hourly.qty / reason.qty * 100).toFixed(1) + '%' : '', isHourlyNote: true, note: hourly.note || statusNote, detail: assemblyReasonDetail({ ...reason, qty: hourly.qty, hourly: [hourly] }) };
+                }
+                // 舊批次沒有保存原因×小時，仍顯示當日原因與 LOG 細項，避免點擊後整個空白。
+                if (!reason.hourly?.length) {
+                    return { label: reason.name, qty: reason.qty, ratio: reason.ratio + '%', isHourlyNote: true, note: statusNote || '既有資料未保存此時段原因，以下顯示當日 LOG 細項', detail: assemblyReasonDetail(reason) };
+                }
+                return null;
+            }).filter(Boolean).sort((a, b) => b.qty - a.qty);
+            openDashboardDetail({
+                title: `${dashDate.value} ${row.label} 停機明細`,
+                subtitle: reasons.some(item => item.detail?.sections?.[0]?.items?.length) ? '此時段停機原因與備註已連動' : '此時段尚無可連動的停機原因',
+                metrics: [toMetric('生產成功', row.production, 'green'), toMetric('停機／不良', row.ng, 'red'), { label: '停機率', value: row.downtimeRate + '%', tone: 'red' }],
+                sections: [makeDistributionSection('停機原因與備註', 'fa-bug', reasons)]
+            });
+        };
         const openAssemblyDateDetail = date => {
             const result = getAssemblyReportForDate(date);
             openDashboardDetail({ title: `${date} Mylar 生產明細`, subtitle: '產出成功、停機不良與每小時明細', metrics: [toMetric('產出成功', result.totalSuccess, 'green'), toMetric('停機／不良', result.totalDefects, 'red'), { label: '停機率', value: result.downtimeRate + '%', tone: 'red' }], sections: [makeDistributionSection('停機原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: assemblyReasonDetail(row) }))), makeDistributionSection('每小時產出', 'fa-clock', (result.hourly || []).filter(row => row.total > 0).map(row => ({ label: row.label, qty: row.production, ratio: '', meta: `NG ${row.ng}` })))] });
@@ -454,12 +494,12 @@ SMT.dashboard = function (ctx) {
             if (dailyEl && dates.length) {
                 dashDafDailyChartInst = ensureDashboardChart(dashDafDailyChartInst, dailyEl);
                 setDashboardOption(dashDafDailyChartInst, {
-                    legend: { data: ['投入數', '良率'], top: 4, right: 10, textStyle: { fontSize: 10, color: '#6b7280' } },
-                    grid: { top: 32, right: 56, bottom: 36, left: 48 },
-                    tooltip: { trigger: 'axis', formatter: params => { let s = params[0]?.axisValue || ''; params.forEach(item => { s += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return s; } },
+                    legend: { data: ['良率'], top: 4, right: 10, textStyle: { fontSize: 10, color: '#6b7280' } },
+                    grid: { top: 32, right: 20, bottom: 36, left: 48 },
+                    tooltip: { trigger: 'axis', formatter: params => { const item = params[0]; return `${item?.axisValue || ''}<br/>${item?.marker || ''}良率: <b>${item?.value ?? 0}%</b>`; } },
                     xAxis: { type: 'category', data: dates.map(date => date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' } },
-                    yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }],
-                    series: [{ name: '投入數', type: 'bar', data: reports.map(row => row.totalInput || 0), barMaxWidth: 24, itemStyle: { color: '#c4b5fd', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: reports.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#7c3aed', width: 2.5 }, itemStyle: { color: '#7c3aed' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(124,58,237,0.16)' }, { offset: 1, color: 'rgba(124,58,237,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
+                    yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                    series: [{ name: '良率', type: 'line', data: reports.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#7c3aed', width: 2.5 }, itemStyle: { color: '#7c3aed' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(124,58,237,0.16)' }, { offset: 1, color: 'rgba(124,58,237,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
                 });
                 if (dashDafDailyChartInst.off) dashDafDailyChartInst.off('click');
                 if (dashDafDailyChartInst.on) dashDafDailyChartInst.on('click', params => { if (dates[params.dataIndex]) openDafDateDetail(dates[params.dataIndex]); });
@@ -571,6 +611,6 @@ SMT.dashboard = function (ctx) {
             openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail,
             openDafInputDetail, openDafYieldDetail, openDafDefectDashboardDetail, openDafWeekDetail,
             openDafModelDetail, openDafWorkOrderDetail,
-            openAssemblyInputDetail, openAssemblyRateDetail, openAssemblyDefectDashboardDetail, openAssemblyReasonDashboard, openAssemblyWeekDetail
+            openAssemblyInputDetail, openAssemblyRateDetail, openAssemblyDefectDashboardDetail, openAssemblyReasonDashboard, openAssemblyHourDetail, openAssemblyWeekDetail
         };
 };

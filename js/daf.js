@@ -13,6 +13,10 @@ SMT.daf = function (ctx) {
     const COL_DATE = 6;
     const COL_DEFECT = 8;
     const COL_STATUS = 9;
+    const DAF_MACHINE_ORDER = ['1', '2', ''];
+    const DAF_MACHINE_LABELS = { '1': '1號機', '2': '2號機', '': '未區分機台' };
+    const normalizeMachine = value => ['1', '2'].includes(String(value ?? '').trim()) ? String(value).trim() : '';
+    const machineLabel = value => DAF_MACHINE_LABELS[normalizeMachine(value)];
 
     const MODEL_MAPPING = {
         'FP-D01607MB11': 'TK14-Goodix',
@@ -43,10 +47,12 @@ SMT.daf = function (ctx) {
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
     const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, failed: [] });
+    const dafUploadMachine = ref('');
     const dafModelMappings = ref({});
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
-    const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] });
+    const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] });
+    const dafOutputDetail = ref({ show: false, title: '', subtitle: '', machineRows: [] });
     const dafQuickMode = ref(null);
     const dafQuickOffset = ref(0);
     let applyingDafQuick = false;
@@ -132,15 +138,20 @@ SMT.daf = function (ctx) {
         return {
             ...record,
             model: normalizeModelName(record.model),
+            machine: normalizeMachine(record.machine),
             dedupKey: normalizeText(record.dedupKey || raw[COL_DEDUP_KEY] || ''),
             dedupTime: parsedTime
         };
     };
-    const normalizeBatchModels = batch => ({
-        ...batch,
-        modelName: normalizeModelName(batch.modelName),
-        records: (batch.records || []).map(normalizeDafRecord)
-    });
+    const normalizeBatchModels = batch => {
+        const records = (batch.records || []).map(normalizeDafRecord);
+        return {
+            ...batch,
+            machine: normalizeMachine(batch.machine || records.find(record => record.machine)?.machine),
+            modelName: normalizeModelName(batch.modelName),
+            records
+        };
+    };
     const deduplicateRows = rows => {
         const grouped = new Map();
         const passthrough = [];
@@ -228,7 +239,8 @@ SMT.daf = function (ctx) {
         const end = dates[dates.length - 1];
         return { display: start === end ? start : `${start}～${end}`, start, end, dates: [...new Set(dates)] };
     };
-    const analyzeFile = async (file) => {
+    const analyzeFile = async (file, machine = '') => {
+        machine = normalizeMachine(machine);
         const { rows: sourceRows, columnCount } = await readFileRows(file);
         const rows = deduplicateRows(sourceRows);
         const duplicateCount = sourceRows.length - rows.length;
@@ -256,6 +268,7 @@ SMT.daf = function (ctx) {
                 defect: isDefect ? (cleanText(row[COL_DEFECT]) || '未填寫不良原因') : '',
                 status,
                 model: normalizeModelName(model.model),
+                machine,
                 inputIncluded: ['GOOD', 'FAIL'].includes(status),
                 isDefect,
                 raw: Array.from({ length: columnCount }, (_, index) => displayCell(row[index]))
@@ -264,6 +277,7 @@ SMT.daf = function (ctx) {
         return {
             id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             line: 'DAF',
+            machine,
             fileName: file.name,
             uploadedAt: new Date().toISOString(),
             modelName: normalizeModelName(model.model),
@@ -382,6 +396,7 @@ SMT.daf = function (ctx) {
         const dateEnd = dates[dates.length - 1] || batch.dateEnd || dateStart;
         return {
             ...batch,
+            machine: normalizeMachine(batch.machine || records.find(record => record.machine)?.machine),
             modelName: models.length ? models.join('、') : normalizeModelName(batch.modelName),
             productCode: products.join('、') || batch.productCode || '未識別產品代碼',
             workOrder: workOrders.length ? workOrders.join('、') : (batch.workOrder || '未識別工單'),
@@ -431,7 +446,7 @@ SMT.daf = function (ctx) {
         };
     };
     const dafBatchSignature = batch => (batch.records || []).map(record => [
-        record.dedupKey, record.dedupTime, record.date, record.status,
+        record.dedupKey, record.dedupTime, record.date, record.status, record.machine,
         record.workOrder, record.productCode, record.defect, record.model
     ].join('|')).join('\n');
     const syncDafRemoteChanges = async (before, after) => {
@@ -562,9 +577,20 @@ SMT.daf = function (ctx) {
         return true;
     });
     const mapRate = (value, base) => base ? (value / base * 100).toFixed(2) : '0.00';
-    const buildDafStats = () => {
-        const rows = filterRecords();
-        const inputRows = rows.filter(row => row.inputIncluded);
+    const buildDafMachineBreakdowns = rows => {
+        const groups = new Map();
+        (rows || []).forEach(row => {
+            const machine = normalizeMachine(row.machine);
+            if (!groups.has(machine)) groups.set(machine, []);
+            groups.get(machine).push(row);
+        });
+        return DAF_MACHINE_ORDER
+            .filter(machine => groups.has(machine))
+            .map(machine => ({ ...buildDafSummary(groups.get(machine), machine, false), machine, machineLabel: machineLabel(machine) }))
+            .filter(row => row.totalInput > 0 || row.totalDefects > 0 || row.sourceFiles.length);
+    };
+    const buildDafSummary = (rows, machine = '', includeMachineDetails = true) => {
+        const inputRows = (rows || []).filter(row => row.inputIncluded);
         const goodRows = inputRows.filter(row => row.status === 'GOOD');
         const failRows = inputRows.filter(row => row.status === 'FAIL');
         const input = inputRows.length;
@@ -588,11 +614,13 @@ SMT.daf = function (ctx) {
         inputRows.forEach(row => {
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
-            if (!modelMap[model]) modelMap[model] = { input: 0, good: 0, defects: 0 };
-            if (!workOrderMap[workOrder]) workOrderMap[workOrder] = { models: new Set(), input: 0, good: 0, defects: 0 };
+            if (!modelMap[model]) modelMap[model] = { input: 0, good: 0, defects: 0, byWorkOrder: {} };
+            if (!workOrderMap[workOrder]) workOrderMap[workOrder] = { models: new Set(), input: 0, good: 0, defects: 0, byModel: {} };
             modelMap[model].input++;
             workOrderMap[workOrder].input++;
             workOrderMap[workOrder].models.add(model);
+            modelMap[model].byWorkOrder[workOrder] = (modelMap[model].byWorkOrder[workOrder] || 0) + 1;
+            workOrderMap[workOrder].byModel[model] = (workOrderMap[workOrder].byModel[model] || 0) + 1;
             if (row.status === 'GOOD') { modelMap[model].good++; workOrderMap[workOrder].good++; }
             if (row.status === 'FAIL') { modelMap[model].defects++; workOrderMap[workOrder].defects++; }
             if (row.date) {
@@ -608,19 +636,35 @@ SMT.daf = function (ctx) {
             byModel: detailRows(defectModelMap[name]),
             byWorkOrder: detailRows(defectWorkOrderMap[name])
         })).sort((a, b) => b.qty - a.qty);
-        const byModel = Object.entries(modelMap).map(([name, value]) => ({ name, ...value, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
-        const byWorkOrder = Object.entries(workOrderMap).map(([workOrder, value]) => ({ workOrder, model: [...value.models].join(' / '), input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
+        const byModel = Object.entries(modelMap).map(([name, value]) => ({ name, input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects), byWorkOrder: detailRows(value.byWorkOrder) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
+        const byWorkOrder = Object.entries(workOrderMap).map(([workOrder, value]) => ({ workOrder, name: workOrder, model: [...value.models].join(' / '), input: value.input, good: value.good, defects: value.defects, yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input), ratio: mapRate(value.defects, defects), byModel: detailRows(value.byModel) })).sort((a, b) => b.defects - a.defects || b.input - a.input);
         const daily = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({ ...day, total: day.input, yieldRate: mapRate(day.good, day.input), defectRate: mapRate(day.defects, day.input) }));
-        const unknownStatuses = [...new Set(rows.map(row => row.status).filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
-        return {
+        const unknownStatuses = [...new Set((rows || []).map(row => row.status).filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
+        const result = {
+            machine,
+            machineLabel: machineLabel(machine),
             totalInput: input, totalGood: goodRows.length, totalDefects: defects,
             yieldRate: mapRate(goodRows.length, input), defectRate: mapRate(defects, input),
-            unknownStatusCount: rows.filter(row => row.status && !['GOOD', 'FAIL'].includes(row.status)).length,
+            unknownStatusCount: (rows || []).filter(row => row.status && !['GOOD', 'FAIL'].includes(row.status)).length,
             unknownStatusText: unknownStatuses.join('、') || '無',
-            totalDays: daily.length, totalRows: rows.length, sourceFiles: [...new Set(rows.map(row => row.fileName))],
-            byType, byModel, byWorkOrder, daily, rows
+            totalDays: daily.length, totalRows: (rows || []).length, sourceFiles: [...new Set((rows || []).map(row => row.fileName).filter(Boolean))],
+            byType, byModel, byWorkOrder, daily, rows: rows || []
         };
+        if (includeMachineDetails) {
+            result.byMachine = buildDafMachineBreakdowns(rows);
+            result.byType.forEach(item => {
+                item.byMachine = buildDafMachineBreakdowns((rows || []).filter(row => row.inputIncluded && row.status === 'FAIL' && (row.defect || '未填寫不良原因') === item.name));
+            });
+            result.byModel.forEach(item => {
+                item.byMachine = buildDafMachineBreakdowns((rows || []).filter(row => row.inputIncluded && (row.model || '未識別機種') === item.name));
+            });
+            result.byWorkOrder.forEach(item => {
+                item.byMachine = buildDafMachineBreakdowns((rows || []).filter(row => row.inputIncluded && (row.workOrder || '未識別工單') === item.workOrder));
+            });
+        }
+        return result;
     };
+    const buildDafStats = () => buildDafSummary(filterRecords());
     let dafDashboardCacheSource = null;
     const dafDashboardCache = new Map();
     const getDafUploadedDates = (limit = 14) => {
@@ -637,65 +681,7 @@ SMT.daf = function (ctx) {
         }
         if (dafDashboardCache.has(date)) return dafDashboardCache.get(date);
         const rows = getDafRowsForDate(date);
-        const inputRows = rows.filter(row => row.inputIncluded);
-        const goodRows = inputRows.filter(row => row.status === 'GOOD');
-        const failRows = inputRows.filter(row => row.status === 'FAIL');
-        const toList = map => {
-            const total = Object.values(map).reduce((sum, qty) => sum + qty, 0);
-            return Object.entries(map).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, total) })).sort((a, b) => b.qty - a.qty);
-        };
-        const defectMap = {}, defectModelMap = {}, defectWorkOrderMap = {};
-        const modelMap = {}, workOrderMap = {};
-        failRows.forEach(row => {
-            const defect = row.defect || '未填寫不良原因';
-            const model = row.model || '未識別機種';
-            const workOrder = row.workOrder || '未識別工單';
-            defectMap[defect] = (defectMap[defect] || 0) + 1;
-            if (!defectModelMap[defect]) defectModelMap[defect] = {};
-            if (!defectWorkOrderMap[defect]) defectWorkOrderMap[defect] = {};
-            defectModelMap[defect][model] = (defectModelMap[defect][model] || 0) + 1;
-            defectWorkOrderMap[defect][workOrder] = (defectWorkOrderMap[defect][workOrder] || 0) + 1;
-        });
-        inputRows.forEach(row => {
-            const model = row.model || '未識別機種';
-            const workOrder = row.workOrder || '未識別工單';
-            if (!modelMap[model]) modelMap[model] = { input: 0, good: 0, defects: 0, byWorkOrder: {} };
-            if (!workOrderMap[workOrder]) workOrderMap[workOrder] = { input: 0, good: 0, defects: 0, models: new Set(), byModel: {} };
-            modelMap[model].input++;
-            workOrderMap[workOrder].input++;
-            workOrderMap[workOrder].models.add(model);
-            modelMap[model].byWorkOrder[workOrder] = (modelMap[model].byWorkOrder[workOrder] || 0) + 1;
-            workOrderMap[workOrder].byModel[model] = (workOrderMap[workOrder].byModel[model] || 0) + 1;
-            if (row.status === 'GOOD') { modelMap[model].good++; workOrderMap[workOrder].good++; }
-            if (row.status === 'FAIL') { modelMap[model].defects++; workOrderMap[workOrder].defects++; }
-        });
-        const byType = Object.entries(defectMap).map(([name, qty]) => ({
-            name, qty, ratio: mapRate(qty, failRows.length),
-            byModel: toList(defectModelMap[name]),
-            byWorkOrder: toList(defectWorkOrderMap[name])
-        })).sort((a, b) => b.qty - a.qty);
-        const byModel = Object.entries(modelMap).map(([name, value]) => ({
-            name, qty: value.input, input: value.input, good: value.good, defects: value.defects,
-            yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input),
-            ratio: mapRate(value.input, inputRows.length), byWorkOrder: toList(value.byWorkOrder)
-        })).sort((a, b) => b.input - a.input || b.defects - a.defects);
-        const byWorkOrder = Object.entries(workOrderMap).map(([name, value]) => ({
-            name, qty: value.input, input: value.input, good: value.good, defects: value.defects,
-            model: [...value.models].join(' / '), yieldRate: mapRate(value.good, value.input), defectRate: mapRate(value.defects, value.input),
-            ratio: mapRate(value.input, inputRows.length), byModel: toList(value.byModel)
-        })).sort((a, b) => b.input - a.input || b.defects - a.defects);
-        const result = {
-            date,
-            totalInput: inputRows.length,
-            totalGood: goodRows.length,
-            totalDefects: failRows.length,
-            yieldRate: mapRate(goodRows.length, inputRows.length),
-            defectRate: mapRate(failRows.length, inputRows.length),
-            byType,
-            byModel,
-            byWorkOrder,
-            sourceFiles: [...new Set(rows.map(row => row.fileName).filter(Boolean))]
-        };
+        const result = { ...buildDafSummary(rows), date };
         dafDashboardCache.set(date, result);
         return result;
     };
@@ -753,7 +739,7 @@ SMT.daf = function (ctx) {
     };
     const calculateDafStats = (showToast = true) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
-        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] };
         dafStatsResult.value = buildDafStats();
         renderDafCharts();
         if (showToast) toast(`DAF 統計完成，共 ${dafStatsResult.value.sourceFiles.length} 個檔案`);
@@ -761,11 +747,19 @@ SMT.daf = function (ctx) {
     const openDafDefectDetail = name => {
         const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
         dafDefectDetail.value = row
-            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [] }
-            : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [], byMachine: row.byMachine || [] }
+            : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] };
     };
     const closeDafDefectDetail = () => {
-        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [] };
+    };
+    const openDafOutputDetail = () => {
+        const result = dafStatsResult.value;
+        if (!result) return;
+        dafOutputDetail.value = { show: true, title: 'DAF 產出與良率明細', subtitle: '第一層顯示總和；以下依上傳時選擇的機台拆分', machineRows: result.byMachine || [] };
+    };
+    const closeDafOutputDetail = () => {
+        dafOutputDetail.value = { show: false, title: '', subtitle: '', machineRows: [] };
     };
     const ensureDafBaseSettings = async batch => {
         const modelNames = [...new Set((batch.records || []).flatMap(record => cleanText(record.model).split('、').map(cleanText).filter(model => model && model !== '未識別機種')))];
@@ -810,7 +804,7 @@ SMT.daf = function (ctx) {
         for (let index = queue.index; index < queue.files.length; index++) {
             const file = queue.files[index];
             try {
-                const batch = await analyzeFile(file);
+                const batch = await analyzeFile(file, queue.machine);
                 if (batch.unknownProductDetails?.length || batch.unknownProductCodes?.length) {
                     queue.index = index;
                     pendingDafUpload.value = queue;
@@ -835,7 +829,7 @@ SMT.daf = function (ctx) {
     const uploadDafFiles = async event => {
         const files = [...(event.target.files || [])];
         if (!files.length) return;
-        const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, failed: [] };
+        const queue = { files, machine: normalizeMachine(dafUploadMachine.value), index: 0, success: 0, rows: 0, duplicates: 0, failed: [] };
         loading.value = true;
         try { await processDafUploadQueue(queue); }
         finally {
@@ -898,6 +892,10 @@ SMT.daf = function (ctx) {
         const defectWorkOrders = [['不良原因', '工單', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byWorkOrder || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
         const models = [['機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byModel.map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
+        const machines = [['機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byMachine.map(row => [row.machineLabel, row.totalInput, row.totalGood, row.totalDefects, row.yieldRate + '%', row.defectRate + '%'])];
+        const defectMachines = [['不良原因', '機台', '不良數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalDefects, item.totalDefects && row.qty ? (item.totalDefects / row.qty * 100).toFixed(2) + '%' : '0.00%']))];
+        const modelMachines = [['機種', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byModel.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))];
+        const workOrderMachines = [['工單', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byWorkOrder.flatMap(row => (row.byMachine || []).map(item => [row.workOrder, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))];
         const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
         const paretoTotal = result.byType.reduce((sum, row) => sum + row.qty, 0);
         let paretoAccumulated = 0;
@@ -907,12 +905,12 @@ SMT.daf = function (ctx) {
         })];
         const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
-        const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
-        const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
+        const rawHeader = ['機台', '系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
+        const rawRows = result.rows.map(row => [machineLabel(row.machine), row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
         const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
-        [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
+        [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
         const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
         const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
@@ -978,10 +976,10 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); });
 
     return {
-        dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary,
+        dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadMachine,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
-        openDafDefectDetail, closeDafDefectDetail, setDafQuickMode, shiftDafQuick,
+        openDafDefectDetail, closeDafDefectDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate,
         renderDafCharts
     };

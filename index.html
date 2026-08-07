@@ -951,7 +951,7 @@
                     <p v-if="assemblySourceDetail.hourlyHint" class="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 mb-2">{{ assemblySourceDetail.hourlyHint }}</p>
                     <div v-if="assemblySourceDetail.hourly.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div v-for="hour in assemblySourceDetail.hourly" :key="hour.hour" class="rounded-lg bg-blue-50 border border-blue-100 p-2 text-sm">
-                            <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="font-black text-blue-900"><span v-if="hour.production !== undefined">成功 {{ hour.production }}／</span>{{ hour.qty }} 次 <span v-if="hour.ratio" class="font-normal text-gray-500">{{ hour.ratio }}%</span></div></div><div v-if="hour.note" class="mt-1 text-xs leading-5 text-blue-900 whitespace-pre-wrap break-words">{{ hour.note }}</div>
+                            <div class="flex items-center justify-between gap-2"><div class="font-mono text-blue-700">{{ hour.label }}</div><div class="font-black text-blue-900">{{ hour.qty }} 次 <span v-if="hour.ratio" class="font-normal text-gray-500">{{ hour.ratio }}%</span></div></div><div v-if="hour.note" class="mt-1 text-xs leading-5 text-blue-900 whitespace-pre-wrap break-words">{{ hour.note }}</div>
                         </div>
                     </div>
                     <div v-else class="text-xs text-gray-400">沒有可用的小時資料。</div>
@@ -1087,7 +1087,7 @@
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>機種統計 <span class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊查看 NG 細項</span></h3><div class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>機種</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.byModel" :key="row.name" @click="openDafModelStatsDetail(row.name)" class="cursor-pointer hover:bg-purple-50"><td class="font-bold">{{ row.name }}</td><td class="text-right font-mono">{{ row.input }}</td><td class="text-right font-mono text-success">{{ row.good }}</td><td class="text-right font-mono text-danger">{{ row.defects }}</td><td class="text-right font-mono">{{ row.yieldRate }}%</td><td class="text-right font-mono text-danger">{{ row.defectRate }}%</td></tr><tr v-if="!dafStatsResult.byModel.length"><td colspan="6" class="text-center text-gray-400 py-6">無資料</td></tr></tbody></table></div></div>
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單統計</h3><div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>工單</th><th>機種</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.byWorkOrder" :key="row.workOrder"><td class="font-mono font-bold">{{ row.workOrder }}</td><td class="text-xs">{{ row.model }}</td><td class="text-right font-mono">{{ row.input }}</td><td class="text-right font-mono text-success">{{ row.good }}</td><td class="text-right font-mono text-danger">{{ row.defects }}</td><td class="text-right font-mono">{{ row.yieldRate }}%</td><td class="text-right font-mono text-danger">{{ row.defectRate }}%</td></tr><tr v-if="!dafStatsResult.byWorkOrder.length"><td colspan="7" class="text-center text-gray-400 py-6">無資料</td></tr></tbody></table></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>工單統計 <span class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊查看連動資訊</span></h3><div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>工單</th><th>機種</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.byWorkOrder" :key="row.workOrder" @click="openDafWorkOrderStatsDetail(row.workOrder)" class="cursor-pointer hover:bg-blue-50"><td class="font-mono font-bold">{{ row.workOrder }}</td><td class="text-xs">{{ row.model }}</td><td class="text-right font-mono">{{ row.input }}</td><td class="text-right font-mono text-success">{{ row.good }}</td><td class="text-right font-mono text-danger">{{ row.defects }}</td><td class="text-right font-mono">{{ row.yieldRate }}%</td><td class="text-right font-mono text-danger">{{ row.defectRate }}%</td></tr><tr v-if="!dafStatsResult.byWorkOrder.length"><td colspan="7" class="text-center text-gray-400 py-6">無資料</td></tr></tbody></table></div></div>
                     </div>
                     <div class="section-card p-4" v-if="dafStatsResult.daily.length"><h3 class="card-title"><i class="fas fa-calendar-days text-blue-600"></i>每日明細</h3><div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>日期</th><th class="text-right">投入</th><th class="text-right">良品</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th></tr></thead><tbody><tr v-for="row in dafStatsResult.daily" :key="row.date"><td class="font-mono font-bold">{{ row.date }}</td><td class="text-right">{{ row.input }}</td><td class="text-right text-success">{{ row.good }}</td><td class="text-right text-danger">{{ row.defects }}</td><td class="text-right">{{ row.yieldRate }}%</td><td class="text-right text-danger">{{ row.defectRate }}%</td></tr></tbody></table></div></div>
                 </template>
@@ -1165,6 +1165,42 @@
                                 <div v-for="item in machine.byType" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate">{{ item.name }}</span><span class="font-mono text-red-600">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div>
                             </div>
                             <div v-if="!dafModelDetail.byMachine.length" class="text-xs text-gray-400">無機台資料</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="dafWorkOrderDetail.show && currentLine === 'DAF'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafWorkOrderStatsDetail">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
+                    <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
+                        <div><h3 class="text-lg font-black text-blue-800"><i class="fas fa-file-alt mr-2 text-blue-600"></i>{{ dafWorkOrderDetail.workOrder }} 詳細分析</h3><p class="text-xs text-gray-500 mt-1">第一層工單統計的連動資料；以下拆分 NG 項目、機種與機台。</p></div>
+                        <button @click="closeDafWorkOrderStatsDetail" class="btn-ghost text-xs whitespace-nowrap">關閉</button>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-8 gap-3 mb-5">
+                        <div class="rounded-xl bg-blue-50 p-3 text-center md:col-span-2"><b class="block font-mono font-bold text-blue-800 truncate">{{ dafWorkOrderDetail.workOrder }}</b><span class="text-xs text-gray-500">工單</span></div>
+                        <div class="rounded-xl bg-indigo-50 p-3 text-center md:col-span-2"><b class="block font-bold text-indigo-800 truncate">{{ dafWorkOrderDetail.model }}</b><span class="text-xs text-gray-500">機種</span></div>
+                        <div class="rounded-xl bg-gray-50 p-3 text-center"><b class="block font-mono text-lg text-gray-800">{{ dafWorkOrderDetail.input.toLocaleString() }}</b><span class="text-xs text-gray-500">投入</span></div>
+                        <div class="rounded-xl bg-green-50 p-3 text-center"><b class="block font-mono text-lg text-green-700">{{ dafWorkOrderDetail.good.toLocaleString() }}</b><span class="text-xs text-gray-500">良品</span></div>
+                        <div class="rounded-xl bg-red-50 p-3 text-center"><b class="block font-mono text-lg text-red-700">{{ dafWorkOrderDetail.defects.toLocaleString() }}</b><span class="text-xs text-gray-500">不良</span></div>
+                        <div class="rounded-xl bg-emerald-50 p-3 text-center"><b class="block font-mono text-lg text-emerald-700">{{ dafWorkOrderDetail.yieldRate }}%</b><span class="text-xs text-gray-500">良率</span></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="border border-red-100 rounded-xl overflow-hidden">
+                            <div class="px-4 py-3 bg-red-50 font-black text-red-800"><i class="fas fa-bug mr-2"></i>NG 項目</div>
+                            <table class="data-table min-w-[360px]"><thead><tr><th>NG 項目</th><th class="text-right">數量</th><th class="text-right">占比</th></tr></thead><tbody><tr v-for="item in dafWorkOrderDetail.byType" :key="item.name"><td class="font-bold">{{ item.name }}</td><td class="text-right font-mono text-red-600">{{ item.qty }}</td><td class="text-right font-mono">{{ item.ratio }}%</td></tr><tr v-if="!dafWorkOrderDetail.byType.length"><td colspan="3" class="text-center text-gray-400 py-6">此工單沒有 NG 細項</td></tr></tbody></table>
+                        </div>
+                        <div class="border border-indigo-100 rounded-xl p-4">
+                            <h4 class="font-black text-indigo-800 mb-3"><i class="fas fa-microchip mr-2"></i>機種分佈</h4>
+                            <div v-for="item in dafWorkOrderDetail.byModel" :key="item.name" class="flex items-center gap-2 text-sm py-2 border-b last:border-0 border-gray-100"><span class="flex-1 truncate font-bold">{{ item.name }}</span><span class="font-mono">{{ item.qty }} 件</span><span class="text-xs text-gray-500">{{ item.ratio }}%</span></div>
+                            <div v-if="!dafWorkOrderDetail.byModel.length" class="text-xs text-gray-400">無機種資料</div>
+                        </div>
+                        <div class="border border-purple-100 rounded-xl p-4">
+                            <h4 class="font-black text-purple-800 mb-3"><i class="fas fa-server mr-2"></i>機台分佈</h4>
+                            <div v-for="machine in dafWorkOrderDetail.byMachine" :key="machine.machineLabel" class="border-b last:border-0 border-gray-100 pb-3 mb-3 last:mb-0 last:pb-0">
+                                <div class="flex items-center justify-between mb-2"><b class="text-purple-800">{{ machine.machineLabel }}</b><span class="text-xs text-gray-500">投入 {{ machine.totalInput }}／不良 {{ machine.totalDefects }}／良率 {{ machine.yieldRate }}%</span></div>
+                                <div v-for="item in machine.byType" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate">{{ item.name }}</span><span class="font-mono text-red-600">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div>
+                            </div>
+                            <div v-if="!dafWorkOrderDetail.byMachine.length" class="text-xs text-gray-400">無機台資料</div>
                         </div>
                     </div>
                 </div>
@@ -1769,8 +1805,8 @@
 <script src="js/core.js?v=202608062140"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
-<script src="js/assembly.js?v=202608071025"></script>
-<script src="js/daf.js?v=202608071900"></script>
+<script src="js/assembly.js?v=202608071045"></script>
+<script src="js/daf.js?v=202608071044"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608071900"></script>

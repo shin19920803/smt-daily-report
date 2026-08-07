@@ -861,8 +861,8 @@ SMT.assembly = function (ctx) {
                 const note = item.note || assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
                 return { ...item, note };
             }),
-            hourlyTitle: hasCategoryHourly ? '每小時發生次數' : '每小時作業資料（當日總數）',
-            hourlyHint: hasCategoryHourly ? '' : '此筆歷史資料未保存原因與小時的對應，以下顯示當日各時段總生產／NG。',
+            hourlyTitle: hasCategoryHourly ? '每小時錯誤數' : '每小時錯誤數（當日總數）',
+            hourlyHint: hasCategoryHourly ? '' : '此筆歷史資料未保存原因與小時的對應，以下顯示當日各時段錯誤數。',
             total: row?.qty || 0,
             note: assemblyDefectNotes.value[category] || '',
             draftNote: assemblyDefectNotes.value[category] || ''

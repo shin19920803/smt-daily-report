@@ -149,7 +149,7 @@
                         <div class="kpi-card cursor-pointer" @click="openDafWeekDetail"><div class="kpi-icon purple"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-success">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均良率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-line text-xs"></i></div>近 14 日良率趨勢</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-line text-xs"></i></div>近 14 日投入量與良率</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-bar text-xs"></i></div>當日不良原因排行</div><div id="dashDafReasonChart" style="width:100%;height:240px;"></div><div v-if="!dafDashboardResult.byType.length" class="empty-state py-5"><div class="hint">當日沒有不良資料</div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1830,10 +1830,10 @@
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
 <script src="js/assembly.js?v=202608071045"></script>
-<script src="js/daf.js?v=202608072101"></script>
+<script src="js/daf.js?v=202608072201"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608072102"></script>
+<script src="js/dashboard.js?v=202608072202"></script>
 <script src="js/stats.js?v=202608071025"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608072103"></script>

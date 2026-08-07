@@ -23,6 +23,7 @@ SMT.daf = function (ctx) {
     const currentDafMigrationKey = () => currentLine.value === 'FT2' ? 'koya_ft2_log_remote_migrated_v1' : REMOTE_MIGRATED_KEY;
     const currentDafLabel = () => currentDafLine();
     const currentDafMachine = value => currentLine.value === 'FT2' ? '' : normalizeMachine(value);
+    const defaultDafDefect = () => currentLine.value === 'FT2' ? '偵測失效' : '未填寫不良原因';
 
     const MODEL_MAPPING = {
         'FP-D01607MB11': 'TK14-Goodix',
@@ -273,7 +274,7 @@ SMT.daf = function (ctx) {
                 dedupKey: normalizeText(row[COL_DEDUP_KEY]),
                 dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
                 date: parsedDate,
-                defect: isDefect ? (cleanText(row[COL_DEFECT]) || '未填寫不良原因') : '',
+                defect: isDefect ? (cleanText(row[COL_DEFECT]) || defaultDafDefect()) : '',
                 status,
                 model: normalizeModelName(model.model),
                 machine,
@@ -613,7 +614,7 @@ SMT.daf = function (ctx) {
         const workOrderMap = {};
         const dayMap = {};
         failRows.forEach(row => {
-            const defect = row.defect || '未填寫不良原因';
+            const defect = row.defect || defaultDafDefect();
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
             defectMap[defect] = (defectMap[defect] || 0) + 1;
@@ -642,7 +643,7 @@ SMT.daf = function (ctx) {
                 if (!dayMap[row.date]) dayMap[row.date] = { date: row.date, input: 0, good: 0, defects: 0, byType: {} };
                 dayMap[row.date].input++;
                 if (row.status === 'GOOD') dayMap[row.date].good++;
-                if (row.status === 'FAIL') { dayMap[row.date].defects++; dayMap[row.date].byType[row.defect] = (dayMap[row.date].byType[row.defect] || 0) + 1; }
+                if (row.status === 'FAIL') { dayMap[row.date].defects++; const defect = row.defect || defaultDafDefect(); dayMap[row.date].byType[defect] = (dayMap[row.date].byType[defect] || 0) + 1; }
             }
         });
         const detailRows = map => Object.entries(map || {}).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, Object.values(map).reduce((sum, value) => sum + value, 0)) })).sort((a, b) => b.qty - a.qty);
@@ -668,7 +669,7 @@ SMT.daf = function (ctx) {
         if (includeMachineDetails) {
             result.byMachine = buildDafMachineBreakdowns(rows);
             result.byType.forEach(item => {
-                item.byMachine = buildDafMachineBreakdowns((rows || []).filter(row => row.inputIncluded && row.status === 'FAIL' && (row.defect || '未填寫不良原因') === item.name));
+                item.byMachine = buildDafMachineBreakdowns((rows || []).filter(row => row.inputIncluded && row.status === 'FAIL' && (row.defect || defaultDafDefect()) === item.name));
             });
             result.byModel.forEach(item => {
                 item.byMachine = buildDafMachineBreakdowns((rows || []).filter(row => row.inputIncluded && (row.model || '未識別機種') === item.name));

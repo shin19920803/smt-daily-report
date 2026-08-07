@@ -33,7 +33,7 @@ SMT.assembly = function (ctx) {
     const assemblyStatusNoteDraft = ref('');
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
-    const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' });
+    const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '' });
     const assemblyDailyDetail = ref({ show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] });
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
@@ -836,28 +836,41 @@ SMT.assembly = function (ctx) {
         if (assemblyStatsFilter.value.start && assemblyStatsFilter.value.end && assemblyStatsFilter.value.start > assemblyStatsFilter.value.end) {
             return toast('開始日期不能晚於結束日期', 'warning');
         }
-        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' };
+        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '' };
         assemblyDailyDetail.value = { show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] };
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
     };
-    const openAssemblySourceDetail = (category) => {
-        const row = (assemblyStatsResult.value?.byType || []).find(item => item.name === category);
+    const openAssemblySourceDetail = (category, result = assemblyStatsResult.value) => {
+        const row = (result?.byType || []).find(item => item.name === category);
+        const categoryHourly = row?.hourly || [];
+        const hasCategoryHourly = categoryHourly.length > 0;
+        const fallbackHourly = (result?.hourly || []).filter(item => item.total > 0).map(item => ({
+            hour: item.hour,
+            label: item.label,
+            qty: item.ng,
+            production: item.production,
+            ratio: result?.totalDefects ? (item.ng / result.totalDefects * 100).toFixed(1) : '0.0',
+            note: item.note || ''
+        }));
         assemblySourceDetail.value = {
             show: true,
             category,
             items: row?.sourceItems || [],
-            hourly: (row?.hourly || []).map(item => {
+            hourly: (hasCategoryHourly ? categoryHourly : fallbackHourly).map(item => {
                 const note = item.note || assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
                 return { ...item, note };
             }),
+            hourlyTitle: hasCategoryHourly ? '每小時發生次數' : '每小時作業資料（當日總數）',
+            hourlyHint: hasCategoryHourly ? '' : '此筆歷史資料未保存原因與小時的對應，以下顯示當日各時段總生產／NG。',
             total: row?.qty || 0,
             note: assemblyDefectNotes.value[category] || '',
             draftNote: assemblyDefectNotes.value[category] || ''
         };
     };
+    const openAssemblyReportSourceDetail = category => openAssemblySourceDetail(category, assemblyReportResult.value);
     const closeAssemblySourceDetail = () => {
-        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], total: 0, note: '', draftNote: '' };
+        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '' };
     };
     const openAssemblyDailyDetail = date => {
         const result = aggregate(assemblyBatches.value, date, date);
@@ -915,7 +928,7 @@ SMT.assembly = function (ctx) {
             ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '產出成功', '停機／不良', '良率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.successRate + '%'])];
-        const outputTrend = [['日期', '產出成功', '停機／不良'],
+        const outputTrend = [['日期', '產出數', '停機／不良'],
             ...result.daily.map(row => [row.date, row.success, row.ng])];
         const hourly = [['時段', '平均每日生產成功', '平均每日 NG', '平均每日紀錄', '停機率'],
             ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
@@ -967,7 +980,7 @@ SMT.assembly = function (ctx) {
             }
         });
     };
-    const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; });
+    const renderAssemblyReportChart = () => renderChart('assemblyReportChart', assemblyReportResult.value, reportChart, value => { reportChart = value; }, openAssemblyReportSourceDetail);
     const renderParetoChart = (id, result, previous, setPrevious, onClick) => {
         Vue.nextTick(() => {
             const el = document.getElementById(id);
@@ -1015,12 +1028,12 @@ SMT.assembly = function (ctx) {
                 statsDailyChart = echarts.init(el);
             }
             statsDailyChart.setOption({
-                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params[0]?.marker || ''}產出成功: <b>${Number(params[0]?.value || 0).toLocaleString()}</b>` },
-                legend: { data: ['產出成功'], top: 8, right: 0, textStyle: { fontSize: 11 } },
+                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params[0]?.marker || ''}產出數: <b>${Number(params[0]?.value || 0).toLocaleString()}</b>` },
+                legend: { data: ['產出數'], top: 8, right: 0, textStyle: { fontSize: 11 } },
                 grid: { top: 56, right: 20, bottom: 44, left: 48 },
                 xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } },
                 yAxis: { type: 'value', name: '產出', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-                series: [{ name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 24, itemStyle: { color: '#fed7aa', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', formatter: '{c}', fontSize: 9 } }]
+                series: [{ name: '產出數', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 24, itemStyle: { color: '#fed7aa', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', formatter: '{c}', fontSize: 9 } }]
             });
         });
     };
@@ -1064,7 +1077,7 @@ SMT.assembly = function (ctx) {
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, openAssemblyReportSourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

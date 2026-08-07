@@ -377,12 +377,7 @@ SMT.stats = function (ctx) {
                 const wsYield = XLSX.utils.aoa_to_sheet(combinedData);
                 XLSX.utils.book_append_sheet(wb, wsYield, "良率報告");
 
-                const trendTotal = statsResult.value.trend.reduce((sum, row) => sum + row.defects, 0);
-                let trendAccumulated = 0;
-                const paretoData = [["不良現象", "數量", "佔比", "累積佔比"], ...statsResult.value.byType.map(row => {
-                    trendAccumulated += row.qty;
-                    return [row.name, row.qty, `${row.ratio}%`, trendTotal ? `${(trendAccumulated / trendTotal * 100).toFixed(1)}%` : '0.0%'];
-                })];
+                const paretoData = [["不良現象", "數量", "佔比"], ...statsResult.value.byType.map(row => [row.name, row.qty, `${row.ratio}%`])];
                 const yieldTrendData = [["日期", "投入", "不良", "良率"], ...statsResult.value.trend.map(row => [row.date, row.input, row.defects, `${row.yieldRate}%`])];
                 const outputTrendData = [["日期", "投入", "良品", "不良"], ...statsResult.value.trend.map(row => [row.date, row.input, row.input - row.defects, row.defects])];
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrendData), "良率趨勢");
@@ -492,18 +487,13 @@ SMT.stats = function (ctx) {
                 if (!paretoChartInst || paretoChartInst.getDom() !== el) { disposePareto(); paretoChartInst = echarts.init(el); }
                 const sorted = [...statsResult.value.byType].sort((a,b)=>b.qty-a.qty);
                 const names = sorted.map(x=>x.name); const qtys = sorted.map(x=>x.qty);
-                const total = qtys.reduce((s,v)=>s+v,0);
-                let cum=0; const cumPct=qtys.map(q=>{cum+=q;return parseFloat((cum/total*100).toFixed(1));});
                 paretoChartInst.setOption({
                     tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
-                    legend:{data:['不良數量','累積佔比'],top:8,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
-                    grid:{top:64,right:60,bottom:60,left:50},
+                    legend:{data:['不良數量'],top:8,right:10,textStyle:{fontSize:11,color:'#6b7280'}},
+                    grid:{top:64,right:20,bottom:60,left:50},
                     xAxis:{type:'category',data:names,triggerEvent:true,axisLabel:{fontSize:10,color:'#374151',rotate:names.some(n=>n.length>4)?20:0},axisLine:{lineStyle:{color:'#e5e7eb'}}},
-                    yAxis:[{type:'value',name:'數量',nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'累積%',min:0,max:100,nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
-                    series:[
-                        {name:'不良數量',type:'bar',data:qtys,barMaxWidth:40,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#dc2626'},{offset:1,color:'#fca5a5'}]},borderRadius:[4,4,0,0]},label:{show:true,position:'top',fontSize:10,color:'#374151',formatter:'{c}'}},
-                        {name:'累積佔比',type:'line',yAxisIndex:1,data:cumPct,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#2563eb',width:2},itemStyle:{color:'#2563eb'},label:{show:true,position:'top',fontSize:9,color:'#2563eb',formatter:'{c}%'},markLine:{silent:true,lineStyle:{color:'#d97706',type:'dashed',width:1.5},data:[{yAxis:80,label:{formatter:'80%',position:'start',fontSize:10,color:'#d97706'}}]}}
-                    ]
+                    yAxis:{type:'value',name:'數量',nameTextStyle:{color:'#6b7280',fontSize:10},axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
+                    series:[{name:'不良數量',type:'bar',data:qtys,barMaxWidth:40,itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#dc2626'},{offset:1,color:'#fca5a5'}]},borderRadius:[4,4,0,0]},label:{show:true,position:'top',fontSize:10,color:'#374151',formatter:'{c}'}}]
                 });
                 // 點擊柱狀 / X 軸標籤即開啟該不良現象的交叉分析彈窗
                 paretoChartInst.off('click');

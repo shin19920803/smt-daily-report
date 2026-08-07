@@ -17,6 +17,12 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_LABELS = { '1': '1號機', '2': '2號機', '': '未區分機台' };
     const normalizeMachine = value => ['1', '2'].includes(String(value ?? '').trim()) ? String(value).trim() : '';
     const machineLabel = value => DAF_MACHINE_LABELS[normalizeMachine(value)];
+    const isDafLikeLine = () => ['DAF', 'FT2'].includes(currentLine.value);
+    const currentDafLine = () => currentLine.value === 'FT2' ? 'FT2' : 'DAF';
+    const currentDafStorageKey = () => currentLine.value === 'FT2' ? 'koya_ft2_log_batches_v1' : STORAGE_KEY;
+    const currentDafMigrationKey = () => currentLine.value === 'FT2' ? 'koya_ft2_log_remote_migrated_v1' : REMOTE_MIGRATED_KEY;
+    const currentDafLabel = () => currentDafLine();
+    const currentDafMachine = value => currentLine.value === 'FT2' ? '' : normalizeMachine(value);
 
     const MODEL_MAPPING = {
         'FP-D01607MB11': 'TK14-Goodix',
@@ -242,7 +248,7 @@ SMT.daf = function (ctx) {
         return { display: start === end ? start : `${start}～${end}`, start, end, dates: [...new Set(dates)] };
     };
     const analyzeFile = async (file, machine = '') => {
-        machine = normalizeMachine(machine);
+        machine = currentDafMachine(machine);
         const { rows: sourceRows, columnCount } = await readFileRows(file);
         const rows = deduplicateRows(sourceRows);
         const duplicateCount = sourceRows.length - rows.length;
@@ -278,8 +284,8 @@ SMT.daf = function (ctx) {
         });
         return {
             id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-            line: 'DAF',
-            machine,
+            line: currentDafLine(),
+            machine: currentDafMachine(machine),
             fileName: file.name,
             uploadedAt: new Date().toISOString(),
             modelName: normalizeModelName(model.model),
@@ -308,7 +314,7 @@ SMT.daf = function (ctx) {
 
     const readStorage = () => {
         try {
-            const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            const parsed = JSON.parse(localStorage.getItem(currentDafStorageKey()) || '[]');
             return Array.isArray(parsed) ? parsed.map(normalizeBatchModels) : [];
         } catch (e) { return []; }
     };
@@ -328,20 +334,20 @@ SMT.daf = function (ctx) {
         ];
         for (const cache of attempts) {
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+                localStorage.setItem(currentDafStorageKey(), JSON.stringify(cache));
                 return;
             } catch (e) {}
         }
-        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        try { localStorage.removeItem(currentDafStorageKey()); } catch (e) {}
     };
     const hasMigrationFlag = () => {
-        try { return localStorage.getItem(REMOTE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
+        try { return localStorage.getItem(currentDafMigrationKey()) === '1'; } catch (e) { return false; }
     };
     const setMigrationFlag = () => {
-        try { localStorage.setItem(REMOTE_MIGRATED_KEY, '1'); } catch (e) {}
+        try { localStorage.setItem(currentDafMigrationKey(), '1'); } catch (e) {}
     };
     const toRemote = (batch) => ({
-        id: batch.id, line: 'DAF', file_name: batch.fileName, uploaded_at: batch.uploadedAt,
+        id: batch.id, line: currentDafLine(), file_name: batch.fileName, uploaded_at: batch.uploadedAt,
         model_name: batch.modelName, product_code: batch.productCode, work_order: batch.workOrder,
         report_date: batch.reportDate, date_start: batch.dateStart || null, date_end: batch.dateEnd || null,
         input_count: batch.inputCount, good_count: batch.goodCount, fail_count: batch.failCount,
@@ -350,7 +356,7 @@ SMT.daf = function (ctx) {
         row_count: batch.rowCount, raw_column_count: batch.rawColumnCount, records: batch.records
     });
     const fromRemote = (row) => normalizeBatchModels({
-        id: row.id, line: row.line || 'DAF', fileName: row.file_name, uploadedAt: row.uploaded_at,
+        id: row.id, line: row.line || currentDafLine(), fileName: row.file_name, uploadedAt: row.uploaded_at,
         modelName: normalizeModelName(row.model_name), productCode: row.product_code, workOrder: row.work_order,
         workOrderFileName: row.work_order, reportDate: row.report_date, dateStart: row.date_start || '', dateEnd: row.date_end || '',
         inputCount: row.input_count || 0, goodCount: row.good_count || 0, failCount: row.fail_count || 0,
@@ -362,13 +368,13 @@ SMT.daf = function (ctx) {
     const saveRemote = async (batch) => {
         if (!dafRemoteReady.value) return false;
         const { error } = await _supabase.from(REMOTE_TABLE).upsert(toRemote(batch), { onConflict: 'id' });
-        if (error) { dafRemoteError.value = error.message || 'DAF 共用資料庫寫入失敗'; return false; }
+        if (error) { dafRemoteError.value = error.message || `${currentDafLabel()} 共用資料庫寫入失敗`; return false; }
         return true;
     };
     const deleteRemote = async (id) => {
         if (!dafRemoteReady.value) return true;
-        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', 'DAF');
-        if (error) { toast('DAF 共用資料庫刪除失敗：' + error.message, 'error'); return false; }
+        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', currentDafLine());
+        if (error) { toast(`${currentDafLabel()} 共用資料庫刪除失敗：` + error.message, 'error'); return false; }
         return true;
     };
     const loadDafRemoteRows = async () => {
@@ -376,7 +382,7 @@ SMT.daf = function (ctx) {
         const rows = [];
         for (let offset = 0; ; offset += pageSize) {
             const { data: page, error } = await _supabase.from(REMOTE_TABLE)
-                .select('*').eq('line', 'DAF').order('uploaded_at', { ascending: false })
+                .select('*').eq('line', currentDafLine()).order('uploaded_at', { ascending: false })
                 .range(offset, offset + pageSize - 1);
             if (error) return { data: null, error };
             rows.push(...(page || []));
@@ -486,7 +492,7 @@ SMT.daf = function (ctx) {
     };
     const loadDafData = async () => {
         const localBatches = deduplicateDafBatches(readStorage()).batches;
-        if (currentLine.value !== 'DAF') { dafBatches.value = localBatches; return; }
+        if (!isDafLikeLine()) { dafBatches.value = localBatches; return; }
         const { data: remoteRows, error } = await loadDafRemoteRows();
         if (error) {
             dafRemoteReady.value = false;
@@ -580,6 +586,7 @@ SMT.daf = function (ctx) {
     });
     const mapRate = (value, base) => base ? (value / base * 100).toFixed(2) : '0.00';
     const buildDafMachineBreakdowns = rows => {
+        if (currentLine.value === 'FT2') return [];
         const groups = new Map();
         (rows || []).forEach(row => {
             const machine = normalizeMachine(row.machine);
@@ -752,7 +759,7 @@ SMT.daf = function (ctx) {
         dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [], byMachine: [] };
         dafStatsResult.value = buildDafStats();
         renderDafCharts();
-        if (showToast) toast(`DAF 統計完成，共 ${dafStatsResult.value.sourceFiles.length} 個檔案`);
+        if (showToast) toast(`${currentDafLabel()} 統計完成，共 ${dafStatsResult.value.sourceFiles.length} 個檔案`);
     };
     const openDafDefectDetail = name => {
         const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
@@ -784,7 +791,10 @@ SMT.daf = function (ctx) {
     const openDafOutputDetail = () => {
         const result = dafStatsResult.value;
         if (!result) return;
-        dafOutputDetail.value = { show: true, title: 'DAF 產出與良率明細', subtitle: '第一層顯示總和；以下依上傳時選擇的機台拆分', machineRows: result.byMachine || [] };
+        const machineRows = currentLine.value === 'FT2'
+            ? [{ ...result, machineLabel: 'FT2 總和' }]
+            : (result.byMachine || []);
+        dafOutputDetail.value = { show: true, title: `${currentDafLabel()} 產出與良率明細`, subtitle: currentLine.value === 'FT2' ? '第一層顯示 FT2 總和；FT2 不區分機台' : '第一層顯示總和；以下依上傳時選擇的機台拆分', machineRows };
     };
     const closeDafOutputDetail = () => {
         dafOutputDetail.value = { show: false, title: '', subtitle: '', machineRows: [] };
@@ -795,8 +805,8 @@ SMT.daf = function (ctx) {
         if (!modelNames.length && !defectNames.length) return;
         try {
             const [{ data: existingModels, error: modelReadError }, { data: existingDefects, error: defectReadError }] = await Promise.all([
-                _supabase.from('models').select('name').eq('line', 'DAF'),
-                _supabase.from('defect_types').select('name').eq('line', 'DAF')
+                _supabase.from('models').select('name').eq('line', currentDafLine()),
+                _supabase.from('defect_types').select('name').eq('line', currentDafLine())
             ]);
             if (modelReadError || defectReadError) throw modelReadError || defectReadError;
             const modelSet = new Set((existingModels || []).map(row => normalizeText(row.name)));
@@ -805,28 +815,28 @@ SMT.daf = function (ctx) {
             const missingDefects = defectNames.filter(name => !defectSet.has(normalizeText(name)));
             let created = 0;
             for (const name of missingModels) {
-                const { error } = await _supabase.from('models').insert({ name, line: 'DAF' });
+                const { error } = await _supabase.from('models').insert({ name, line: currentDafLine() });
                 if (!error) created++;
             }
             for (const name of missingDefects) {
-                const { error } = await _supabase.from('defect_types').insert({ name, line: 'DAF' });
+                const { error } = await _supabase.from('defect_types').insert({ name, line: currentDafLine() });
                 if (!error) created++;
             }
             if (created && loadBaseData) await loadBaseData();
             if (missingModels.length || missingDefects.length) {
-                toast(`DAF 已自動新增基礎設定：機種 ${missingModels.length} 項、不良現象 ${missingDefects.length} 項`, 'info');
+                toast(`${currentDafLabel()} 已自動新增基礎設定：機種 ${missingModels.length} 項、不良現象 ${missingDefects.length} 項`, 'info');
             }
         } catch (error) {
-            console.warn('DAF 基礎設定自動同步失敗', error);
-            toast('DAF 檔案已分析，但基礎設定自動新增失敗', 'warning');
+            console.warn(`${currentDafLabel()} 基礎設定自動同步失敗`, error);
+            toast(`${currentDafLabel()} 檔案已分析，但基礎設定自動新增失敗`, 'warning');
         }
     };
     const finishDafUploadQueue = queue => {
         persistStorage();
         dafUploadSummary.value = { files: queue.success, rows: queue.rows, duplicates: queue.duplicates, failed: queue.failed };
         if (dafStatsResult.value) dafStatsResult.value = buildDafStats();
-        if (queue.success) toast(`DAF 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
-        else toast('DAF 檔案全部處理失敗', 'error');
+        if (queue.success) toast(`${currentDafLabel()} 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
+        else toast(`${currentDafLabel()} 檔案全部處理失敗`, 'error');
     };
     const processDafUploadQueue = async queue => {
         for (let index = queue.index; index < queue.files.length; index++) {
@@ -857,7 +867,7 @@ SMT.daf = function (ctx) {
     const uploadDafFiles = async event => {
         const files = [...(event.target.files || [])];
         if (!files.length) return;
-        const queue = { files, machine: normalizeMachine(dafUploadMachine.value), index: 0, success: 0, rows: 0, duplicates: 0, failed: [] };
+        const queue = { files, machine: currentDafMachine(dafUploadMachine.value), index: 0, success: 0, rows: 0, duplicates: 0, failed: [] };
         loading.value = true;
         try { await processDafUploadQueue(queue); }
         finally {
@@ -891,21 +901,21 @@ SMT.daf = function (ctx) {
     const cancelDafUnknownModel = () => {
         pendingDafUpload.value = null;
         dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' };
-        toast('已取消此次 DAF 上傳', 'info');
+        toast(`已取消此次 ${currentDafLabel()} 上傳`, 'info');
     };
     const deleteDafBatch = async (id) => {
         const batch = dafBatches.value.find(item => item.id === id);
-        if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 DAF 統計？`)) return;
+        if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 ${currentDafLabel()} 統計？`)) return;
         if (!(await deleteRemote(id))) return;
         dafBatches.value = dafBatches.value.filter(item => item.id !== id);
         dafLastUpload.value = dafBatches.value[0] || null;
         persistStorage();
         if (dafStatsResult.value) dafStatsResult.value = buildDafStats();
-        toast('DAF 檔案統計已刪除', 'info');
+        toast(`${currentDafLabel()} 檔案統計已刪除`, 'info');
     };
 
     const exportDafStats = () => {
-        if (!dafStatsResult.value) return toast('請先執行 DAF 統計', 'warning');
+        if (!dafStatsResult.value) return toast(`請先執行 ${currentDafLabel()} 統計`, 'warning');
         const result = dafStatsResult.value;
         const range = `${dafStatsFilter.value.start || '不限'} ~ ${dafStatsFilter.value.end || '不限'}`;
         const summary = [
@@ -922,25 +932,28 @@ SMT.daf = function (ctx) {
         const models = [['機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byModel.map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
         const workOrderDefects = [['工單', '機種', 'NG項目', '數量', '占該工單NG比例'], ...result.byWorkOrder.flatMap(row => (row.byType || []).map(item => [row.workOrder, row.model, item.name, item.qty, item.ratio + '%']))];
-        const machines = [['機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byMachine.map(row => [row.machineLabel, row.totalInput, row.totalGood, row.totalDefects, row.yieldRate + '%', row.defectRate + '%'])];
-        const defectMachines = [['不良原因', '機台', '不良數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalDefects, item.totalDefects && row.qty ? (item.totalDefects / row.qty * 100).toFixed(2) + '%' : '0.00%']))];
-        const modelMachines = [['機種', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byModel.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))];
-        const workOrderMachines = [['工單', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byWorkOrder.flatMap(row => (row.byMachine || []).map(item => [row.workOrder, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))];
+        const includeMachine = currentLine.value === 'DAF';
+        const machines = includeMachine ? [['機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byMachine.map(row => [row.machineLabel, row.totalInput, row.totalGood, row.totalDefects, row.yieldRate + '%', row.defectRate + '%'])] : [];
+        const defectMachines = includeMachine ? [['不良原因', '機台', '不良數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalDefects, item.totalDefects && row.qty ? (item.totalDefects / row.qty * 100).toFixed(2) + '%' : '0.00%']))] : [];
+        const modelMachines = includeMachine ? [['機種', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byModel.flatMap(row => (row.byMachine || []).map(item => [row.name, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))] : [];
+        const workOrderMachines = includeMachine ? [['工單', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.byWorkOrder.flatMap(row => (row.byMachine || []).map(item => [row.workOrder, item.machineLabel, item.totalInput, item.totalGood, item.totalDefects, item.yieldRate + '%', item.defectRate + '%']))] : [];
         const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
         const pareto = [['不良現象', '不良數量', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
-        const rawHeader = ['機台', '系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
-        const rawRows = result.rows.map(row => [machineLabel(row.machine), row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
+        const rawHeader = [...(includeMachine ? ['機台'] : []), '系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
+        const rawRows = result.rows.map(row => [...(includeMachine ? [machineLabel(row.machine)] : []), row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
         const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
-        [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
+        const sheets = [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]];
+        if (includeMachine) sheets.splice(10, 0, ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines]);
+        sheets.forEach(([name, sheetData]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), name));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
         const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
         const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
-        XLSX.writeFile(wb, `DAF_${modelPart}_${woPart}_${safeFilename(range, '不限日期')}_統計結果.xlsx`);
-        toast('DAF 完整統計報表已導出');
+        XLSX.writeFile(wb, `${currentDafLabel()}_${modelPart}_${woPart}_${safeFilename(range, '不限日期')}_統計結果.xlsx`);
+        toast(`${currentDafLabel()} 完整統計報表已導出`);
     };
 
     let reasonChart = null;
@@ -977,14 +990,14 @@ SMT.daf = function (ctx) {
     dafBatches.value = deduplicateDafBatches(readStorage()).batches;
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => { if (!applyingDafQuick) dafQuickMode.value = null; });
-    watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && currentLine.value === 'DAF') renderDafCharts(); });
+    watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });
     watch(currentTab, tab => {
-        if (currentLine.value !== 'DAF') return;
+        if (!isDafLikeLine()) return;
         if (tab === 'stats' && !dafStatsResult.value) calculateDafStats(false);
         else if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
-        if (line === 'DAF') {
+        if (['DAF', 'FT2'].includes(line)) {
             dafStatsResult.value = null;
             if (currentTab.value === 'stats') calculateDafStats(false);
         }

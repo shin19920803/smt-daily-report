@@ -5,9 +5,11 @@ window.SMT = window.SMT || {};
 SMT.LINES = [
     { id: 'SMT',  label: 'SMT',      icon: 'fa-microchip',   canImport: true  },
     { id: 'DAF',  label: 'DAF',      icon: 'fa-layer-group', canImport: false },
-    { id: 'ASSY', label: 'Mylar',     icon: 'fa-screwdriver-wrench', canImport: false }
+    { id: 'ASSY', label: 'Mylar',    icon: 'fa-screwdriver-wrench', canImport: false },
+    { id: 'FT2',  label: 'FT2',      icon: 'fa-vial',         canImport: false, hidden: true }
 ];
 SMT.LINE_KEY = 'koya_current_line';
+SMT.FT2_ACCESS_KEY = 'koya_ft2_access_v1';
 
 SMT.core = function (ctx) {
         const currentTab = ref('dashboard');
@@ -18,15 +20,30 @@ SMT.core = function (ctx) {
 
         // --- 產線切換 ---
         const lines = SMT.LINES;
-        const validLine = (id) => SMT.LINES.some(l => l.id === id) ? id : 'SMT';
+        const ft2Unlocked = ref((() => { try { return localStorage.getItem(SMT.FT2_ACCESS_KEY) === '1'; } catch(e) { return false; } })());
+        const visibleLines = computed(() => lines.filter(line => !line.hidden || ft2Unlocked.value));
+        const validLine = (id) => SMT.LINES.some(l => l.id === id) && (id !== 'FT2' || ft2Unlocked.value) ? id : 'SMT';
         const currentLine = ref(validLine((() => { try { return localStorage.getItem(SMT.LINE_KEY); } catch(e) { return null; } })()));
         const currentLineMeta = computed(() => SMT.LINES.find(l => l.id === currentLine.value) || SMT.LINES[0]);
-        // DAF／組裝測試先保留功能模組，但操作入口暫不顯示；SMT 維持原有入口。
-        const hideLineTools = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
-        const hideOrders = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
+        const unlockFt2 = () => {
+            ft2Unlocked.value = true;
+            try { localStorage.setItem(SMT.FT2_ACCESS_KEY, '1'); } catch(e) {}
+        };
+        const lockFt2 = () => {
+            ft2Unlocked.value = false;
+            try { localStorage.removeItem(SMT.FT2_ACCESS_KEY); } catch(e) {}
+            if (currentLine.value === 'FT2') {
+                currentLine.value = 'SMT';
+                currentTab.value = 'orders';
+                try { localStorage.setItem(SMT.LINE_KEY, 'SMT'); } catch(e) {}
+            }
+        };
+        const switchableDafLines = ['DAF', 'FT2'];
+        const hideLineTools = computed(() => ['DAF', 'ASSY', 'FT2'].includes(currentLine.value));
+        const hideOrders = computed(() => ['DAF', 'ASSY', 'FT2'].includes(currentLine.value));
         const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
         const hideDailyReport = computed(() => currentLine.value === 'SMT');
-        const hideSettings = computed(() => ['DAF', 'ASSY'].includes(currentLine.value));
+        const hideSettings = computed(() => ['DAF', 'ASSY', 'FT2'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -78,6 +95,17 @@ SMT.core = function (ctx) {
         const todayStr = new Date().toISOString().split('T')[0];
         const loadBaseData = async () => {
             const L = currentLine.value;
+            if (L === 'FT2') {
+                const [dafModels, ft2Models, dafDefects, ft2Defects] = await Promise.all([
+                    _supabase.from('models').select('*').eq('line', 'DAF'),
+                    _supabase.from('models').select('*').eq('line', 'FT2'),
+                    _supabase.from('defect_types').select('*').eq('line', 'DAF'),
+                    _supabase.from('defect_types').select('*').eq('line', 'FT2')
+                ]);
+                const uniqueByName = rows => [...new Map((rows || []).map(row => [String(row.name || '').trim().toUpperCase(), row])).values()];
+                data.value = { workOrders: [], models: uniqueByName([...(dafModels.data || []), ...(ft2Models.data || [])]), defectTypes: uniqueByName([...(dafDefects.data || []), ...(ft2Defects.data || [])]), defectLocations: [], machines: [], oocCauses: [] };
+                return;
+            }
             if (L !== 'SMT') {
                 const [mo, dt] = await Promise.all([
                     _supabase.from('models').select('*').eq('line', L),
@@ -106,9 +134,10 @@ SMT.core = function (ctx) {
         // 切換產線：清掉所有跨線殘留狀態並重新載入該線資料
         const switchLine = async (lineId) => {
             const target = validLine(lineId);
+            if (lineId === 'FT2' && !ft2Unlocked.value) { toast('請先在 SMT「基礎設定」登入解鎖 FT2', 'warning'); return; }
             if (target === currentLine.value) return;
             if ((target === 'SMT' && ['report', 'ooc'].includes(currentTab.value)) ||
-                (['ASSY', 'DAF'].includes(target) && ['fpy', 'ooc', 'equipment', 'orders', 'settings'].includes(currentTab.value))) {
+                (switchableDafLines.concat('ASSY').includes(target) && ['fpy', 'ooc', 'equipment', 'orders', 'settings'].includes(currentTab.value))) {
                 currentTab.value = target === 'SMT' ? 'orders' : 'dashboard';
             }
             currentLine.value = target;
@@ -137,6 +166,7 @@ SMT.core = function (ctx) {
             getWoColor, fpyTargets, saveFpyTargets, loadFpyTargets, isFpyBelowTarget, todayStr,
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
-            lines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, hideSettings, canImport, switchLine,
+            lines, visibleLines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, hideSettings, canImport, switchLine,
+            ft2Unlocked, unlockFt2, lockFt2,
         };
 };

@@ -1,6 +1,8 @@
 window.SMT = window.SMT || {};
 SMT.settings = function (ctx) {
-        const { data, toast, loadBaseData, currentLine } = ctx;
+        const { data, toast, loadBaseData, currentLine, ft2Unlocked, unlockFt2, lockFt2 } = ctx;
+        const ft2LoginForm = ref({ username: '', password: '' });
+        const ft2LoginError = ref('');
         const settingConfig = ref({
             models: { title: '機種清單', colorClass: 'text-indigo-600', btnColor: 'bg-indigo-600', input: '', placeholder: '新機種名稱', field: 'name' },
             defect_types: { title: '不良項目', colorClass: 'text-red-600', btnColor: 'bg-red-600', input: '', placeholder: '不良現象', field: 'name' },
@@ -20,7 +22,19 @@ SMT.settings = function (ctx) {
         });
         const showEquipmentModelSettings = computed(() => currentLine.value === 'SMT');
         const editingId = ref(null); const editingValue = ref('');
-        const sortedList = (key) => { 
+        const loginFt2 = () => {
+            const username = String(ft2LoginForm.value.username || '').trim().toLowerCase();
+            const password = String(ft2LoginForm.value.password || '').toLowerCase();
+            if (username === 'smt' && password === 'shin1992!') {
+                unlockFt2();
+                ft2LoginForm.value = { username: '', password: '' };
+                ft2LoginError.value = '';
+                toast('FT2 已解鎖，產線入口已顯示', 'success');
+                return;
+            }
+            ft2LoginError.value = '帳號或密碼錯誤';
+        };
+        const sortedList = (key) => {
             let list = [];
             if(['models','defect_types','defect_locations'].includes(key)) list = data.value[key.replace(/_([a-z])/g, (g) => g[1].toUpperCase())] || data.value[key];
             else list = data.value[key.replace('ooc_causes', 'oocCauses')] || [];
@@ -33,6 +47,6 @@ SMT.settings = function (ctx) {
         const saveEdit = async (key, id, field) => { if (!editingValue.value.trim()) return; await _supabase.from(key).update({ [field]: editingValue.value }).eq('id', id); editingId.value = null; loadBaseData(); toast("已更新"); };
         return {
             settingConfig, visibleSettingConfig, showEquipmentModelSettings, sortedList, addSettingItem, deleteSettingItem,
-            editingId, editingValue, startEdit, saveEdit
+            editingId, editingValue, startEdit, saveEdit, ft2LoginForm, ft2LoginError, loginFt2, ft2Unlocked, lockFt2
         };
 };

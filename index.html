@@ -39,7 +39,7 @@
             <p class="text-[10px] text-slate-500 font-mono text-center mb-3">生產管理系統</p>
             <!-- 產線切換：各線資料完全獨立 -->
             <div class="line-switch" role="group" aria-label="產線切換">
-                <button v-for="l in lines" :key="l.id" @click="switchLine(l.id)"
+                <button v-for="l in visibleLines" :key="l.id" @click="switchLine(l.id)"
                         :class="{ 'is-active': currentLine === l.id }"
                         :aria-pressed="currentLine === l.id" :title="l.label">
                     <i class="fas" :class="l.icon"></i><span>{{ l.label }}</span>
@@ -124,11 +124,11 @@
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 Mylar LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
             </div>
-            <div v-else-if="currentLine === 'DAF'" class="space-y-6 animate-fade-in">
+            <div v-else-if="['DAF', 'FT2'].includes(currentLine)" class="space-y-6 animate-fade-in">
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <div>
-                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-purple-600 rounded inline-block"></span>DAF 總覽儀表板</h2>
-                        <p class="text-xs text-gray-400 mt-1">依 DAF LOG 顯示投入、產出、不良與工單狀況</p>
+                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-purple-600 rounded inline-block"></span>{{ currentLineMeta.label }} 總覽儀表板</h2>
+                        <p class="text-xs text-gray-400 mt-1">依 {{ currentLineMeta.label }} LOG 顯示投入、產出、不良與工單狀況</p>
                     </div>
                     <div class="flex items-center gap-2">
                         <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left text-xs"></i></button>
@@ -137,8 +137,8 @@
                         <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
                 </div>
-                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} DAF 生產概況</p>
-                <div v-if="dafDashboardResult && !dafDashboardResult.sourceFiles.length" class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800"><i class="fas fa-info-circle mr-1"></i>選擇日期沒有 DAF 報工；當日數據顯示 0，週統計與近 14 個有投入日期仍會保留。</div>
+                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} {{ currentLineMeta.label }} 生產概況</p>
+                <div v-if="dafDashboardResult && !dafDashboardResult.sourceFiles.length" class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800"><i class="fas fa-info-circle mr-1"></i>選擇日期沒有 {{ currentLineMeta.label }} 報工；當日數據顯示 0，週統計與近 14 個有投入日期仍會保留。</div>
                 <div v-if="dafDashboardResult" class="space-y-5">
                     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <div class="kpi-card cursor-pointer" @click="openDafInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
@@ -157,7 +157,7 @@
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="dafDashboardResult.byWorkOrder.length" class="space-y-2"><button v-for="row in dafDashboardResult.byWorkOrder" :key="row.name" @click="openDafWorkOrderDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-blue-50 rounded-lg p-1"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 DAF LOG</div><div class="hint">前往「每日報工」上傳檔案；有資料日期會自動出現在近 14 日統計</div></div></div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 {{ currentLineMeta.label }} LOG</div><div class="hint">前往「每日報工」上傳檔案；有資料日期會自動出現在近 14 日統計</div></div></div>
             </div>
             <div v-else>
             <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -416,20 +416,20 @@
                 <div v-else class="section-card"><div class="empty-state py-12"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 LOG 統計</div><div class="hint">請上傳機台 LOG 檔案，系統會自動偵測日期</div></div></div>
             </div>
 
-            <div v-else-if="currentLine === 'DAF'" class="space-y-4 animate-fade-in">
+            <div v-else-if="['DAF', 'FT2'].includes(currentLine)" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4 md:p-6 border-l-4 border-purple-500">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
-                            <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>DAF 檔案報工</h3>
+                            <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>{{ currentLineMeta.label }} 檔案報工</h3>
                             <p class="text-xs text-gray-400 mt-1">依 Python 版本讀取 C／E／G／I／J 欄：工單、產品代碼、日期、不良原因、GOOD／FAIL。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else class="badge-hint text-orange-700" :title="dafRemoteError"><i class="fas fa-laptop"></i>目前僅本機保存</span>
                     </div>
                     <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
-                        <label class="w-full md:w-56"><span class="block text-xs font-bold text-gray-400 mb-1">上傳機台</span><select v-model="dafUploadMachine" class="w-full border border-purple-200 p-2 rounded-lg text-sm bg-white"><option value="">不區分機台</option><option value="1">1號機</option><option value="2">2號機</option></select></label>
+                        <label v-if="currentLine === 'DAF'" class="w-full md:w-56"><span class="block text-xs font-bold text-gray-400 mb-1">上傳機台</span><select v-model="dafUploadMachine" class="w-full border border-purple-200 p-2 rounded-lg text-sm bg-white"><option value="">不區分機台</option><option value="1">1號機</option><option value="2">2號機</option></select></label>
                         <label class="btn-primary cursor-pointer text-center" style="background:#7c3aed">
-                            <i class="fas fa-upload mr-1"></i>選擇多份 DAF 檔案
+                            <i class="fas fa-upload mr-1"></i>選擇多份 {{ currentLineMeta.label }} 檔案
                             <input type="file" accept=".xlsx,.xls,.xlsm,.csv,.txt" multiple @change="uploadDafFiles" class="hidden">
                         </label>
                         <button @click="loadDafData" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
@@ -459,7 +459,7 @@
                                     <div class="flex flex-wrap items-center gap-2">
                                         <i class="fas fa-file-excel text-green-600"></i>
                                         <span class="font-bold text-sm truncate flex-1">{{ batch.fileName }}</span>
-                                        <span class="badge-hint text-purple-700">{{ batch.machine === '1' ? '1號機' : batch.machine === '2' ? '2號機' : '未區分機台' }}</span>
+                                        <span v-if="currentLine === 'DAF'" class="badge-hint text-purple-700">{{ batch.machine === '1' ? '1號機' : batch.machine === '2' ? '2號機' : '未區分機台' }}</span>
                                         <span class="text-xs text-gray-400">上傳 {{ batch.uploadedAt?.slice(0, 16).replace('T', ' ') }}</span>
                                         <button @click="deleteDafBatch(batch.id)" class="text-red-400 hover:text-red-600 px-1" title="刪除此檔案統計"><i class="fas fa-trash-alt"></i></button>
                                     </div>
@@ -477,7 +477,7 @@
                         </div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚未上傳 DAF 檔案</div><div class="hint">可一次選擇多份檔案，系統會自動分類整理</div></div></div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚未上傳 {{ currentLineMeta.label }} 檔案</div><div class="hint">可一次選擇多份檔案，系統會自動分類整理</div></div></div>
                 <div v-if="dafUnknownModelModal.show" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4">
                     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-5 md:p-6">
                         <div class="flex items-center justify-between border-b pb-3 mb-4">
@@ -1042,11 +1042,11 @@
                     </div>
                 </template>
             </div>
-            <div v-else-if="currentLine === 'DAF'" class="space-y-4 animate-fade-in">
+            <div v-else-if="['DAF', 'FT2'].includes(currentLine)" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4">
                     <div class="quick-bar mb-4">
                         <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
-                        <div class="quick-seg" role="group" aria-label="DAF 快捷統計區間">
+                        <div class="quick-seg" role="group" :aria-label="currentLineMeta.label + ' 快捷統計區間'">
                             <button @click="setDafQuickMode('day')" :class="{ 'is-active': dafQuickMode === 'day' }" :aria-pressed="dafQuickMode === 'day'">日</button>
                             <button @click="setDafQuickMode('week')" :class="{ 'is-active': dafQuickMode === 'week' }" :aria-pressed="dafQuickMode === 'week'">週</button>
                             <button @click="setDafQuickMode('month')" :class="{ 'is-active': dafQuickMode === 'month' }" :aria-pressed="dafQuickMode === 'month'">月</button>
@@ -1093,7 +1093,7 @@
                 </template>
             </div>
 
-            <div v-if="dafOutputDetail.show && currentLine === 'DAF'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafOutputDetail">
+            <div v-if="dafOutputDetail.show && ['DAF', 'FT2'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafOutputDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-center justify-between border-b pb-3 mb-4">
                         <div><h3 class="text-lg font-black text-purple-800"><i class="fas fa-cubes mr-2 text-purple-500"></i>{{ dafOutputDetail.title }}</h3><p class="text-xs text-gray-500 mt-1">{{ dafOutputDetail.subtitle }}</p></div>
@@ -1118,7 +1118,7 @@
                 </div>
             </div>
 
-            <div v-if="dafDefectDetail.show && currentLine === 'DAF'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafDefectDetail">
+            <div v-if="dafDefectDetail.show && ['DAF', 'FT2'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafDefectDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-center justify-between border-b pb-3 mb-4">
                         <div>
@@ -1128,19 +1128,23 @@
                         <button @click="closeDafDefectDetail" class="btn-ghost text-xs">關閉</button>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div v-for="machine in dafDefectDetail.byMachine" :key="machine.machineLabel" class="border border-red-100 rounded-xl p-4">
+                            <div v-for="machine in currentLine === 'DAF' ? dafDefectDetail.byMachine : []" :key="machine.machineLabel" class="border border-red-100 rounded-xl p-4">
                             <h4 class="font-black text-red-800 mb-3"><i class="fas fa-microchip mr-2"></i>{{ machine.machineLabel }}<span class="font-mono text-sm ml-2">{{ machine.totalDefects }} 件</span></h4>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div><h5 class="text-xs font-black text-purple-800 mb-2">機種分佈</h5><div v-for="item in machine.byModel" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate">{{ item.name }}</span><span class="font-mono text-purple-700">{{ item.defects }} 件</span></div><div v-if="!machine.byModel.length" class="text-xs text-gray-400">無機種資料</div></div>
                                 <div><h5 class="text-xs font-black text-blue-800 mb-2">工單分佈</h5><div v-for="item in machine.byWorkOrder" :key="item.workOrder" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate font-mono">{{ item.workOrder }}</span><span class="font-mono text-blue-700">{{ item.defects }} 件</span></div><div v-if="!machine.byWorkOrder.length" class="text-xs text-gray-400">無工單資料</div></div>
                             </div>
                         </div>
-                        <div v-if="!dafDefectDetail.byMachine.length" class="text-xs text-gray-400">無機台資料</div>
+                        <div v-if="currentLine === 'FT2'" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div class="border border-purple-100 rounded-xl p-4"><h4 class="font-black text-purple-800 mb-2"><i class="fas fa-microchip mr-2"></i>機種分佈</h4><div v-for="item in dafDefectDetail.byModel" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate">{{ item.name }}</span><span class="font-mono text-purple-700">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div><div v-if="!dafDefectDetail.byModel.length" class="text-xs text-gray-400">無機種資料</div></div>
+                            <div class="border border-blue-100 rounded-xl p-4"><h4 class="font-black text-blue-800 mb-2"><i class="fas fa-file-alt mr-2"></i>工單分佈</h4><div v-for="item in dafDefectDetail.byWorkOrder" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate font-mono">{{ item.name }}</span><span class="font-mono text-blue-700">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div><div v-if="!dafDefectDetail.byWorkOrder.length" class="text-xs text-gray-400">無工單資料</div></div>
+                        </div>
+                        <div v-if="currentLine === 'DAF' && !dafDefectDetail.byMachine.length" class="text-xs text-gray-400">無機台資料</div>
                     </div>
                 </div>
             </div>
 
-            <div v-if="dafModelDetail.show && currentLine === 'DAF'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafModelStatsDetail">
+            <div v-if="dafModelDetail.show && ['DAF', 'FT2'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafModelStatsDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
                         <div><h3 class="text-lg font-black text-purple-800"><i class="fas fa-microchip mr-2 text-purple-600"></i>{{ dafModelDetail.name }} NG 細項</h3><p class="text-xs text-gray-500 mt-1">以下 NG 項目、數量與占此機種 NG 比例。</p></div>
@@ -1158,7 +1162,7 @@
                             <div class="px-4 py-3 bg-red-50 font-black text-red-800"><i class="fas fa-bug mr-2"></i>NG 項目</div>
                             <table class="data-table min-w-[420px]"><thead><tr><th>NG 項目</th><th class="text-right">數量</th><th class="text-right">占比</th></tr></thead><tbody><tr v-for="item in dafModelDetail.byType" :key="item.name"><td class="font-bold">{{ item.name }}</td><td class="text-right font-mono text-red-600">{{ item.qty }}</td><td class="text-right font-mono">{{ item.ratio }}%</td></tr><tr v-if="!dafModelDetail.byType.length"><td colspan="3" class="text-center text-gray-400 py-6">此機種沒有 NG 細項</td></tr></tbody></table>
                         </div>
-                        <div class="border border-purple-100 rounded-xl p-4">
+                        <div v-if="currentLine === 'DAF'" class="border border-purple-100 rounded-xl p-4">
                             <h4 class="font-black text-purple-800 mb-3"><i class="fas fa-microchip mr-2"></i>機台分佈</h4>
                             <div v-for="machine in dafModelDetail.byMachine" :key="machine.machineLabel" class="border-b last:border-0 border-gray-100 pb-3 mb-3 last:mb-0 last:pb-0">
                                 <div class="flex items-center justify-between mb-2"><b class="text-purple-800">{{ machine.machineLabel }}</b><span class="text-xs text-gray-500">投入 {{ machine.totalInput }}／不良 {{ machine.totalDefects }}／良率 {{ machine.yieldRate }}%</span></div>
@@ -1170,7 +1174,7 @@
                 </div>
             </div>
 
-            <div v-if="dafWorkOrderDetail.show && currentLine === 'DAF'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafWorkOrderStatsDetail">
+            <div v-if="dafWorkOrderDetail.show && ['DAF', 'FT2'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafWorkOrderStatsDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
                         <div><h3 class="text-lg font-black text-blue-800"><i class="fas fa-file-alt mr-2 text-blue-600"></i>{{ dafWorkOrderDetail.workOrder }} 詳細分析</h3><p class="text-xs text-gray-500 mt-1">第一層工單統計的連動資料；以下拆分 NG 項目、機種與機台。</p></div>
@@ -1194,7 +1198,7 @@
                             <div v-for="item in dafWorkOrderDetail.byModel" :key="item.name" class="flex items-center gap-2 text-sm py-2 border-b last:border-0 border-gray-100"><span class="flex-1 truncate font-bold">{{ item.name }}</span><span class="font-mono">{{ item.qty }} 件</span><span class="text-xs text-gray-500">{{ item.ratio }}%</span></div>
                             <div v-if="!dafWorkOrderDetail.byModel.length" class="text-xs text-gray-400">無機種資料</div>
                         </div>
-                        <div class="border border-purple-100 rounded-xl p-4">
+                        <div v-if="currentLine === 'DAF'" class="border border-purple-100 rounded-xl p-4">
                             <h4 class="font-black text-purple-800 mb-3"><i class="fas fa-server mr-2"></i>機台分佈</h4>
                             <div v-for="machine in dafWorkOrderDetail.byMachine" :key="machine.machineLabel" class="border-b last:border-0 border-gray-100 pb-3 mb-3 last:mb-0 last:pb-0">
                                 <div class="flex items-center justify-between mb-2"><b class="text-purple-800">{{ machine.machineLabel }}</b><span class="text-xs text-gray-500">投入 {{ machine.totalInput }}／不良 {{ machine.totalDefects }}／良率 {{ machine.yieldRate }}%</span></div>
@@ -1206,7 +1210,7 @@
                 </div>
             </div>
 
-            <div v-if="!['ASSY', 'DAF'].includes(currentLine)">
+            <div v-if="!['ASSY', 'DAF', 'FT2'].includes(currentLine)">
             <div class="section-card p-4 mb-5">
                 <!-- 快捷區間：日 / 週(日–六) / 月，左右鍵快速切換上下一期 -->
                 <div class="quick-bar">
@@ -1696,6 +1700,26 @@
         <!-- ==================== SETTINGS ==================== -->
         <div v-if="currentTab === 'settings' && !hideSettings" class="animate-fade-in">
             <h2 class="text-xl md:text-2xl font-black mb-6 text-gray-800"><i class="fas fa-cog mr-2 text-gray-500"></i>系統基礎設定</h2>
+
+            <div v-if="currentLine === 'SMT'" class="section-card p-4 mb-6 border border-indigo-100">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h3 class="font-bold text-sm text-indigo-700"><i class="fas fa-lock mr-1"></i>FT2 產線權限</h3>
+                        <p class="text-xs text-gray-400 mt-1">登入後才會顯示 FT2 產線入口。</p>
+                    </div>
+                    <span v-if="ft2Unlocked" class="badge-hint text-green-700"><i class="fas fa-unlock mr-1"></i>已解鎖</span>
+                </div>
+                <div v-if="!ft2Unlocked" class="flex flex-col md:flex-row gap-2 mt-3 max-w-2xl">
+                    <input v-model="ft2LoginForm.username" class="flex-1 border border-gray-200 p-2 rounded-lg text-sm" placeholder="登入帳號" autocomplete="username" @keyup.enter="loginFt2">
+                    <input v-model="ft2LoginForm.password" type="password" class="flex-1 border border-gray-200 p-2 rounded-lg text-sm" placeholder="登入密碼" autocomplete="current-password" @keyup.enter="loginFt2">
+                    <button @click="loginFt2" class="btn-primary text-sm whitespace-nowrap"><i class="fas fa-key mr-1"></i>登入解鎖</button>
+                </div>
+                <div v-else class="flex flex-wrap items-center gap-3 mt-3">
+                    <span class="text-sm text-gray-600">FT2 入口已顯示於上方產線切換。</span>
+                    <button @click="lockFt2" class="btn-ghost text-sm text-red-600">鎖定 FT2</button>
+                </div>
+                <p v-if="ft2LoginError" class="text-xs text-red-600 mt-2"><i class="fas fa-circle-exclamation mr-1"></i>{{ ft2LoginError }}</p>
+            </div>
             
             <!-- FPY Target Settings -->
             <div v-if="!hideLineTools" class="section-card p-4 mb-6">
@@ -1793,7 +1817,7 @@
                 <a v-if="!hideSettings" @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
                 <div class="border-t border-gray-100 mt-2 pt-2">
                     <div class="px-4 pb-1 text-[10px] font-bold text-gray-400">切換產線</div>
-                    <a v-for="l in lines" :key="l.id" @click="switchLine(l.id); showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentLine===l.id ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas w-5 mr-2" :class="l.icon"></i>{{ l.label }}<i v-if="currentLine===l.id" class="fas fa-check ml-auto text-xs"></i></a>
+                    <a v-for="l in visibleLines" :key="l.id" @click="switchLine(l.id); showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentLine===l.id ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas w-5 mr-2" :class="l.icon"></i>{{ l.label }}<i v-if="currentLine===l.id" class="fas fa-check ml-auto text-xs"></i></a>
                 </div>
             </div>
         </a>
@@ -1802,17 +1826,17 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608062140"></script>
+<script src="js/core.js?v=202608072100"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
 <script src="js/assembly.js?v=202608071045"></script>
-<script src="js/daf.js?v=202608071044"></script>
+<script src="js/daf.js?v=202608072101"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608071900"></script>
+<script src="js/dashboard.js?v=202608072102"></script>
 <script src="js/stats.js?v=202608071025"></script>
 <script src="js/equipment.js?v=202608052100"></script>
-<script src="js/settings.js?v=202608061900"></script>
+<script src="js/settings.js?v=202608072103"></script>
 <script src="js/app.js?v=202608062810"></script>
 </body>
 </html>

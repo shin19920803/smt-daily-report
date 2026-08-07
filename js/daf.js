@@ -906,12 +906,14 @@ SMT.daf = function (ctx) {
             return [row.name, row.qty, row.ratio + '%', paretoTotal ? (paretoAccumulated / paretoTotal * 100).toFixed(1) + '%' : '0.0%'];
         })];
         const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
+        const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
         const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
         const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
         const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
         const wb = XLSX.utils.book_new();
         [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['工單統計', workOrders], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
         const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
         const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
         XLSX.writeFile(wb, `DAF_${modelPart}_${woPart}_${safeFilename(range, '不限日期')}_統計結果.xlsx`);
@@ -953,7 +955,7 @@ SMT.daf = function (ctx) {
             } else reasonChart = disposeChart(reasonChart);
             if (trendEl && result?.daily?.length) {
                 if (!trendChart || trendChart.getDom() !== trendEl) { trendChart = disposeChart(trendChart); trendChart = echarts.init(trendEl); }
-                trendChart.setOption({ grid: { top: 32, right: 24, bottom: 44, left: 48 }, tooltip: { trigger: 'axis', formatter: params => `${params[0].name}<br/><b>良率 ${params[0].value}%</b>` }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 } }, series: [{ name: '良率', type: 'line', data: result.daily.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }] });
+                trendChart.setOption({ legend: { data: ['投入數', '良率'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } }, grid: { top: 36, right: 58, bottom: 44, left: 48 }, tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 }, splitLine: { show: false } }], series: [{ name: '投入數', type: 'bar', data: result.daily.map(row => row.input), barMaxWidth: 24, itemStyle: { color: '#c4b5fd', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: result.daily.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }] });
             } else trendChart = disposeChart(trendChart);
         });
     };
@@ -962,8 +964,17 @@ SMT.daf = function (ctx) {
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => { if (!applyingDafQuick) dafQuickMode.value = null; });
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && currentLine.value === 'DAF') renderDafCharts(); });
-    watch(currentTab, tab => { if ((tab === 'stats' || tab === 'report') && currentLine.value === 'DAF') renderDafCharts(); });
-    watch(currentLine, line => { if (line === 'DAF') dafStatsResult.value = null; });
+    watch(currentTab, tab => {
+        if (currentLine.value !== 'DAF') return;
+        if (tab === 'stats' && !dafStatsResult.value) calculateDafStats(false);
+        else if (tab === 'stats' || tab === 'report') renderDafCharts();
+    });
+    watch(currentLine, line => {
+        if (line === 'DAF') {
+            dafStatsResult.value = null;
+            if (currentTab.value === 'stats') calculateDafStats(false);
+        }
+    });
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); });
 
     return {

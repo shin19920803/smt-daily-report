@@ -114,7 +114,7 @@
                         <div class="kpi-card cursor-pointer" @click="openAssemblyWeekDetail"><div class="kpi-icon cyan"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-danger">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均停機率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-line text-xs"></i></div>近 14 日停機率趨勢</div><div id="dashAssemblyDowntimeChart" style="width:100%;height:220px;"></div></div>
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-line text-xs"></i></div>近 14 日產出與成功率</div><div id="dashAssemblyDowntimeChart" style="width:100%;height:220px;"></div></div>
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ffedd5;color:#ea580c"><i class="fas fa-chart-bar text-xs"></i></div>當日停機原因排行</div><div id="dashAssemblyReasonChart" style="width:100%;height:220px;"></div><div v-if="assemblyDashboardResult.byType.length === 0" class="empty-state py-5"><div class="hint">當日沒有停機／不良</div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -149,7 +149,7 @@
                         <div class="kpi-card cursor-pointer" @click="openDafWeekDetail"><div class="kpi-icon purple"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-success">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均良率</div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-line text-xs"></i></div>近 14 日良率趨勢</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#ede9fe;color:#7c3aed"><i class="fas fa-chart-line text-xs"></i></div>近 14 日產出與良率</div><div id="dashDafDailyChart" style="width:100%;height:240px;"></div></div>
                         <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-bar text-xs"></i></div>當日不良原因排行</div><div id="dashDafReasonChart" style="width:100%;height:240px;"></div><div v-if="!dafDashboardResult.byType.length" class="empty-state py-5"><div class="hint">當日沒有不良資料</div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -211,7 +211,7 @@
                 <div class="section-card">
                     <div class="card-header">
                         <div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-chart-line text-xs"></i></div>
-                        近 14 日良率趨勢
+                        近 14 日產出與良率
                     </div>
                     <div id="dashYieldChart" style="width:100%;height:220px;"></div>
                 </div>
@@ -965,7 +965,7 @@
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4">
-                            <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>良率趨勢（產出成功率）</h3>
+                            <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與成功率趨勢</h3>
                             <div v-if="assemblyStatsResult.daily.length" id="assemblyDailyChart" style="width:100%;height:340px;"></div>
                             <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
                         </div>
@@ -1053,7 +1053,7 @@
                     </div>
                     <div v-if="dafStatsResult.unknownStatusCount" class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ dafStatsResult.unknownStatusCount }} 筆：{{ dafStatsResult.unknownStatusText }}；不列入投入、良品與不良統計。</div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>良率趨勢</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>不良現象 Pareto 圖分析 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
                     </div>
                     <div class="section-card p-4">
@@ -1145,7 +1145,7 @@
 
             <div v-if="statsResult" class="grid grid-cols-1 md:grid-cols-2 gap-5 animate-fade-in">
                 <div class="section-card p-4 col-span-1 md:col-span-2 lg:col-span-1">
-                    <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>良率趨勢 <span class="text-xs font-normal text-gray-400">（依生產日彙總）</span></h3>
+                    <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢 <span class="text-xs font-normal text-gray-400">（依生產日彙總）</span></h3>
                     <div v-if="statsResult.trend && statsResult.trend.length" id="statsYieldTrend" style="width:100%;height:340px;"></div>
                     <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
                 </div>
@@ -1695,12 +1695,12 @@
 <script src="js/core.js?v=202608062140"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608062500"></script>
-<script src="js/assembly.js?v=202608062930"></script>
-<script src="js/daf.js?v=202608062930"></script>
+<script src="js/assembly.js?v=202608071230"></script>
+<script src="js/daf.js?v=202608071230"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608062930"></script>
-<script src="js/stats.js?v=202608062930"></script>
+<script src="js/dashboard.js?v=202608071230"></script>
+<script src="js/stats.js?v=202608071230"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608061900"></script>
 <script src="js/app.js?v=202608062810"></script>

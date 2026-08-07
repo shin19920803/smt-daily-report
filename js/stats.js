@@ -232,7 +232,7 @@ SMT.stats = function (ctx) {
         };
 
         // --- 主統計 ---
-        const calculateStats = async () => {
+        const calculateStats = async (showToast = true) => {
             loading.value = true;
             try {
                 let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
@@ -363,7 +363,7 @@ SMT.stats = function (ctx) {
                     modelAgg, woAgg,
                     topLocations, trend, topTypeNames, totalDays, fpyTrend
                 };
-                toast("統計完成");
+                if (showToast) toast("統計完成");
             } catch (e) { toast("統計失敗: " + e.message, "error"); } finally { loading.value = false; }
         };
 
@@ -384,7 +384,9 @@ SMT.stats = function (ctx) {
                     return [row.name, row.qty, `${row.ratio}%`, trendTotal ? `${(trendAccumulated / trendTotal * 100).toFixed(1)}%` : '0.0%'];
                 })];
                 const yieldTrendData = [["日期", "投入", "不良", "良率"], ...statsResult.value.trend.map(row => [row.date, row.input, row.defects, `${row.yieldRate}%`])];
+                const outputTrendData = [["日期", "投入", "良品", "不良"], ...statsResult.value.trend.map(row => [row.date, row.input, row.input - row.defects, row.defects])];
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrendData), "良率趨勢");
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrendData), "產出趨勢");
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(paretoData), "Pareto分析");
 
                 // === 每日明細分頁 ===
@@ -579,11 +581,12 @@ SMT.stats = function (ctx) {
                 if (!el) return;
                 if (!yieldTrendChartInst || yieldTrendChartInst.getDom() !== el) { disposeYieldTrend(); yieldTrendChartInst = echarts.init(el); }
                 yieldTrendChartInst.setOption({
-                    tooltip: { trigger: 'axis', formatter: params => `${params[0].name}<br/><b>良率 ${params[0].value}%</b>` },
-                    grid: { top: 28, right: 20, bottom: 44, left: 50 },
+                    legend: { data: ['投入數', '良率'], top: 4, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                    tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } },
+                    grid: { top: 36, right: 58, bottom: 44, left: 50 },
                     xAxis: { type: 'category', data: r.trend.map(row => row.date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-                    yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-                    series: [{ name: '良率', type: 'line', data: r.trend.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
+                    yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }],
+                    series: [{ name: '投入數', type: 'bar', data: r.trend.map(row => row.input), barMaxWidth: 24, itemStyle: { color: '#bfdbfe', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: r.trend.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
                 });
             });
         };
@@ -600,7 +603,15 @@ SMT.stats = function (ctx) {
         window.addEventListener('resize', () => { if (currentTab.value === 'stats') resizeStatsCharts(); });
 
         watch(() => statsResult.value, (val) => { if (val && currentTab.value === 'stats') renderStatsCharts(); });
-        watch(currentTab, (tab) => { if (tab === 'stats' && statsResult.value) renderStatsCharts(); });
+        watch(currentTab, (tab) => {
+            if (tab !== 'stats' || currentLine.value !== 'SMT') return;
+            if (statsResult.value) renderStatsCharts();
+            else calculateStats(false);
+        });
+        watch(currentLine, line => {
+            if (line !== 'SMT') statsResult.value = null;
+            else if (currentTab.value === 'stats') calculateStats(false);
+        });
 
         return {
             statsFilter, statsResult, calculateStats, exportToExcel, hasDefects,

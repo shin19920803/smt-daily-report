@@ -405,7 +405,8 @@ SMT.dashboard = function (ctx) {
             const days = getAssemblyUploadedDates(14);
             const reports = days.map(date => getAssemblyReportForDate(date));
             const labels = days.map(d => d.slice(5));
-            const downtime = reports.map(result => result.totalRecords > 0 ? parseFloat(result.downtimeRate) : null);
+            const outputs = reports.map(result => result.totalSuccess > 0 ? result.totalSuccess : 0);
+            const successRates = reports.map(result => result.totalRecords > 0 ? parseFloat(result.yieldRate) : null);
             const current = assemblyDashboardResult.value || getAssemblyReportForDate(target);
             await waitForDashboardLayout();
             if (!canRenderDashboard(requestId, line)) return;
@@ -413,11 +414,12 @@ SMT.dashboard = function (ctx) {
             if (downtimeEl) {
                 dashAssemblyDowntimeChartInst = ensureDashboardChart(dashAssemblyDowntimeChartInst, downtimeEl);
                 setDashboardOption(dashAssemblyDowntimeChartInst, {
-                    grid:{top:28,right:20,bottom:36,left:48},
-                    tooltip:{trigger:'axis',formatter:p=>{const v=p[0];return v.name+'<br/>'+(v.value!==null?'<b>'+v.value+'%</b>':'無資料');}},
+                    legend:{data:['產出成功','成功率'],top:4,right:10,textStyle:{fontSize:10,color:'#6b7280'}},
+                    grid:{top:32,right:56,bottom:36,left:48},
+                    tooltip:{trigger:'axis',formatter:p=>{let s=p[0]?.axisValue||'';p.forEach(v=>{s+=`<br/>${v.marker}${v.seriesName}: <b>${v.value === null || v.value === undefined ? '無資料' : v.seriesName === '成功率' ? v.value + '%' : v.value.toLocaleString()}</b>`;});return s;}},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
-                    yAxis:{type:'value',min:0,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
-                    series:[{type:'line',data:downtime,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#dc2626',width:2.5},itemStyle:{color:'#dc2626'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(220,38,38,0.15)'},{offset:1,color:'rgba(220,38,38,0)'}]}}}]
+                    yAxis:[{type:'value',name:'產出',min:0,axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'成功率',min:0,max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
+                    series:[{name:'產出成功',type:'bar',data:outputs,barMaxWidth:24,itemStyle:{color:'#fca5a5',borderRadius:[4,4,0,0]}},{name:'成功率',type:'line',yAxisIndex:1,data:successRates,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#dc2626',width:2.5},itemStyle:{color:'#dc2626'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(220,38,38,0.15)'},{offset:1,color:'rgba(220,38,38,0)'}]}}}]
                 });
                 if (dashAssemblyDowntimeChartInst.off) dashAssemblyDowntimeChartInst.off('click');
                 if (dashAssemblyDowntimeChartInst.on) dashAssemblyDowntimeChartInst.on('click', params => { if (days[params.dataIndex]) openAssemblyDateDetail(days[params.dataIndex]); });
@@ -452,11 +454,12 @@ SMT.dashboard = function (ctx) {
             if (dailyEl && dates.length) {
                 dashDafDailyChartInst = ensureDashboardChart(dashDafDailyChartInst, dailyEl);
                 setDashboardOption(dashDafDailyChartInst, {
-                    grid: { top: 30, right: 20, bottom: 36, left: 48 },
-                    tooltip: { trigger: 'axis', formatter: params => `${params[0].name}<br/><b>良率 ${params[0].value}%</b>` },
+                    legend: { data: ['投入數', '良率'], top: 4, right: 10, textStyle: { fontSize: 10, color: '#6b7280' } },
+                    grid: { top: 32, right: 56, bottom: 36, left: 48 },
+                    tooltip: { trigger: 'axis', formatter: params => { let s = params[0]?.axisValue || ''; params.forEach(item => { s += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return s; } },
                     xAxis: { type: 'category', data: dates.map(date => date.slice(5)), axisLabel: { fontSize: 10, color: '#9ca3af' } },
-                    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' } },
-                    series: [{ name: '良率', type: 'line', data: reports.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#7c3aed', width: 2.5 }, itemStyle: { color: '#7c3aed' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(124,58,237,0.16)' }, { offset: 1, color: 'rgba(124,58,237,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
+                    yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }],
+                    series: [{ name: '投入數', type: 'bar', data: reports.map(row => row.totalInput || 0), barMaxWidth: 24, itemStyle: { color: '#c4b5fd', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: reports.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#7c3aed', width: 2.5 }, itemStyle: { color: '#7c3aed' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(124,58,237,0.16)' }, { offset: 1, color: 'rgba(124,58,237,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
                 });
                 if (dashDafDailyChartInst.off) dashDafDailyChartInst.off('click');
                 if (dashDafDailyChartInst.on) dashDafDailyChartInst.on('click', params => { if (dates[params.dataIndex]) openDafDateDetail(dates[params.dataIndex]); });
@@ -503,16 +506,18 @@ SMT.dashboard = function (ctx) {
             const days = (smtDashboardData.value.trendDays || []).map(row => row.date);
             const labels = days.map(d => d.slice(5));
             const yields = (smtDashboardData.value.trendDays || []).map(row => parseFloat(row.yieldRate));
+            const inputs = (smtDashboardData.value.trendDays || []).map(row => row.input);
             const currentTypeRows = (smtDashboardData.value.byType || []).slice(0, 10).reverse();
             const yieldEl = document.getElementById('dashYieldChart');
             if (yieldEl) {
                 dashYieldChartInst = ensureDashboardChart(dashYieldChartInst, yieldEl);
                 setDashboardOption(dashYieldChartInst, {
-                    grid:{top:28,right:20,bottom:36,left:48},
-                    tooltip:{trigger:'axis',formatter:p=>{const v=p[0];return v.name+'<br/>'+(v.value!==null?'<b>'+v.value+'%</b>':'無資料');}},
+                    legend:{data:['投入數','良率'],top:4,right:10,textStyle:{fontSize:10,color:'#6b7280'}},
+                    grid:{top:32,right:56,bottom:36,left:48},
+                    tooltip:{trigger:'axis',formatter:p=>{let s=p[0]?.axisValue||'';p.forEach(v=>{s+=`<br/>${v.marker}${v.seriesName}: <b>${v.value === null || v.value === undefined ? '無資料' : v.seriesName === '良率' ? v.value + '%' : v.value.toLocaleString()}</b>`;});return s;}},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
-                    yAxis:{type:'value',min:v=>Math.max(90,Math.floor(v.min-1)),max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
-                    series:[{type:'line',data:yields,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#7c3aed',width:2.5},itemStyle:{color:'#7c3aed'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(124,58,237,0.15)'},{offset:1,color:'rgba(124,58,237,0)'}]}},markLine:{silent:true,lineStyle:{color:'#dc2626',type:'dashed',width:1},data:[{yAxis:98,label:{formatter:'目標98%',position:'end',fontSize:10,color:'#dc2626'}}]}}]
+                    yAxis:[{type:'value',name:'投入',min:0,axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'良率',min:0,max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
+                    series:[{name:'投入數',type:'bar',data:inputs,barMaxWidth:24,itemStyle:{color:'#bfdbfe',borderRadius:[4,4,0,0]}},{name:'良率',type:'line',yAxisIndex:1,data:yields,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#7c3aed',width:2.5},itemStyle:{color:'#7c3aed'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(124,58,237,0.15)'},{offset:1,color:'rgba(124,58,237,0)'}]}},markLine:{silent:true,lineStyle:{color:'#dc2626',type:'dashed',width:1},data:[{yAxis:98,label:{formatter:'目標98%',position:'end',fontSize:10,color:'#dc2626'}}]}}]
                 });
                 if (dashYieldChartInst.off) dashYieldChartInst.off('click');
                 if (dashYieldChartInst.on) dashYieldChartInst.on('click', params => { if (days[params.dataIndex]) openSmtDateDetail(days[params.dataIndex]); });

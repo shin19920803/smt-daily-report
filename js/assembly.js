@@ -18,7 +18,7 @@ SMT.assembly = function (ctx) {
     const assemblyBatches = ref([]);
     const assemblyLastFile = ref('');
     const assemblyReportResult = ref(null);
-    const assemblyStatsFilter = ref({ start: today(), end: today() });
+    const assemblyStatsFilter = ref({ start: '', end: '' });
     const assemblyStatsResult = ref(null);
     const assemblyRemoteReady = ref(false);
     const assemblyRemoteError = ref('');
@@ -903,6 +903,8 @@ SMT.assembly = function (ctx) {
             })];
         const yieldTrend = [['日期', '產出成功', '停機／不良', '良率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.successRate + '%'])];
+        const outputTrend = [['日期', '產出成功', '停機／不良'],
+            ...result.daily.map(row => [row.date, row.success, row.ng])];
         const hourly = [['時段', '平均每日生產成功', '平均每日 NG', '平均每日紀錄', '停機率'],
             ...result.hourly.map(row => [row.label, row.production, row.ng, row.total, row.downtimeRate + '%'])];
         const sourceDetails = [['停機／不良項目', 'LOG 原始訊息', '次數', '占該分類比例'],
@@ -910,6 +912,7 @@ SMT.assembly = function (ctx) {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrend), '良率趨勢');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pareto), 'Pareto分析');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
@@ -1009,12 +1012,12 @@ SMT.assembly = function (ctx) {
                 statsDailyChart = echarts.init(el);
             }
             statsDailyChart.setOption({
-                tooltip: { trigger: 'axis' },
-                legend: { top: 0, right: 0, textStyle: { fontSize: 11 } },
-                grid: { top: 32, right: 20, bottom: 44, left: 48 },
+                tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '成功率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } },
+                legend: { data: ['產出成功', '成功率'], top: 0, right: 0, textStyle: { fontSize: 11 } },
+                grid: { top: 32, right: 58, bottom: 44, left: 48 },
                 xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } },
-                yAxis: { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 } },
-                series: [{ name: '良率', type: 'line', data: result.daily.map(row => Number(row.successRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
+                yAxis: [{ type: 'value', name: '產出', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '成功率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 }, splitLine: { show: false } }],
+                series: [{ name: '產出成功', type: 'bar', data: result.daily.map(row => row.success), barMaxWidth: 24, itemStyle: { color: '#fed7aa', borderRadius: [4, 4, 0, 0] } }, { name: '成功率', type: 'line', yAxisIndex: 1, data: result.daily.map(row => Number(row.successRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }]
             });
         });
     };

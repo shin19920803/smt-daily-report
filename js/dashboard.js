@@ -6,7 +6,8 @@ SMT.dashboard = function (ctx) {
         const dafDashboardResult = ref(null);
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
-        const dashDate = ref(new Date().toISOString().split('T')[0]);
+        const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        const dashDate = ref(fmtDate(new Date()));
         const dashboardDetail = ref({ show: false, title: '', subtitle: '', metrics: [], sections: [], allowNote: false, noteKey: '', note: '' });
         const smtDashboardData = ref({ production: [], byType: [], byLocation: [], byModel: [], byWorkOrder: [], weekDays: [], trendDays: [], weekRange: null });
         const assemblyWeekDays = ref([]);
@@ -32,7 +33,7 @@ SMT.dashboard = function (ctx) {
             .sort((a, b) => b.qty - a.qty);
         const mapIncrement = (map, key, qty = 1) => { if (key) map[key] = (map[key] || 0) + qty; };
         const toMetric = (label, value, tone = 'slate') => ({ label, value: Number(value) || 0, tone });
-        const currentDafLabel = () => currentLine.value === 'FT2' ? 'FT2' : 'DAF';
+        const currentDafLabel = () => ['DAF', 'FT1', 'FT2'].includes(currentLine.value) ? currentLine.value : 'DAF';
         const makeProductionDetail = row => ({
             title: `${row.workOrder || '未識別工單'} 生產明細`,
             subtitle: `${row.model || '未識別機種'} · ${row.date || dashDate.value}`,
@@ -45,7 +46,6 @@ SMT.dashboard = function (ctx) {
             if (!input) return '100.00';
             return (Math.floor((input - defects) / input * 10000) / 100).toFixed(2);
         };
-        const fmtDate = date => date.toISOString().split('T')[0];
         const getWeekRange = dateValue => {
             const start = new Date(`${dateValue}T00:00:00`);
             start.setDate(start.getDate() - start.getDay());
@@ -82,7 +82,7 @@ SMT.dashboard = function (ctx) {
         const invalidateDashboardDateCache = () => { smtUploadedDatesCache = null; };
         const loadDashboardAvailableDates = async line => {
             if (line === 'ASSY') return getAssemblyUploadedDates ? getAssemblyUploadedDates(2000) : [];
-            if (['DAF', 'FT2'].includes(line)) return getDafUploadedDates ? getDafUploadedDates(2000) : [];
+            if (['DAF', 'FT1', 'FT2'].includes(line)) return getDafUploadedDates ? getDafUploadedDates(2000) : [];
             if (line === 'SMT') return loadSmtUploadedDates();
             return [];
         };
@@ -257,7 +257,7 @@ SMT.dashboard = function (ctx) {
             }
             const d = new Date(dashDate.value);
             d.setDate(d.getDate() + delta);
-            dashDate.value = d.toISOString().split('T')[0];
+            dashDate.value = fmtDate(d);
         };
 
         let dashboardRefreshId = 0;
@@ -284,7 +284,7 @@ SMT.dashboard = function (ctx) {
                 dashboardRecentOoc.value = [];
                 return requestId === dashboardRefreshId;
             }
-            if (['DAF', 'FT2'].includes(currentLine.value)) {
+            if (['DAF', 'FT1', 'FT2'].includes(currentLine.value)) {
                 if (!getDafDashboardForDate) {
                     dafDashboardResult.value = null;
                 } else {
@@ -564,7 +564,7 @@ SMT.dashboard = function (ctx) {
                 await initAssemblyDashboardCharts(requestId, line);
                 return;
             }
-            if (['DAF', 'FT2'].includes(line)) {
+            if (['DAF', 'FT1', 'FT2'].includes(line)) {
                 dashYieldChartInst = disposeChart(dashYieldChartInst);
                 dashInputChartInst = disposeChart(dashInputChartInst);
                 dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);

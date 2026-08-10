@@ -5,6 +5,7 @@ window.SMT = window.SMT || {};
 SMT.LINES = [
     { id: 'SMT',  label: 'SMT',      icon: 'fa-microchip',   canImport: true  },
     { id: 'DAF',  label: 'DAF',      icon: 'fa-layer-group', canImport: false },
+    { id: 'FT1',  label: 'FT1',      icon: 'fa-vial-circle-check', canImport: false },
     { id: 'ASSY', label: 'Mylar',    icon: 'fa-screwdriver-wrench', canImport: false },
     { id: 'FT2',  label: 'FT2',      icon: 'fa-vial',         canImport: false, hidden: true }
 ];
@@ -38,12 +39,12 @@ SMT.core = function (ctx) {
                 try { localStorage.setItem(SMT.LINE_KEY, 'SMT'); } catch(e) {}
             }
         };
-        const switchableDafLines = ['DAF', 'FT2'];
-        const hideLineTools = computed(() => ['DAF', 'ASSY', 'FT2'].includes(currentLine.value));
-        const hideOrders = computed(() => ['DAF', 'ASSY', 'FT2'].includes(currentLine.value));
+        const switchableDafLines = ['DAF', 'FT1', 'FT2'];
+        const hideLineTools = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2'].includes(currentLine.value));
+        const hideOrders = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2'].includes(currentLine.value));
         const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
         const hideDailyReport = computed(() => currentLine.value === 'SMT');
-        const hideSettings = computed(() => ['DAF', 'ASSY', 'FT2'].includes(currentLine.value));
+        const hideSettings = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -98,9 +99,9 @@ SMT.core = function (ctx) {
             if (L === 'FT2') {
                 const [dafModels, ft2Models, dafDefects, ft2Defects] = await Promise.all([
                     _supabase.from('models').select('*').eq('line', 'DAF'),
-                    _supabase.from('models').select('*').eq('line', 'FT2'),
+                    _supabase.from('models').select('*').eq('line', L),
                     _supabase.from('defect_types').select('*').eq('line', 'DAF'),
-                    _supabase.from('defect_types').select('*').eq('line', 'FT2')
+                    _supabase.from('defect_types').select('*').eq('line', L)
                 ]);
                 const uniqueByName = rows => [...new Map((rows || []).map(row => [String(row.name || '').trim().toUpperCase(), row])).values()];
                 data.value = { workOrders: [], models: uniqueByName([...(dafModels.data || []), ...(ft2Models.data || [])]), defectTypes: uniqueByName([...(dafDefects.data || []), ...(ft2Defects.data || [])]), defectLocations: [], machines: [], oocCauses: [] };

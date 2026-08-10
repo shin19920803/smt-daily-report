@@ -13,10 +13,10 @@ SMT.daf = function (ctx) {
     const COL_DATE = 6;
     const COL_DEFECT = 8;
     const COL_STATUS = 9;
-    const isDafLikeLine = () => ['DAF', 'FT2'].includes(currentLine.value);
-    const currentDafLine = () => currentLine.value === 'FT2' ? 'FT2' : 'DAF';
-    const currentDafStorageKey = () => currentLine.value === 'FT2' ? 'koya_ft2_log_batches_v1' : STORAGE_KEY;
-    const currentDafMigrationKey = () => currentLine.value === 'FT2' ? 'koya_ft2_log_remote_migrated_v1' : REMOTE_MIGRATED_KEY;
+    const isDafLikeLine = () => ['DAF', 'FT1', 'FT2'].includes(currentLine.value);
+    const currentDafLine = () => isDafLikeLine() ? currentLine.value : 'DAF';
+    const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
+    const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
     const currentDafLabel = () => currentDafLine();
     const defaultDafDefect = () => currentLine.value === 'FT2' ? '偵測失效' : '未填寫不良原因';
 
@@ -371,12 +371,12 @@ SMT.daf = function (ctx) {
         if (error) { toast(`${currentDafLabel()} 共用資料庫刪除失敗：` + error.message, 'error'); return false; }
         return true;
     };
-    const loadDafRemoteRows = async () => {
+    const loadDafRemoteRows = async (line = currentDafLine()) => {
         const pageSize = 500;
         const rows = [];
         for (let offset = 0; ; offset += pageSize) {
             const { data: page, error } = await _supabase.from(REMOTE_TABLE)
-                .select('*').eq('line', currentDafLine()).order('uploaded_at', { ascending: false })
+                .select('*').eq('line', line).order('uploaded_at', { ascending: false })
                 .range(offset, offset + pageSize - 1);
             if (error) return { data: null, error };
             rows.push(...(page || []));
@@ -484,10 +484,14 @@ SMT.daf = function (ctx) {
             remoteSaved
         };
     };
+    let dafLoadRequestId = 0;
     const loadDafData = async () => {
+        const requestId = ++dafLoadRequestId;
+        const line = currentDafLine();
         const localBatches = deduplicateDafBatches(readStorage()).batches;
         if (!isDafLikeLine()) { dafBatches.value = localBatches; return; }
-        const { data: remoteRows, error } = await loadDafRemoteRows();
+        const { data: remoteRows, error } = await loadDafRemoteRows(line);
+        if (requestId !== dafLoadRequestId || line !== currentDafLine()) return;
         if (error) {
             dafRemoteReady.value = false;
             dafRemoteError.value = error.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (error.message || 'DAF 共用資料庫讀取失敗');
@@ -955,7 +959,12 @@ SMT.daf = function (ctx) {
         else if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
-        if (['DAF', 'FT2'].includes(line)) {
+        if (['DAF', 'FT1', 'FT2'].includes(line)) {
+            dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
+            dafQuickMode.value = null;
+            dafQuickOffset.value = 0;
+            dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [] };
+            dafLastUpload.value = null;
             dafStatsResult.value = null;
             if (currentTab.value === 'stats') calculateDafStats(false);
         }

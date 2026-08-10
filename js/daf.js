@@ -132,13 +132,14 @@ SMT.daf = function (ctx) {
     const normalizeDafRecord = record => {
         const raw = Array.isArray(record.raw) ? record.raw : [];
         const columns = currentDafColumns();
+        const mappedModel = resolveDafModel(record.productCode || raw[columns.productCode]);
         const hasStoredTime = record.dedupTime !== null && record.dedupTime !== undefined && record.dedupTime !== '';
         const parsedTime = hasStoredTime && Number.isFinite(Number(record.dedupTime))
             ? Number(record.dedupTime)
             : (parseDateTime(raw[columns.date])?.getTime() || null);
         return {
             ...record,
-            model: normalizeModelName(record.model),
+            model: mappedModel !== '未識別機種' ? mappedModel : normalizeModelName(record.model),
             machine: '',
             dedupKey: normalizeText(record.dedupKey || raw[columns.dedupKey] || ''),
             dedupTime: parsedTime
@@ -201,20 +202,28 @@ SMT.daf = function (ctx) {
         return { rows, columnCount };
     };
 
+    const findDafModelMatch = value => {
+        const normalized = normalizeText(value);
+        if (!normalized) return null;
+        const dynamicEntries = Object.entries(dafModelMappings.value).sort((a, b) => b[0].length - a[0].length);
+        return MAPPING_ENTRIES.find(([productCode]) => normalized.includes(productCode))
+            || dynamicEntries.find(([productCode]) => normalized.includes(productCode))
+            || null;
+    };
+    const resolveDafModel = value => {
+        const match = findDafModelMatch(value);
+        return match ? normalizeModelName(match[1]) : '未識別機種';
+    };
     const detectModel = (rows) => {
         const columns = currentDafColumns();
         const rawValues = [...new Map(rows.map(row => {
             const raw = cleanText(row[columns.productCode]);
             return [normalizeText(raw), raw];
         }).filter(([key, raw]) => key && !/產品|料號|product\s*code|part\s*number|型號|model/i.test(raw))).values()];
-        const dynamicEntries = Object.entries(dafModelMappings.value).sort((a, b) => b[0].length - a[0].length);
         const matched = [];
         const unknownProductCodes = [];
         rawValues.forEach(raw => {
-            const value = normalizeText(raw);
-            const staticMatch = MAPPING_ENTRIES.find(([productCode]) => value.includes(productCode));
-            const dynamicMatch = dynamicEntries.find(([productCode]) => value.includes(productCode));
-            const match = staticMatch || dynamicMatch;
+            const match = findDafModelMatch(raw);
             if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: normalizeModelName(match[1]) });
             if (!match) unknownProductCodes.push(raw);
         });
@@ -273,7 +282,7 @@ SMT.daf = function (ctx) {
                 date: parsedDate,
                 defect: isDefect ? (cleanText(row[columns.defect]) || defaultDafDefect()) : '',
                 status,
-                model: normalizeModelName(model.model),
+                model: resolveDafModel(row[columns.productCode]),
                 machine: '',
                 inputIncluded: ['GOOD', 'FAIL'].includes(status),
                 isDefect,

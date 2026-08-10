@@ -421,7 +421,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>{{ currentLineMeta.label }} 檔案報工</h3>
-                            <p class="text-xs text-gray-400 mt-1">依 Python 版本讀取 C／E／G／I／J 欄：工單、產品代碼、日期、不良原因、GOOD／FAIL。</p>
+                            <p class="text-xs text-gray-400 mt-1">DAF／FT2 讀取 C／E／F／G／I／J 欄；FT1 讀取前移一欄後的 B／D／E／F／H／I 欄，包含工單、產品代碼、日期、不良原因與 GOOD／FAIL。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else class="badge-hint text-orange-700" :title="dafRemoteError"><i class="fas fa-laptop"></i>目前僅本機保存</span>
@@ -1798,7 +1798,7 @@
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
 <script src="js/assembly.js?v=202608071045"></script>
-<script src="js/daf.js?v=202608101105"></script>
+<script src="js/daf.js?v=202608101250"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608101035"></script>

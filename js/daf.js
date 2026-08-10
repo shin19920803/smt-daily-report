@@ -1,20 +1,17 @@
 window.SMT = window.SMT || {};
 
-// DAF 檔案統計：依 Google Colab 版本的 C／E／F／G／I／J 欄位規則分析。
+// DAF／FT1／FT2 檔案統計：DAF／FT2 使用 C／E／F／G／I／J；FT1 使用前移一欄後的 B／D／E／F／H／I。
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
     const MODEL_MAPPING_STORAGE_KEY = 'koya_daf_model_mappings_v1';
-    const COL_WORK_ORDER = 2;
-    const COL_PRODUCT_CODE = 4;
-    const COL_DEDUP_KEY = 5;
-    const COL_DATE = 6;
-    const COL_DEFECT = 8;
-    const COL_STATUS = 9;
+    const DAF_COLUMNS = Object.freeze({ workOrder: 2, productCode: 4, dedupKey: 5, date: 6, defect: 8, status: 9, minColumns: 10 });
+    const FT1_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
     const isDafLikeLine = () => ['DAF', 'FT1', 'FT2'].includes(currentLine.value);
     const currentDafLine = () => isDafLikeLine() ? currentLine.value : 'DAF';
+    const currentDafColumns = () => currentLine.value === 'FT1' ? FT1_COLUMNS : DAF_COLUMNS;
     const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
     const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
     const currentDafLabel = () => currentDafLine();
@@ -134,15 +131,16 @@ SMT.daf = function (ctx) {
     const parseDate = value => { const parsed = parseDateTime(value); return parsed ? fmtDate(parsed) : ''; };
     const normalizeDafRecord = record => {
         const raw = Array.isArray(record.raw) ? record.raw : [];
+        const columns = currentDafColumns();
         const hasStoredTime = record.dedupTime !== null && record.dedupTime !== undefined && record.dedupTime !== '';
         const parsedTime = hasStoredTime && Number.isFinite(Number(record.dedupTime))
             ? Number(record.dedupTime)
-            : (parseDateTime(raw[COL_DATE])?.getTime() || null);
+            : (parseDateTime(raw[columns.date])?.getTime() || null);
         return {
             ...record,
             model: normalizeModelName(record.model),
             machine: '',
-            dedupKey: normalizeText(record.dedupKey || raw[COL_DEDUP_KEY] || ''),
+            dedupKey: normalizeText(record.dedupKey || raw[columns.dedupKey] || ''),
             dedupTime: parsedTime
         };
     };
@@ -156,15 +154,16 @@ SMT.daf = function (ctx) {
         };
     };
     const deduplicateRows = rows => {
+        const columns = currentDafColumns();
         const grouped = new Map();
         const passthrough = [];
         rows.forEach((row, index) => {
-            const key = normalizeText(row[COL_DEDUP_KEY]);
+            const key = normalizeText(row[columns.dedupKey]);
             if (!key) {
                 passthrough.push({ row, index });
                 return;
             }
-            const parsedTime = parseDateTime(row[COL_DATE]);
+            const parsedTime = parseDateTime(row[columns.date]);
             const timestamp = parsedTime ? parsedTime.getTime() : Number.MAX_SAFE_INTEGER;
             const previous = grouped.get(key);
             if (!previous || timestamp < previous.timestamp) grouped.set(key, { row, index, timestamp });
@@ -197,13 +196,15 @@ SMT.daf = function (ctx) {
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' })
             .filter(row => row.some(cell => cleanText(cell) !== ''));
         const columnCount = Math.max(0, ...rows.map(row => row.length));
-        if (columnCount < 10) throw new Error(`檔案目前只有 ${columnCount} 欄，至少需要 10 欄才能讀取 J 欄`);
+        const minColumns = currentDafColumns().minColumns;
+        if (columnCount < minColumns) throw new Error(`${currentDafLabel()} 檔案目前只有 ${columnCount} 欄，至少需要 ${minColumns} 欄才能讀取狀態欄`);
         return { rows, columnCount };
     };
 
     const detectModel = (rows) => {
+        const columns = currentDafColumns();
         const rawValues = [...new Map(rows.map(row => {
-            const raw = cleanText(row[COL_PRODUCT_CODE]);
+            const raw = cleanText(row[columns.productCode]);
             return [normalizeText(raw), raw];
         }).filter(([key, raw]) => key && !/產品|料號|product\s*code|part\s*number|型號|model/i.test(raw))).values()];
         const dynamicEntries = Object.entries(dafModelMappings.value).sort((a, b) => b[0].length - a[0].length);
@@ -219,8 +220,8 @@ SMT.daf = function (ctx) {
         });
         const unknownWorkOrders = new Map(unknownProductCodes.map(code => [normalizeText(code), new Set()]));
         rows.forEach(row => {
-            const code = normalizeText(row[COL_PRODUCT_CODE]);
-            const workOrder = cleanText(row[COL_WORK_ORDER]);
+            const code = normalizeText(row[columns.productCode]);
+            const workOrder = cleanText(row[columns.workOrder]);
             if (unknownWorkOrders.has(code) && workOrder) unknownWorkOrders.get(code).add(workOrder);
         });
         const unknownProductDetails = unknownProductCodes.map(code => ({
@@ -236,38 +237,41 @@ SMT.daf = function (ctx) {
         };
     };
     const detectDateRange = (rows) => {
-        const dates = rows.map(row => parseDate(row[COL_DATE])).filter(Boolean).sort();
+        const columns = currentDafColumns();
+        const dates = rows.map(row => parseDate(row[columns.date])).filter(Boolean).sort();
         if (!dates.length) return { display: '未識別日期', start: '', end: '', dates: [] };
         const start = dates[0];
         const end = dates[dates.length - 1];
         return { display: start === end ? start : `${start}～${end}`, start, end, dates: [...new Set(dates)] };
     };
     const analyzeFile = async (file) => {
+        const columns = currentDafColumns();
         const { rows: sourceRows, columnCount } = await readFileRows(file);
-        const rows = deduplicateRows(sourceRows);
-        const duplicateCount = sourceRows.length - rows.length;
+        const dataRows = currentLine.value === 'FT1' ? sourceRows.slice(1) : sourceRows;
+        const rows = deduplicateRows(dataRows);
+        const duplicateCount = dataRows.length - rows.length;
         const model = detectModel(rows);
         const dateRange = detectDateRange(rows);
-        const statuses = rows.map(row => normalizeText(row[COL_STATUS]));
+        const statuses = rows.map(row => normalizeText(row[columns.status]));
         const goodCount = statuses.filter(status => status === 'GOOD').length;
         const failCount = statuses.filter(status => status === 'FAIL').length;
         const inputCount = goodCount + failCount;
         const unknownStatuses = [...new Set(statuses.filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
-        const workOrders = [...new Set(rows.map(row => cleanText(row[COL_WORK_ORDER])).filter(Boolean))];
+        const workOrders = [...new Set(rows.map(row => cleanText(row[columns.workOrder])).filter(Boolean))];
         const workOrderDisplay = workOrders.length ? workOrders.join('、') : '未識別工單';
         const workOrderFileName = workOrders.length === 1 ? workOrders[0] : workOrders.length ? `${workOrders[0]}等${workOrders.length}筆工單` : '未識別工單';
         const records = rows.map(row => {
-            const status = normalizeText(row[COL_STATUS]);
-            const parsedDateTime = parseDateTime(row[COL_DATE]);
+            const status = normalizeText(row[columns.status]);
+            const parsedDateTime = parseDateTime(row[columns.date]);
             const parsedDate = parsedDateTime ? fmtDate(parsedDateTime) : '';
             const isDefect = status === 'FAIL';
             return {
-                workOrder: cleanText(row[COL_WORK_ORDER]) || '未識別工單',
-                productCode: cleanText(row[COL_PRODUCT_CODE]),
-                dedupKey: normalizeText(row[COL_DEDUP_KEY]),
+                workOrder: cleanText(row[columns.workOrder]) || '未識別工單',
+                productCode: cleanText(row[columns.productCode]),
+                dedupKey: normalizeText(row[columns.dedupKey]),
                 dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
                 date: parsedDate,
-                defect: isDefect ? (cleanText(row[COL_DEFECT]) || defaultDafDefect()) : '',
+                defect: isDefect ? (cleanText(row[columns.defect]) || defaultDafDefect()) : '',
                 status,
                 model: normalizeModelName(model.model),
                 machine: '',
@@ -301,7 +305,7 @@ SMT.daf = function (ctx) {
             unknownProductCodes: model.unknownProductCodes,
             unknownProductDetails: model.unknownProductDetails,
             duplicateCount,
-            rawRowCount: sourceRows.length,
+            rawRowCount: dataRows.length,
             records
         };
     };
@@ -309,7 +313,10 @@ SMT.daf = function (ctx) {
     const readStorage = () => {
         try {
             const parsed = JSON.parse(localStorage.getItem(currentDafStorageKey()) || '[]');
-            return Array.isArray(parsed) ? parsed.map(normalizeBatchModels) : [];
+            if (!Array.isArray(parsed)) return [];
+            const line = currentDafLine();
+            const scoped = parsed.filter(batch => line === 'DAF' ? (!batch.line || batch.line === 'DAF') : batch.line === line);
+            return scoped.map(normalizeBatchModels);
         } catch (e) { return []; }
     };
     // 本機只保存統計所需欄位；原始 raw 欄位由 Supabase 批次資料保留，避免大量 LOG 撐滿 localStorage。
@@ -489,7 +496,11 @@ SMT.daf = function (ctx) {
         const requestId = ++dafLoadRequestId;
         const line = currentDafLine();
         const localBatches = deduplicateDafBatches(readStorage()).batches;
-        if (!isDafLikeLine()) { dafBatches.value = localBatches; return; }
+        dafBatches.value = localBatches;
+        dafLastUpload.value = localBatches[0] || null;
+        if (!isDafLikeLine()) return;
+        dafRemoteReady.value = false;
+        dafRemoteError.value = '';
         const { data: remoteRows, error } = await loadDafRemoteRows(line);
         if (requestId !== dafLoadRequestId || line !== currentDafLine()) return;
         if (error) {
@@ -906,8 +917,10 @@ SMT.daf = function (ctx) {
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
         const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
         const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
-        const rawColumns = Math.max(10, ...result.rows.map(row => (row.raw || []).length));
-        for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${[2, 4, 6, 8, 9].includes(index) ? ['工單', '產品代碼', '日期', '不良原因', '狀態'][[2, 4, 6, 8, 9].indexOf(index)] : ''}`);
+        const columns = currentDafColumns();
+        const rawColumns = Math.max(columns.minColumns, ...result.rows.map(row => (row.raw || []).length));
+        const rawFieldLabels = { [columns.workOrder]: '工單', [columns.productCode]: '產品代碼', [columns.dedupKey]: '去重識別碼', [columns.date]: '日期', [columns.defect]: '不良原因', [columns.status]: '狀態' };
+        for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${rawFieldLabels[index] || ''}`);
         const wb = XLSX.utils.book_new();
         const sheets = [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]];
         sheets.forEach(([name, sheetData]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), name));

@@ -12,6 +12,7 @@ SMT.dashboard = function (ctx) {
         const assemblyWeekDays = ref([]);
         const dafWeekDays = ref([]);
         const dafWeekInput = computed(() => dafWeekDays.value.reduce((sum, day) => sum + (Number(day.report?.totalInput) || 0), 0));
+        const dashboardAvailableDates = ref([]);
 
         const closeDashboardDetail = () => {
             dashboardDetail.value = { show: false, title: '', subtitle: '', metrics: [], sections: [], allowNote: false, noteKey: '', note: '' };
@@ -39,29 +40,6 @@ SMT.dashboard = function (ctx) {
             sections: [{ title: '不良項目', icon: 'fa-bug', items: listFromMap(row.byType, row.defects) }]
         });
         const makeDistributionSection = (title, icon, items) => ({ title, icon, items: items || [] });
-        const buildDafMachineDetail = (machine, title, subtitle) => ({
-            title: `${machine.machineLabel} ${title}`,
-            subtitle,
-            metrics: [toMetric('投入數', machine.totalInput, 'slate'), toMetric('良品數', machine.totalGood, 'green'), toMetric('不良數', machine.totalDefects, 'red'), { label: '良率', value: machine.yieldRate + '%', tone: 'green' }],
-            sections: [
-                makeDistributionSection('機種分佈', 'fa-microchip', (machine.byModel || []).map(item => ({ label: item.name, qty: item.input, ratio: item.yieldRate + '%', meta: `不良 ${item.defects}` }))),
-                makeDistributionSection('工單分佈', 'fa-file-alt', (machine.byWorkOrder || []).map(item => ({ label: item.workOrder || item.name, qty: item.input, ratio: item.yieldRate + '%', meta: `不良 ${item.defects}` }))),
-                makeDistributionSection('不良原因', 'fa-bug', (machine.byType || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))
-            ]
-        });
-        const buildDafMachineItems = (result, amount = 'totalInput', title = `${currentDafLabel()} 機台明細`) => {
-            const machineRows = result?.byMachine?.length
-                ? result.byMachine
-                : (currentLine.value === 'FT2' && result ? [{ ...result, machineLabel: 'FT2 總和' }] : []);
-            return machineRows.map(machine => ({
-            label: machine.machineLabel,
-            qty: Number(machine[amount]) || 0,
-            ratio: Number(result?.[amount] ?? result?.qty) ? ((Number(machine[amount]) || 0) / Number(result?.[amount] ?? result?.qty) * 100).toFixed(1) + '%' : '',
-            meta: `良率 ${machine.yieldRate}%`,
-            detail: buildDafMachineDetail(machine, title, dashDate.value)
-            }));
-        };
-
         // 良率一律無條件捨去至小數 2 位：只要有不良就不會被進位成 100%
         const calcYield = (input, defects) => {
             if (!input) return '100.00';
@@ -74,6 +52,48 @@ SMT.dashboard = function (ctx) {
             const end = new Date(start);
             end.setDate(end.getDate() + 6);
             return { start: fmtDate(start), end: fmtDate(end) };
+        };
+        let smtUploadedDatesCache = null;
+        let smtUploadedDatesRequest = null;
+        const loadSmtUploadedDates = async () => {
+            if (smtUploadedDatesCache) return smtUploadedDatesCache;
+            if (!smtUploadedDatesRequest) {
+                smtUploadedDatesRequest = _supabase.from('daily_production')
+                    .select('production_date, input_quantity')
+                    .eq('line', 'SMT')
+                    .order('production_date', { ascending: true })
+                    .limit(10000)
+                    .then(({ data, error }) => {
+                        if (error) throw error;
+                        smtUploadedDatesCache = [...new Set((data || [])
+                            .filter(row => Number(row.input_quantity) > 0)
+                            .map(row => row.production_date)
+                            .filter(Boolean))].sort();
+                        return smtUploadedDatesCache;
+                    })
+                    .catch(error => {
+                        console.warn('SMT 儀表板日期讀取失敗', error);
+                        return [];
+                    })
+                    .finally(() => { smtUploadedDatesRequest = null; });
+            }
+            return smtUploadedDatesRequest;
+        };
+        const invalidateDashboardDateCache = () => { smtUploadedDatesCache = null; };
+        const loadDashboardAvailableDates = async line => {
+            if (line === 'ASSY') return getAssemblyUploadedDates ? getAssemblyUploadedDates(2000) : [];
+            if (['DAF', 'FT2'].includes(line)) return getDafUploadedDates ? getDafUploadedDates(2000) : [];
+            if (line === 'SMT') return loadSmtUploadedDates();
+            return [];
+        };
+        const nearestAvailableDate = (date, dates) => {
+            if (!dates.length) return '';
+            const target = new Date(`${date}T00:00:00`).getTime();
+            return dates.reduce((closest, candidate) => {
+                const distance = Math.abs(new Date(`${candidate}T00:00:00`).getTime() - target);
+                const closestDistance = Math.abs(new Date(`${closest}T00:00:00`).getTime() - target);
+                return distance < closestDistance ? candidate : closest;
+            }, dates[0]);
         };
         const loadSmtDateRows = async (start, end = start) => {
             let query = _supabase.from('daily_production')
@@ -228,6 +248,13 @@ SMT.dashboard = function (ctx) {
         };
 
         const changeDashDate = (delta) => {
+            const dates = dashboardAvailableDates.value;
+            if (dates.length) {
+                const currentIndex = dates.indexOf(dashDate.value);
+                const nextIndex = currentIndex < 0 ? (delta < 0 ? dates.length - 1 : 0) : currentIndex + delta;
+                if (dates[nextIndex]) dashDate.value = dates[nextIndex];
+                return;
+            }
             const d = new Date(dashDate.value);
             d.setDate(d.getDate() + delta);
             dashDate.value = d.toISOString().split('T')[0];
@@ -237,15 +264,17 @@ SMT.dashboard = function (ctx) {
         const refreshDashboard = async () => {
             const requestId = ++dashboardRefreshId;
             const line = currentLine.value;
+            const availableDates = await loadDashboardAvailableDates(line);
+            if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
+            dashboardAvailableDates.value = availableDates;
+            if (availableDates.length && !availableDates.includes(dashDate.value)) {
+                dashDate.value = nearestAvailableDate(dashDate.value, availableDates);
+                return false;
+            }
             if (currentLine.value === 'ASSY') {
                 assemblyDashboardResult.value = getAssemblyReportForDate(dashDate.value);
-                const uploadedDates = getAssemblyUploadedDates ? getAssemblyUploadedDates(200) : [];
-                if (!assemblyDashboardResult.value.totalRecords && dashDate.value === new Date().toISOString().split('T')[0] && uploadedDates.length) {
-                    dashDate.value = uploadedDates[uploadedDates.length - 1];
-                    return false;
-                }
                 const weekRange = getWeekRange(dashDate.value);
-                assemblyWeekDays.value = (getAssemblyUploadedDates ? getAssemblyUploadedDates(200) : [])
+                assemblyWeekDays.value = availableDates
                     .filter(date => date >= weekRange.start && date <= weekRange.end)
                     .map(date => ({ date, report: getAssemblyReportForDate(date) }))
                     .filter(day => day.report.totalRecords > 0);
@@ -256,7 +285,6 @@ SMT.dashboard = function (ctx) {
                 return requestId === dashboardRefreshId;
             }
             if (['DAF', 'FT2'].includes(currentLine.value)) {
-                const uploadedDates = getDafUploadedDates ? getDafUploadedDates(2000) : [];
                 if (!getDafDashboardForDate) {
                     dafDashboardResult.value = null;
                 } else {
@@ -264,7 +292,7 @@ SMT.dashboard = function (ctx) {
                     if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
                     dafDashboardResult.value = current;
                     const weekRange = getWeekRange(dashDate.value);
-                    dafWeekDays.value = uploadedDates
+                    dafWeekDays.value = availableDates
                         .filter(date => date >= weekRange.start && date <= weekRange.end)
                         .map(date => ({ date, report: getDafDashboardForDate(date) }))
                         .filter(day => day.report.totalInput > 0);
@@ -347,13 +375,12 @@ SMT.dashboard = function (ctx) {
             title: `${getWeekRange(dashDate.value).start} ～ ${getWeekRange(dashDate.value).end} ${currentDafLabel()} 週平均良率`,
             subtitle: `週日到週六；只平均實際有資料的 ${dafWeekDays.value.length} 天`,
             metrics: [{ label: '週平均良率', value: dashboard.value.weekAvgYield + '%', tone: 'green' }],
-            sections: [makeDistributionSection('每日良率', 'fa-calendar-days', dafWeekDays.value.map(day => ({ label: day.date, qty: day.report.totalInput, ratio: day.report.yieldRate + '%', meta: `不良 ${day.report.totalDefects}`, detail: { title: `${day.date} ${currentDafLabel()} 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', day.report.totalInput, 'slate'), toMetric('良品數', day.report.totalGood, 'green'), toMetric('不良數', day.report.totalDefects, 'red'), { label: '良率', value: day.report.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(day.report)), makeDistributionSection('工單投入', 'fa-file-alt', (day.report.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' })))] } })))]
+            sections: [makeDistributionSection('每日良率', 'fa-calendar-days', dafWeekDays.value.map(day => ({ label: day.date, qty: day.report.totalInput, ratio: day.report.yieldRate + '%', meta: `不良 ${day.report.totalDefects}`, detail: { title: `${day.date} ${currentDafLabel()} 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', day.report.totalInput, 'slate'), toMetric('良品數', day.report.totalGood, 'green'), toMetric('不良數', day.report.totalDefects, 'red'), { label: '良率', value: day.report.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單投入', 'fa-file-alt', (day.report.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' })))] } })))]
         });
         const buildDafReasonDetail = row => ({
             title: `${row.name} 不良明細`, subtitle: `${dashDate.value} · ${row.qty} 件`,
             metrics: [toMetric('不良數', row.qty, 'red')],
             sections: [
-                makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row, 'totalDefects', `${row.name} 不良明細`)),
                 makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' }))),
                 makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))
             ]
@@ -361,15 +388,15 @@ SMT.dashboard = function (ctx) {
         const openDafInputDetail = () => openDashboardDetail({
             title: `${dashDate.value} ${currentDafLabel()} 當日投入`, subtitle: '依工單查看投入數量',
             metrics: [toMetric('投入總數', dafDashboardResult.value?.totalInput, 'slate')],
-            sections: [makeDistributionSection('機台產出', 'fa-microchip', buildDafMachineItems(dafDashboardResult.value, 'totalInput', `${currentDafLabel()} 產出明細`)), makeDistributionSection('工單投入數量', 'fa-file-alt', (dafDashboardResult.value?.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%', meta: row.model, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
+            sections: [makeDistributionSection('機種分佈', 'fa-microchip', (dafDashboardResult.value?.byModel || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%', meta: `不良 ${row.defects}` }))), makeDistributionSection('工單投入數量', 'fa-file-alt', (dafDashboardResult.value?.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%', meta: row.model, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
         });
         const openDafYieldDetail = () => openDashboardDetail({
             title: `${dashDate.value} ${currentDafLabel()} 當日良率`, subtitle: '每個機種／工單的良率明細',
             metrics: [toMetric('投入數', dafDashboardResult.value?.totalInput, 'slate'), toMetric('不良數', dafDashboardResult.value?.totalDefects, 'red'), { label: '良率', value: (dafDashboardResult.value?.yieldRate || '0') + '%', tone: 'green' }],
-            sections: [makeDistributionSection('機台良率', 'fa-microchip', buildDafMachineItems(dafDashboardResult.value, 'totalInput', `${currentDafLabel()} 良率明細`)), makeDistributionSection('機種良率', 'fa-microchip', (dafDashboardResult.value?.byModel || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.yieldRate + '%', meta: `不良 ${row.defects}`, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
+            sections: [makeDistributionSection('機種良率', 'fa-microchip', (dafDashboardResult.value?.byModel || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.yieldRate + '%', meta: `不良 ${row.defects}`, detail: { title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] } })))]
         });
-        const openDafModelDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
-        const openDafWorkOrderDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台分佈', 'fa-microchip', buildDafMachineItems(row)), makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
+        const openDafModelDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單分佈', 'fa-file-alt', (row.byWorkOrder || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
+        const openDafWorkOrderDetail = row => openDashboardDetail({ title: `${row.name} 良率明細`, subtitle: dashDate.value, metrics: [toMetric('投入數', row.input || row.qty, 'slate'), toMetric('良品數', row.good, 'green'), toMetric('不良數', row.defects, 'red'), { label: '良率', value: row.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機種分佈', 'fa-microchip', (row.byModel || []).map(item => ({ label: item.name, qty: item.qty, ratio: item.ratio + '%' })))] });
         const openDafDefectDashboardDetail = () => openDashboardDetail({
             title: `${dashDate.value} ${currentDafLabel()} 不良`, subtitle: '點擊不良項目可查看機種與工單',
             metrics: [toMetric('不良總數', dafDashboardResult.value?.totalDefects, 'red')],
@@ -377,7 +404,7 @@ SMT.dashboard = function (ctx) {
         });
         const openDafDateDetail = date => {
             const result = getDafDashboardForDate(date);
-            openDashboardDetail({ title: `${date} ${currentDafLabel()} 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', result.totalInput, 'slate'), toMetric('良品數', result.totalGood, 'green'), toMetric('不良數', result.totalDefects, 'red'), { label: '良率', value: result.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('機台投入', 'fa-microchip', buildDafMachineItems(result)), makeDistributionSection('工單投入', 'fa-file-alt', (result.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' }))), makeDistributionSection('不良原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))] });
+            openDashboardDetail({ title: `${date} ${currentDafLabel()} 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', result.totalInput, 'slate'), toMetric('良品數', result.totalGood, 'green'), toMetric('不良數', result.totalDefects, 'red'), { label: '良率', value: result.yieldRate + '%', tone: 'green' }], sections: [makeDistributionSection('工單投入', 'fa-file-alt', (result.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' }))), makeDistributionSection('不良原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))] });
         };
         const assemblyReasonDetail = row => {
             return { title: `${row.name} 停機明細`, subtitle: `${dashDate.value} · ${row.qty} 次`, metrics: [toMetric('發生次數', row.qty, 'red')], allowNote: false, sections: [makeDistributionSection('每小時發生次數', 'fa-clock', (row.hourly || []).map(item => {
@@ -610,9 +637,9 @@ SMT.dashboard = function (ctx) {
             if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
         });
         return {
-            dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate,
+            dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate, dashboardAvailableDates,
             dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays, dafWeekInput,
-            changeDashDate, refreshDashboard, refreshDashboardAndCharts, initDashboardCharts,
+            changeDashDate, refreshDashboard, refreshDashboardAndCharts, initDashboardCharts, invalidateDashboardDateCache,
             openDashboardDetail, openDashboardDetailItem, closeDashboardDetail, saveDashboardNote,
             openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail,
             openDafInputDetail, openDafYieldDetail, openDafDefectDashboardDetail, openDafWeekDetail,

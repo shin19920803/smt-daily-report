@@ -1,17 +1,20 @@
 window.SMT = window.SMT || {};
 
-// DAF／FT1／FT2 檔案統計：DAF／FT2 使用 C／E／F／G／I／J；FT1 使用前移一欄後的 B／D／E／F／H／I。
+// DAF／FT1／FT2 檔案統計：新上傳格式統一使用 B／D／E／F／H／I；舊批次保留原本的 C／E／F／G／I／J 解析結果。
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
     const MODEL_MAPPING_STORAGE_KEY = 'koya_daf_model_mappings_v1';
-    const DAF_COLUMNS = Object.freeze({ workOrder: 2, productCode: 4, dedupKey: 5, date: 6, defect: 8, status: 9, minColumns: 10 });
-    const FT1_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
+    const LEGACY_COLUMNS = Object.freeze({ workOrder: 2, productCode: 4, dedupKey: 5, date: 6, defect: 8, status: 9, minColumns: 10 });
+    const CURRENT_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
+    const CURRENT_SOURCE_FORMAT = 'current-v2';
+    const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const isDafLikeLine = () => ['DAF', 'FT1', 'FT2'].includes(currentLine.value);
     const currentDafLine = () => isDafLikeLine() ? currentLine.value : 'DAF';
-    const currentDafColumns = () => currentLine.value === 'FT1' ? FT1_COLUMNS : DAF_COLUMNS;
+    const currentDafColumns = () => CURRENT_COLUMNS;
+    const recordColumns = record => record?.sourceFormat === CURRENT_SOURCE_FORMAT || currentLine.value === 'FT1' ? CURRENT_COLUMNS : LEGACY_COLUMNS;
     const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
     const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
     const currentDafLabel = () => currentDafLine();
@@ -131,7 +134,7 @@ SMT.daf = function (ctx) {
     const parseDate = value => { const parsed = parseDateTime(value); return parsed ? fmtDate(parsed) : ''; };
     const normalizeDafRecord = record => {
         const raw = Array.isArray(record.raw) ? record.raw : [];
-        const columns = currentDafColumns();
+        const columns = recordColumns(record);
         const mappedModel = resolveDafModel(record.productCode || raw[columns.productCode]);
         const hasStoredTime = record.dedupTime !== null && record.dedupTime !== undefined && record.dedupTime !== '';
         const parsedTime = hasStoredTime && Number.isFinite(Number(record.dedupTime))
@@ -146,9 +149,11 @@ SMT.daf = function (ctx) {
         };
     };
     const normalizeBatchModels = batch => {
-        const records = (batch.records || []).map(normalizeDafRecord);
+        const sourceFormat = batch.sourceFormat || (currentDafLine() === 'FT1' ? CURRENT_SOURCE_FORMAT : LEGACY_SOURCE_FORMAT);
+        const records = (batch.records || []).map(record => normalizeDafRecord({ ...record, sourceFormat: record.sourceFormat || sourceFormat }));
         return {
             ...batch,
+            sourceFormat,
             machine: '',
             modelName: normalizeModelName(batch.modelName),
             records
@@ -164,10 +169,8 @@ SMT.daf = function (ctx) {
                 passthrough.push({ row, index });
                 return;
             }
-            const parsedTime = parseDateTime(row[columns.date]);
-            const timestamp = parsedTime ? parsedTime.getTime() : Number.MAX_SAFE_INTEGER;
             const previous = grouped.get(key);
-            if (!previous || timestamp < previous.timestamp) grouped.set(key, { row, index, timestamp });
+            if (!previous || index > previous.index) grouped.set(key, { row, index });
         });
         return [...passthrough, ...grouped.values()]
             .sort((a, b) => a.index - b.index)
@@ -256,7 +259,7 @@ SMT.daf = function (ctx) {
     const analyzeFile = async (file) => {
         const columns = currentDafColumns();
         const { rows: sourceRows, columnCount } = await readFileRows(file);
-        const dataRows = currentLine.value === 'FT1' ? sourceRows.slice(1) : sourceRows;
+        const dataRows = sourceRows.slice(1);
         const rows = deduplicateRows(dataRows);
         const duplicateCount = dataRows.length - rows.length;
         const model = detectModel(rows);
@@ -283,6 +286,7 @@ SMT.daf = function (ctx) {
                 defect: isDefect ? (cleanText(row[columns.defect]) || defaultDafDefect()) : '',
                 status,
                 model: resolveDafModel(row[columns.productCode]),
+                sourceFormat: CURRENT_SOURCE_FORMAT,
                 machine: '',
                 inputIncluded: ['GOOD', 'FAIL'].includes(status),
                 isDefect,
@@ -292,6 +296,7 @@ SMT.daf = function (ctx) {
         return {
             id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             line: currentDafLine(),
+            sourceFormat: CURRENT_SOURCE_FORMAT,
             machine: '',
             fileName: file.name,
             uploadedAt: new Date().toISOString(),
@@ -487,7 +492,18 @@ SMT.daf = function (ctx) {
     };
     const mergeDafBatch = async incoming => {
         const before = dafBatches.value.map(rebuildDafBatch);
-        const merged = deduplicateDafBatches([...before, incoming]);
+        const incomingKeys = new Set((incoming.records || []).map(record => normalizeText(record.dedupKey)).filter(Boolean));
+        let replacedCount = 0;
+        const retained = before.map(batch => {
+            const records = (batch.records || []).filter(record => {
+                const key = normalizeText(record.dedupKey);
+                if (!key || !incomingKeys.has(key)) return true;
+                replacedCount++;
+                return false;
+            });
+            return { ...batch, records };
+        }).filter(batch => batch.records.length);
+        const merged = deduplicateDafBatches([...retained, incoming]);
         const batches = merged.batches.filter(batch => !(batch.id === incoming.id && incoming.records?.length && !batch.records.length));
         const remoteSaved = await syncDafRemoteChanges(before, batches);
         dafBatches.value = batches;
@@ -496,7 +512,7 @@ SMT.daf = function (ctx) {
         learnModelMappings(batches);
         return {
             batch: batches.find(batch => batch.id === incoming.id) || null,
-            duplicateCount: merged.duplicateCount,
+            duplicateCount: replacedCount + merged.duplicateCount,
             remoteSaved
         };
     };
@@ -924,12 +940,10 @@ SMT.daf = function (ctx) {
         const pareto = [['不良現象', '不良數量', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
-        const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期'];
-        const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, ...(row.raw || [])]);
-        const columns = currentDafColumns();
-        const rawColumns = Math.max(columns.minColumns, ...result.rows.map(row => (row.raw || []).length));
-        const rawFieldLabels = { [columns.workOrder]: '工單', [columns.productCode]: '產品代碼', [columns.dedupKey]: '去重識別碼', [columns.date]: '日期', [columns.defect]: '不良原因', [columns.status]: '狀態' };
-        for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄${rawFieldLabels[index] || ''}`);
+        const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期', '原始欄位格式'];
+        const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, row.sourceFormat === CURRENT_SOURCE_FORMAT ? '新格式 B／D／E／F／H／I' : '舊格式 C／E／F／G／I／J', ...(row.raw || [])]);
+        const rawColumns = Math.max(LEGACY_COLUMNS.minColumns, CURRENT_COLUMNS.minColumns, ...result.rows.map(row => (row.raw || []).length));
+        for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄`);
         const wb = XLSX.utils.book_new();
         const sheets = [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]];
         sheets.forEach(([name, sheetData]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), name));

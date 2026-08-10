@@ -169,8 +169,10 @@ SMT.daf = function (ctx) {
                 passthrough.push({ row, index });
                 return;
             }
+            const parsedTime = parseDateTime(row[columns.date]);
+            const timestamp = parsedTime ? parsedTime.getTime() : Number.MAX_SAFE_INTEGER;
             const previous = grouped.get(key);
-            if (!previous || index > previous.index) grouped.set(key, { row, index });
+            if (!previous || timestamp < previous.timestamp) grouped.set(key, { row, index, timestamp });
         });
         return [...passthrough, ...grouped.values()]
             .sort((a, b) => a.index - b.index)
@@ -445,8 +447,7 @@ SMT.daf = function (ctx) {
         let duplicateCount = 0;
         normalized.forEach(batch => (batch.records || []).forEach(record => {
             if (!record.dedupKey) return;
-            const hasTime = record.dedupTime !== null && record.dedupTime !== undefined && record.dedupTime !== '';
-            const timestamp = hasTime && Number.isFinite(Number(record.dedupTime)) ? Number(record.dedupTime) : Number.MAX_SAFE_INTEGER;
+            const timestamp = recordTimestamp(record);
             const previous = selected.get(record.dedupKey);
             if (!previous) {
                 selected.set(record.dedupKey, { record, timestamp });
@@ -468,6 +469,16 @@ SMT.daf = function (ctx) {
             duplicateCount
         };
     };
+    const recordTimestamp = record => {
+        const stored = Number(record?.dedupTime);
+        if (Number.isFinite(stored) && stored > 0) return stored;
+        const parsed = parseDateTime(record?.date);
+        return parsed ? parsed.getTime() : Number.MAX_SAFE_INTEGER;
+    };
+    const earliestRecord = records => (records || []).reduce((earliest, record) => {
+        if (!earliest || recordTimestamp(record) < recordTimestamp(earliest)) return record;
+        return earliest;
+    }, null);
     const dafBatchSignature = batch => (batch.records || []).map(record => [
         record.dedupKey, record.dedupTime, record.date, record.status,
         record.workOrder, record.productCode, record.defect, record.model
@@ -492,18 +503,42 @@ SMT.daf = function (ctx) {
     };
     const mergeDafBatch = async incoming => {
         const before = dafBatches.value.map(rebuildDafBatch);
+        const existingByKey = new Map();
+        before.forEach(batch => (batch.records || []).forEach(record => {
+            const key = normalizeText(record.dedupKey);
+            if (!key) return;
+            if (!existingByKey.has(key)) existingByKey.set(key, []);
+            existingByKey.get(key).push(record);
+        }));
         const incomingKeys = new Set((incoming.records || []).map(record => normalizeText(record.dedupKey)).filter(Boolean));
-        let replacedCount = 0;
+        const keepExisting = new Set();
+        const keepIncoming = new Set();
+        let duplicateCount = 0;
+        (incoming.records || []).forEach(record => {
+            const key = normalizeText(record.dedupKey);
+            if (!key) {
+                keepIncoming.add(record);
+                return;
+            }
+            const existingRecords = existingByKey.get(key) || [];
+            if (!existingRecords.length) {
+                keepIncoming.add(record);
+                return;
+            }
+            duplicateCount++;
+            const winner = earliestRecord([...existingRecords, record]);
+            if (winner === record) keepIncoming.add(record);
+            else keepExisting.add(winner);
+        });
         const retained = before.map(batch => {
             const records = (batch.records || []).filter(record => {
                 const key = normalizeText(record.dedupKey);
-                if (!key || !incomingKeys.has(key)) return true;
-                replacedCount++;
-                return false;
+                return !key || !incomingKeys.has(key) || keepExisting.has(record);
             });
             return { ...batch, records };
         }).filter(batch => batch.records.length);
-        const merged = deduplicateDafBatches([...retained, incoming]);
+        const incomingBatch = { ...incoming, records: (incoming.records || []).filter(record => keepIncoming.has(record)) };
+        const merged = deduplicateDafBatches([...retained, incomingBatch]);
         const batches = merged.batches.filter(batch => !(batch.id === incoming.id && incoming.records?.length && !batch.records.length));
         const remoteSaved = await syncDafRemoteChanges(before, batches);
         dafBatches.value = batches;
@@ -512,7 +547,7 @@ SMT.daf = function (ctx) {
         learnModelMappings(batches);
         return {
             batch: batches.find(batch => batch.id === incoming.id) || null,
-            duplicateCount: replacedCount + merged.duplicateCount,
+            duplicateCount: duplicateCount + merged.duplicateCount,
             remoteSaved
         };
     };

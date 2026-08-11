@@ -1,8 +1,8 @@
 window.SMT = window.SMT || {};
 
-// DAF／FT1／FT2 檔案統計：新上傳格式統一使用 B／D／E／F／H／I；舊批次保留原本的 C／E／F／G／I／J 解析結果。
+// DAF／FT1／FT2／組裝檔案統計：新上傳格式統一使用 B／D／E／F／H／I；舊批次保留原本的 C／E／F／G／I／J 解析結果。
 SMT.daf = function (ctx) {
-    const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
+    const { toast, loading, currentLine, currentLineMeta, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
@@ -11,13 +11,14 @@ SMT.daf = function (ctx) {
     const CURRENT_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
-    const isDafLikeLine = () => ['DAF', 'FT1', 'FT2'].includes(currentLine.value);
+    const isDafLikeLine = () => ['DAF', 'FT1', 'FT2', 'ASSEMBLY'].includes(currentLine.value);
     const currentDafLine = () => isDafLikeLine() ? currentLine.value : 'DAF';
     const currentDafColumns = () => CURRENT_COLUMNS;
     const recordColumns = record => record?.sourceFormat === CURRENT_SOURCE_FORMAT || currentLine.value === 'FT1' ? CURRENT_COLUMNS : LEGACY_COLUMNS;
     const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
     const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
-    const currentDafLabel = () => currentDafLine();
+    const currentDafMappingStorageKey = () => currentDafLine() === 'ASSEMBLY' ? 'koya_assembly_model_mappings_v1' : MODEL_MAPPING_STORAGE_KEY;
+    const currentDafLabel = () => currentLineMeta.value.label;
     const defaultDafDefect = () => currentLine.value === 'FT2' ? '偵測失效' : '未填寫不良原因';
 
     const MODEL_MAPPING = {
@@ -69,7 +70,7 @@ SMT.daf = function (ctx) {
     const normalizeModelName = value => normalizeText(value) || '未識別機種';
     const readModelMappings = () => {
         try {
-            const parsed = JSON.parse(localStorage.getItem(MODEL_MAPPING_STORAGE_KEY) || '{}');
+            const parsed = JSON.parse(localStorage.getItem(currentDafMappingStorageKey()) || '{}');
             return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
                 ? Object.fromEntries(Object.entries(parsed).map(([code, model]) => [normalizeText(code), normalizeModelName(model)]))
                 : {};
@@ -79,7 +80,7 @@ SMT.daf = function (ctx) {
         try {
             const normalized = Object.fromEntries(Object.entries(dafModelMappings.value).map(([code, model]) => [normalizeText(code), normalizeModelName(model)]));
             dafModelMappings.value = normalized;
-            localStorage.setItem(MODEL_MAPPING_STORAGE_KEY, JSON.stringify(normalized));
+            localStorage.setItem(currentDafMappingStorageKey(), JSON.stringify(normalized));
         } catch (e) {}
     };
     const learnModelMappings = (batches) => {
@@ -1030,7 +1031,8 @@ SMT.daf = function (ctx) {
         else if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
-        if (['DAF', 'FT1', 'FT2'].includes(line)) {
+        if (['DAF', 'FT1', 'FT2', 'ASSEMBLY'].includes(line)) {
+            dafModelMappings.value = readModelMappings();
             dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
             dafQuickMode.value = null;
             dafQuickOffset.value = 0;

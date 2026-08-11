@@ -717,78 +717,117 @@ SMT.assembly = function (ctx) {
         }));
         return [...dates].sort().slice(-limit);
     };
-    const loadAssemblyData = async () => {
+    let assemblyLoadRequestId = 0;
+    let assemblyRemoteLoadPromise = null;
+    const refreshAssemblyAfterBackgroundLoad = () => {
+        if (currentLine.value !== 'ASSY') return;
+        refreshAssemblyReport();
+        if (assemblyStatsResult.value) assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        if (!ctx.refreshDashboard) return;
+        Promise.resolve(ctx.refreshDashboard()).then(refreshed => {
+            if (refreshed !== false && currentTab.value === 'dashboard' && ctx.initDashboardCharts) return ctx.initDashboardCharts();
+            return null;
+        }).catch(error => console.warn('Mylar 儀表板背景更新失敗', error));
+    };
+    const loadAssemblyData = async ({ background = false } = {}) => {
         const localState = compactAssemblyBatches(readStorage());
         const localBatches = localState.batches;
         if (localState.cleanups.length) persistStorage(localBatches);
         if (currentLine.value !== 'ASSY') {
+            assemblyLoadRequestId++;
             assemblyBatches.value = localBatches;
             refreshAssemblyReport();
             return;
         }
-        const localMappings = readMappingStorage();
-        const [{ data: remoteRows, error }, { data: remoteMappingRows, error: mappingError }] = await Promise.all([
-            _supabase.from(REMOTE_TABLE)
-                .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100),
-            _supabase.from(MAPPING_TABLE)
-                .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500)
-        ]);
-        if (error) {
-            assemblyRemoteReady.value = false;
-            assemblyRemoteError.value = error.code === 'PGRST205'
-                ? '尚未建立組裝 LOG 共用資料表'
-                : (error.message || '共用資料庫讀取失敗');
-            assemblyBatches.value = localBatches;
-        } else {
-            assemblyRemoteReady.value = true;
-            assemblyRemoteError.value = '';
-            let remoteBatches = (remoteRows || []).map(fromRemoteBatch);
-            // 第一次建立資料表時，將這台電腦既有的本機批次搬到共用資料庫。
-            if (!hasRemoteMigrationFlag() && localBatches.length && remoteBatches.length === 0) {
-                const { error: migrationError } = await _supabase.from(REMOTE_TABLE)
-                    .upsert(localBatches.map(toRemoteBatch), { onConflict: 'id' });
-                if (!migrationError) {
-                    remoteBatches = localBatches;
-                    setRemoteMigrationFlag();
-                } else {
-                    console.error('組裝測試 LOG 本機資料搬移失敗', migrationError);
-                    assemblyRemoteError.value = migrationError.message || '本機資料搬移失敗';
-                }
-            } else if (!hasRemoteMigrationFlag()) {
-                setRemoteMigrationFlag();
-            }
-            const remoteState = compactAssemblyBatches(remoteBatches);
-            remoteBatches = remoteState.batches;
-            await applyAssemblyBatchCleanups(remoteState.cleanups);
-            assemblyBatches.value = remoteBatches.slice(0, 100);
-            persistStorage();
+        if (assemblyRemoteLoadPromise) {
+            if (background) return true;
+            await assemblyRemoteLoadPromise;
+            return true;
         }
-        if (mappingError) {
-            assemblyMappingRemoteReady.value = false;
-            assemblyMappings.value = localMappings;
-            if (!assemblyRemoteError.value) assemblyRemoteError.value = mappingError.code === 'PGRST205'
-                ? '尚未建立 LOG 不良對應資料表'
-                : (mappingError.message || 'LOG 對應資料庫讀取失敗');
-        } else {
-            assemblyMappingRemoteReady.value = true;
-            let remoteMappings = (remoteMappingRows || []).map(fromRemoteMapping);
-            if (!hasMappingMigrationFlag() && localMappings.length && remoteMappings.length === 0) {
-                const { error: mappingMigrationError } = await _supabase.from(MAPPING_TABLE)
-                    .upsert(localMappings.map(toRemoteMapping), { onConflict: 'line,log_message' });
-                if (!mappingMigrationError) {
-                    remoteMappings = localMappings;
+        const requestId = ++assemblyLoadRequestId;
+        const localBatchIdsAtStart = new Set(localBatches.map(batch => batch.id));
+        assemblyBatches.value = localBatches;
+        refreshAssemblyReport();
+        const localMappings = readMappingStorage();
+        const remotePromise = (async () => {
+            const [{ data: remoteRows, error }, { data: remoteMappingRows, error: mappingError }] = await Promise.all([
+                _supabase.from(REMOTE_TABLE)
+                    .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100),
+                _supabase.from(MAPPING_TABLE)
+                    .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500)
+            ]);
+            if (requestId !== assemblyLoadRequestId || currentLine.value !== 'ASSY') return;
+            if (error) {
+                assemblyRemoteReady.value = false;
+                assemblyRemoteError.value = error.code === 'PGRST205'
+                    ? '尚未建立組裝 LOG 共用資料表'
+                    : (error.message || '共用資料庫讀取失敗');
+                assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
+            } else {
+                assemblyRemoteReady.value = true;
+                assemblyRemoteError.value = '';
+                let remoteBatches = (remoteRows || []).map(fromRemoteBatch);
+                const latestLocalBatches = compactAssemblyBatches(readStorage()).batches;
+                const pendingLocalBatches = latestLocalBatches.filter(batch => !localBatchIdsAtStart.has(batch.id));
+                // 第一次建立資料表時，將這台電腦既有的本機批次搬到共用資料庫。
+                if (!hasRemoteMigrationFlag() && localBatches.length && remoteBatches.length === 0) {
+                    const { error: migrationError } = await _supabase.from(REMOTE_TABLE)
+                        .upsert(localBatches.map(toRemoteBatch), { onConflict: 'id' });
+                    if (!migrationError) {
+                        remoteBatches = localBatches;
+                        setRemoteMigrationFlag();
+                    } else {
+                        console.error('組裝測試 LOG 本機資料搬移失敗', migrationError);
+                        assemblyRemoteError.value = migrationError.message || '本機資料搬移失敗';
+                    }
+                } else if (!hasRemoteMigrationFlag()) {
+                    setRemoteMigrationFlag();
+                }
+                const remoteState = compactAssemblyBatches(remoteBatches);
+                remoteBatches = remoteState.batches;
+                await applyAssemblyBatchCleanups(remoteState.cleanups);
+                for (const pendingBatch of pendingLocalBatches) await saveBatchRemote(pendingBatch);
+                if (pendingLocalBatches.length) remoteBatches = compactAssemblyBatches([...remoteBatches, ...pendingLocalBatches]).batches;
+                assemblyBatches.value = remoteBatches.slice(0, 100);
+                persistStorage();
+            }
+            if (mappingError) {
+                assemblyMappingRemoteReady.value = false;
+                assemblyMappings.value = localMappings;
+                if (!assemblyRemoteError.value) assemblyRemoteError.value = mappingError.code === 'PGRST205'
+                    ? '尚未建立 LOG 不良對應資料表'
+                    : (mappingError.message || 'LOG 對應資料庫讀取失敗');
+            } else {
+                assemblyMappingRemoteReady.value = true;
+                let remoteMappings = (remoteMappingRows || []).map(fromRemoteMapping);
+                if (!hasMappingMigrationFlag() && localMappings.length && remoteMappings.length === 0) {
+                    const { error: mappingMigrationError } = await _supabase.from(MAPPING_TABLE)
+                        .upsert(localMappings.map(toRemoteMapping), { onConflict: 'line,log_message' });
+                    if (!mappingMigrationError) {
+                        remoteMappings = localMappings;
+                        setMappingMigrationFlag();
+                    }
+                } else if (!hasMappingMigrationFlag()) {
                     setMappingMigrationFlag();
                 }
-            } else if (!hasMappingMigrationFlag()) {
-                setMappingMigrationFlag();
+                assemblyMappings.value = remoteMappings;
+                persistMappingStorage();
             }
-            assemblyMappings.value = remoteMappings;
-            persistMappingStorage();
+            refreshAssemblyAfterBackgroundLoad();
+        })();
+        assemblyRemoteLoadPromise = remotePromise;
+        const settled = remotePromise.finally(() => {
+            if (assemblyRemoteLoadPromise === remotePromise) {
+                assemblyRemoteLoadPromise = null;
+                if (requestId !== assemblyLoadRequestId && currentLine.value === 'ASSY') loadAssemblyData({ background: true });
+            }
+        });
+        if (background) {
+            settled.catch(error => console.warn('Mylar 背景資料同步失敗', error));
+            return true;
         }
-        refreshAssemblyReport();
-        if (currentLine.value === 'ASSY') {
-            assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
-        }
+        await settled;
+        return true;
     };
 
     const finishAssemblyUploadQueue = queue => {

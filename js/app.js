@@ -9,16 +9,24 @@ const app = createApp({
             try {
                 ctx.loadFpyTargets();
                 const isSmt = ctx.currentLine.value === 'SMT';
-                const tasks = [ctx.loadBaseData(), ctx.loadAssemblyData(), ctx.loadDafData()];
-                if (isSmt) {
-                    tasks.push(ctx.loadHistory(), ctx.loadFpyHistory(), ctx.loadOocHistory(), ctx.loadEqData());
-                }
+                // 首屏只等待基本設定與畫面資料；歷史資料在背景同步，避免資料量拖住整個頁面。
+                const tasks = [
+                    ctx.loadBaseData(),
+                    ctx.loadAssemblyData({ background: true }),
+                    ctx.loadDafData({ background: true })
+                ];
                 await Promise.all(tasks);
-                if (isSmt) await Promise.all([ctx.loadFeeders(), ctx.loadNozzleLogs()]);
                 const refreshed = await ctx.refreshDashboard();
                 ctx.renderAssemblyReportChart();
                 ctx.renderAssemblyStatsCharts();
                 if (refreshed !== false) await ctx.initDashboardCharts();
+                if (isSmt) {
+                    // 這些資料只在切到對應功能時使用，不阻塞首頁顯示。
+                    Promise.allSettled([
+                        ctx.loadHistory(), ctx.loadFpyHistory(), ctx.loadOocHistory(), ctx.loadEqData(),
+                        ctx.loadFeeders(), ctx.loadNozzleLogs()
+                    ]).catch(error => console.warn('SMT 背景資料同步失敗', error));
+                }
                 const today = new Date();
                 ctx.rawExportFilter.value.end = today.toISOString().split('T')[0];
                 ctx.fpyFilter.value.end = today.toISOString().split('T')[0];

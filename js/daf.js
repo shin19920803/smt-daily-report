@@ -553,38 +553,78 @@ SMT.daf = function (ctx) {
         };
     };
     let dafLoadRequestId = 0;
-    const loadDafData = async () => {
-        const requestId = ++dafLoadRequestId;
+    let dafRemoteLoadPromise = null;
+    let dafRemoteLoadLine = '';
+    const refreshDafAfterBackgroundLoad = line => {
+        if (currentLine.value !== line) return;
+        if (dafStatsResult.value) calculateDafStats(false);
+        if (!ctx.refreshDashboard) return;
+        Promise.resolve(ctx.refreshDashboard()).then(refreshed => {
+            if (refreshed !== false && currentTab.value === 'dashboard' && ctx.initDashboardCharts) return ctx.initDashboardCharts();
+            return null;
+        }).catch(error => console.warn(`${currentDafLabel()} 儀表板背景更新失敗`, error));
+    };
+    const loadDafData = async ({ background = false } = {}) => {
         const line = currentDafLine();
+        if (dafRemoteLoadPromise && dafRemoteLoadLine === line) {
+            if (background) return true;
+            await dafRemoteLoadPromise;
+            return true;
+        }
+        const requestId = ++dafLoadRequestId;
         const localBatches = deduplicateDafBatches(readStorage()).batches;
+        const localBatchIdsAtStart = new Set(localBatches.map(batch => batch.id));
         dafBatches.value = localBatches;
         dafLastUpload.value = localBatches[0] || null;
         if (!isDafLikeLine()) return;
         dafRemoteReady.value = false;
         dafRemoteError.value = '';
-        const { data: remoteRows, error } = await loadDafRemoteRows(line);
-        if (requestId !== dafLoadRequestId || line !== currentDafLine()) return;
-        if (error) {
-            dafRemoteReady.value = false;
-            dafRemoteError.value = error.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (error.message || 'DAF 共用資料庫讀取失敗');
-            dafBatches.value = localBatches;
-        } else {
-            dafRemoteReady.value = true;
-            dafRemoteError.value = '';
-            const remoteBatches = (remoteRows || []).map(fromRemote);
-            const remoteState = deduplicateDafBatches(remoteBatches);
-            let batches = remoteState.batches;
-            if (!hasMigrationFlag() && localBatches.length && batches.length === 0) {
-                const { error: migrationError } = await _supabase.from(REMOTE_TABLE).upsert(localBatches.map(toRemote), { onConflict: 'id' });
-                if (!migrationError) { batches = localBatches; setMigrationFlag(); }
-            } else if (!hasMigrationFlag()) setMigrationFlag();
-            if (remoteState.duplicateCount) await syncDafRemoteChanges(remoteBatches, batches);
-            dafBatches.value = batches;
-            persistStorage();
+        dafRemoteLoadLine = line;
+        const remotePromise = (async () => {
+            const { data: remoteRows, error } = await loadDafRemoteRows(line);
+            if (requestId !== dafLoadRequestId || line !== currentDafLine()) return;
+            if (error) {
+                dafRemoteReady.value = false;
+                dafRemoteError.value = error.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (error.message || 'DAF 共用資料庫讀取失敗');
+                dafBatches.value = deduplicateDafBatches(readStorage()).batches;
+            } else {
+                dafRemoteReady.value = true;
+                dafRemoteError.value = '';
+                const remoteBatches = (remoteRows || []).map(fromRemote);
+                const remoteState = deduplicateDafBatches(remoteBatches);
+                let batches = remoteState.batches;
+                const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
+                const pendingLocalBatches = latestLocalBatches.filter(batch => !localBatchIdsAtStart.has(batch.id));
+                if (!hasMigrationFlag() && localBatches.length && batches.length === 0) {
+                    const { error: migrationError } = await _supabase.from(REMOTE_TABLE).upsert(latestLocalBatches.map(toRemote), { onConflict: 'id' });
+                    if (!migrationError) { batches = localBatches; setMigrationFlag(); }
+                } else if (!hasMigrationFlag()) setMigrationFlag();
+                if (pendingLocalBatches.length) {
+                    batches = deduplicateDafBatches([...batches, ...pendingLocalBatches]).batches;
+                    await syncDafRemoteChanges(remoteBatches, batches);
+                }
+                if (remoteState.duplicateCount) await syncDafRemoteChanges(remoteBatches, batches);
+                dafBatches.value = batches;
+                persistStorage();
+            }
+            learnModelMappings(dafBatches.value);
+            dafLastUpload.value = dafBatches.value[0] || null;
+            refreshDafAfterBackgroundLoad(line);
+        })();
+        dafRemoteLoadPromise = remotePromise;
+        const settled = remotePromise.finally(() => {
+            if (dafRemoteLoadPromise === remotePromise) {
+                dafRemoteLoadPromise = null;
+                dafRemoteLoadLine = '';
+                if (requestId !== dafLoadRequestId && currentLine.value === line) loadDafData({ background: true });
+            }
+        });
+        if (background) {
+            settled.catch(error => console.warn(`${currentDafLabel()} 背景資料同步失敗`, error));
+            return true;
         }
-        learnModelMappings(dafBatches.value);
-        dafLastUpload.value = dafBatches.value[0] || null;
-        if (dafStatsResult.value) calculateDafStats(false);
+        await settled;
+        return true;
     };
 
     let allRecordsCacheSource = null;

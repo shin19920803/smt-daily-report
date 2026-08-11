@@ -137,12 +137,24 @@ SMT.core = function (ctx) {
                 if (ctx.selectedNozzleModelId) ctx.selectedNozzleModelId.value = null;
                 if (ctx.calHistory) ctx.calHistory.value = [];
                 const isSmt = target === 'SMT';
-                const tasks = [loadBaseData(), ctx.loadAssemblyData && ctx.loadAssemblyData(), ctx.loadDafData && ctx.loadDafData()];
-                if (isSmt) tasks.push(ctx.loadHistory && ctx.loadHistory(), ctx.loadFpyHistory && ctx.loadFpyHistory(), ctx.loadOocHistory && ctx.loadOocHistory(), ctx.loadEqData && ctx.loadEqData());
+                const tasks = [
+                    loadBaseData(),
+                    ctx.loadAssemblyData && ctx.loadAssemblyData({ background: true }),
+                    ctx.loadDafData && ctx.loadDafData({ background: true })
+                ];
                 await Promise.all(tasks);
-                if (isSmt) await Promise.all([ctx.loadFeeders && ctx.loadFeeders(), ctx.loadNozzleLogs && ctx.loadNozzleLogs()]);
                 const refreshed = ctx.refreshDashboard ? await ctx.refreshDashboard() : true;
                 if (refreshed !== false && ctx.initDashboardCharts && currentTab.value === 'dashboard') await ctx.initDashboardCharts();
+                if (isSmt) {
+                    Promise.allSettled([
+                        ctx.loadHistory && ctx.loadHistory(),
+                        ctx.loadFpyHistory && ctx.loadFpyHistory(),
+                        ctx.loadOocHistory && ctx.loadOocHistory(),
+                        ctx.loadEqData && ctx.loadEqData(),
+                        ctx.loadFeeders && ctx.loadFeeders(),
+                        ctx.loadNozzleLogs && ctx.loadNozzleLogs()
+                    ]).catch(error => console.warn('SMT 背景資料同步失敗', error));
+                }
             } finally { loading.value = false; }
             toast(`已切換至 ${currentLineMeta.value.label}`, 'info');
         };

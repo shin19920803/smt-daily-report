@@ -121,6 +121,7 @@
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-ranking-star text-orange-500"></i>當日不良比例</h3><div v-if="assemblyDashboardResult.byType.length" class="space-y-2"><button v-for="(row, idx) in assemblyDashboardResult.byType" :key="row.name" @click="openAssemblyReasonDashboard(row)" class="w-full flex items-center gap-2 text-left hover:bg-orange-50 rounded-lg p-1"><span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black" :class="idx < 3 ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'">{{ idx + 1 }}</span><span class="flex-1 text-sm font-bold truncate">{{ row.name }}</span><span class="font-mono text-sm text-red-600">{{ row.qty }}</span><span class="font-mono text-xs text-gray-500 w-14 text-right">{{ row.ratio }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無資料</div></div></div>
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>當日每小時停機</h3><div class="table-wrap max-h-80"><table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">成功</th><th class="text-right">NG</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyDashboardResult.hourly.filter(item => item.total > 0)" :key="row.hour" @click="openAssemblyHourDetail(row)" class="cursor-pointer hover:bg-blue-50"><td class="font-mono">{{ row.label }}</td><td class="text-right">{{ row.production }}</td><td class="text-right text-danger font-bold">{{ row.ng }}</td><td class="text-right text-danger">{{ row.downtimeRate }}%</td></tr><tr v-if="!assemblyDashboardResult.hourly.some(item => item.total > 0)"><td colspan="4" class="text-center text-gray-400 py-5">無每小時資料</td></tr></tbody></table></div></div>
                     </div>
+                    <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>當日機種分佈</h3><div v-if="assemblyDashboardResult.byModel.length" class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>機種</th><th class="text-right">產出成功</th><th class="text-right">NG</th><th class="text-right">總數</th><th class="text-right">成功率</th></tr></thead><tbody><tr v-for="row in assemblyDashboardResult.byModel" :key="row.name"><td class="font-bold">{{ row.name }}</td><td class="text-right text-green-700">{{ row.success }}</td><td class="text-right text-red-600">{{ row.ng }}</td><td class="text-right">{{ row.total }}</td><td class="text-right">{{ row.successRate }}%</td></tr></tbody></table></div><div v-else class="text-sm text-gray-400 py-5 text-center">無機種區分</div></div>
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 Mylar LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
             </div>
@@ -325,7 +326,10 @@
                                 <input type="file" accept=".txt,.log,.csv" webkitdirectory directory multiple @change="uploadAssemblyLog" class="hidden">
                             </label>
                         </div>
-                        <button @click="refreshAssemblyReport" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
+                        <div class="flex flex-wrap gap-2">
+                            <button @click="openAssemblyModelScheduleModal" class="btn-ghost"><i class="fas fa-microchip mr-1"></i>設定機種</button>
+                            <button @click="refreshAssemblyReport" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
+                        </div>
                     </div>
                     <div v-if="assemblyLastFile" class="mt-3 text-xs text-gray-500"><i class="fas fa-file-lines mr-1 text-orange-500"></i>最近上傳：<b>{{ assemblyLastFile }}</b></div>
                     <div class="mt-4 border-t border-orange-100 pt-4">
@@ -387,6 +391,34 @@
                     </div>
                 </div>
 
+                <div v-if="assemblyModelScheduleModal.show" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeAssemblyModelScheduleModal">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-5 md:p-6 max-h-[85vh] overflow-y-auto animate-fade-in">
+                        <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
+                            <div>
+                                <h3 class="text-lg font-black text-purple-800"><i class="fas fa-microchip mr-2 text-purple-600"></i>設定 Mylar 機種時段</h3>
+                                <p class="text-xs text-gray-500 mt-1">{{ assemblyUploadDate }} 依 LOG 時間套用機種；未設定的紀錄顯示「無機種區分」。</p>
+                            </div>
+                            <button @click="closeAssemblyModelScheduleModal" class="btn-ghost text-xs whitespace-nowrap">關閉</button>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                            <label><span class="block text-xs font-bold text-gray-500 mb-1">開始時間</span><input type="time" step="60" v-model="assemblyModelScheduleForm.startTime" class="w-full border border-gray-200 p-2 rounded-lg"></label>
+                            <label><span class="block text-xs font-bold text-gray-500 mb-1">結束時間</span><input type="time" step="60" v-model="assemblyModelScheduleForm.endTime" class="w-full border border-gray-200 p-2 rounded-lg"></label>
+                            <label class="md:col-span-2"><span class="block text-xs font-bold text-gray-500 mb-1">機種（DAF 共用資料庫）</span><select v-model="assemblyModelScheduleForm.model" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="" disabled>-- 選擇機種 --</option><option v-for="model in assemblyModelOptions" :key="model" :value="model">{{ model }}</option></select></label>
+                            <div class="md:col-span-4 flex justify-end"><button @click="addAssemblyModelSchedule" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增時段</button></div>
+                        </div>
+                        <div v-if="assemblyModelScheduleError" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"><i class="fas fa-triangle-exclamation mr-1"></i>{{ assemblyModelScheduleError }}</div>
+                        <div class="mt-5 border-t pt-4">
+                            <h4 class="font-black text-gray-700 mb-2"><i class="fas fa-list mr-1 text-purple-500"></i>本日已設定時段</h4>
+                            <div v-if="assemblyModelSchedulesForDate.length" class="space-y-2">
+                                <div v-for="item in assemblyModelSchedulesForDate" :key="item.id" class="flex items-center gap-3 rounded-lg border border-purple-100 bg-purple-50/50 px-3 py-2 text-sm">
+                                    <span class="font-mono font-bold text-purple-800">{{ item.startTime }}–{{ item.endTime }}</span><span class="flex-1 font-bold">{{ item.model }}</span><button @click="deleteAssemblyModelSchedule(item.id)" class="text-red-400 hover:text-red-600" title="刪除時段"><i class="fas fa-trash-alt"></i></button>
+                                </div>
+                            </div>
+                            <div v-else class="text-sm text-gray-400 py-4 text-center">本日尚未設定機種時段。</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-if="assemblyReportResult" class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ assemblyReportResult.totalSuccess.toLocaleString() }}</div><div class="kpi-label">產出成功</div></div>
                     <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ assemblyReportResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">停機／不良</div></div>
@@ -411,6 +443,11 @@
                             </button>
                         </div>
                         <div v-else class="empty-state py-8"><i class="fas fa-circle-check text-green-500"></i><div class="hint">本日沒有停機／不良</div></div>
+                    </div>
+                    <div class="section-card p-4 col-span-1 lg:col-span-2">
+                        <h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>當日機種分佈</h3>
+                        <div v-if="assemblyReportResult.byModel.length" class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>機種</th><th class="text-right">產出成功</th><th class="text-right">NG</th><th class="text-right">總數</th><th class="text-right">成功率</th></tr></thead><tbody><tr v-for="row in assemblyReportResult.byModel" :key="row.name"><td class="font-bold">{{ row.name }}</td><td class="text-right text-green-700">{{ row.success }}</td><td class="text-right text-red-600">{{ row.ng }}</td><td class="text-right">{{ row.total }}</td><td class="text-right">{{ row.successRate }}%</td></tr></tbody></table></div>
+                        <div v-else class="text-sm text-gray-400 py-5 text-center">無機種區分</div>
                     </div>
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-12"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 LOG 統計</div><div class="hint">請上傳機台 LOG 檔案，系統會自動偵測日期</div></div></div>
@@ -999,6 +1036,10 @@
                         <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ assemblyStatsResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">停機／不良</div></div>
                         <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ assemblyStatsResult.downtimeRate }}%</div><div class="kpi-label">停機率</div></div>
                         <div class="kpi-card"><div class="kpi-icon cyan"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ assemblyStatsResult.totalDays }}</div><div class="kpi-label">統計天數</div></div>
+                    </div>
+                    <div class="section-card p-4">
+                        <h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>機種統計</h3>
+                        <div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>機種</th><th class="text-right">產出成功</th><th class="text-right">NG</th><th class="text-right">總數</th><th class="text-right">成功率</th><th class="text-right">停機率</th></tr></thead><tbody><tr v-for="row in assemblyStatsResult.byModel" :key="row.name"><td class="font-bold">{{ row.name }}</td><td class="text-right text-green-700">{{ row.success }}</td><td class="text-right text-red-600">{{ row.ng }}</td><td class="text-right">{{ row.total }}</td><td class="text-right">{{ row.successRate }}%</td><td class="text-right">{{ row.downtimeRate }}%</td></tr></tbody></table></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4">
@@ -1789,8 +1830,8 @@
 <script src="js/core.js?v=202608111430"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
-<script src="js/assembly.js?v=202608111630"></script>
-<script src="js/daf.js?v=202608111630"></script>
+<script src="js/assembly.js?v=202608112200"></script>
+<script src="js/daf.js?v=202608112200"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608111430"></script>

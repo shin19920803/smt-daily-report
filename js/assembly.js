@@ -9,6 +9,9 @@ SMT.assembly = function (ctx) {
     const MAPPING_STORAGE_KEY = 'koya_assy_log_mappings_v1';
     const MAPPING_TABLE = 'assembly_log_mappings';
     const MAPPING_MIGRATED_KEY = 'koya_assy_log_mapping_migrated_v1';
+    const MODEL_SCHEDULE_STORAGE_KEY = 'koya_assy_model_schedules_v1';
+    const MODEL_SCHEDULE_TABLE = 'assembly_model_schedules';
+    const MODEL_SCHEDULE_MIGRATED_KEY = 'koya_assy_model_schedule_remote_migrated_v1';
     const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
     const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
     const STATUS_NOTES_STORAGE_KEY = 'koya_assy_log_status_notes_v1';
@@ -23,7 +26,13 @@ SMT.assembly = function (ctx) {
     const assemblyRemoteReady = ref(false);
     const assemblyRemoteError = ref('');
     const assemblyMappingRemoteReady = ref(false);
-    const assemblyCloudReady = computed(() => assemblyRemoteReady.value && assemblyMappingRemoteReady.value);
+    const assemblyModelScheduleRemoteReady = ref(false);
+    const assemblyModelScheduleRemoteError = ref('');
+    const assemblyCloudReady = computed(() => assemblyRemoteReady.value && assemblyMappingRemoteReady.value && assemblyModelScheduleRemoteReady.value);
+    const assemblyModelSchedules = ref([]);
+    const assemblyModelScheduleModal = ref({ show: false });
+    const assemblyModelScheduleForm = ref({ startTime: '00:00', endTime: '23:59', model: '' });
+    const assemblyModelScheduleError = ref('');
     const assemblyMappings = ref([]);
     const assemblyDefectNotes = ref({});
     const assemblyHourlyNotes = ref({});
@@ -38,6 +47,8 @@ SMT.assembly = function (ctx) {
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
     let applyingAssemblyQuick = false;
+
+    const NO_MODEL = '無機種區分';
 
     const WEEKDAY_TW = ['日', '一', '二', '三', '四', '五', '六'];
     const fmtLocal = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -140,6 +151,56 @@ SMT.assembly = function (ctx) {
     const persistMappingStorage = (mappings = assemblyMappings.value) => {
         try { localStorage.setItem(MAPPING_STORAGE_KEY, JSON.stringify(mappings)); } catch (e) {}
     };
+    const normalizeModelSchedule = item => ({
+        id: String(item?.id || ''),
+        date: String(item?.date || item?.scheduleDate || item?.schedule_date || ''),
+        startTime: String(item?.startTime || item?.start_time || ''),
+        endTime: String(item?.endTime || item?.end_time || ''),
+        model: String(item?.model || item?.modelName || item?.model_name || '').trim()
+    });
+    const readModelSchedules = () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(MODEL_SCHEDULE_STORAGE_KEY) || '[]');
+            return Array.isArray(parsed) ? parsed.map(normalizeModelSchedule).filter(item => item.id && item.date && item.startTime && item.endTime && item.model) : [];
+        } catch (e) { return []; }
+    };
+    const persistModelSchedules = (schedules = assemblyModelSchedules.value) => {
+        try { localStorage.setItem(MODEL_SCHEDULE_STORAGE_KEY, JSON.stringify(schedules)); } catch (e) {}
+    };
+    const assemblyModelOptions = computed(() => {
+        const dafModels = ctx.dafModelOptions?.value || [];
+        const currentModels = (data.value.models || []).map(item => item.name);
+        const unique = new Map();
+        [...dafModels, ...currentModels].forEach(item => {
+            const name = String(item || '').trim();
+            const key = name.toUpperCase();
+            if (name && name !== '未識別機種' && !unique.has(key)) unique.set(key, name);
+        });
+        return [...unique.values()].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    });
+    const assemblyModelSchedulesForDate = computed(() => assemblyModelSchedules.value
+        .filter(item => item.date === assemblyUploadDate.value)
+        .sort((a, b) => a.startTime.localeCompare(b.startTime)));
+    const timeToMinutes = (value, isEnd = false) => {
+        const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+        if (!match) return null;
+        const hour = Number(match[1]);
+        const minute = Number(match[2]);
+        if (hour > 23 || minute > 59) return null;
+        // 23:59 作為當日最後一分鐘的結束點，採用半開區間可與下一時段銜接。
+        return isEnd && hour === 23 && minute === 59 ? 1440 : hour * 60 + minute;
+    };
+    const modelForLogTime = (date, time) => {
+        const minute = timeToMinutes(time);
+        if (minute === null) return NO_MODEL;
+        const schedule = assemblyModelSchedules.value.find(item => {
+            if (item.date !== date) return false;
+            const start = timeToMinutes(item.startTime);
+            const end = timeToMinutes(item.endTime, true);
+            return start !== null && end !== null && start <= minute && minute < end;
+        });
+        return schedule?.model || NO_MODEL;
+    };
     const readDefectNotes = () => {
         try {
             const parsed = JSON.parse(localStorage.getItem(NOTES_STORAGE_KEY) || '{}');
@@ -228,6 +289,21 @@ SMT.assembly = function (ctx) {
         logMessage: row.log_message,
         defectName: row.defect_name
     });
+    const toRemoteModelSchedule = schedule => ({
+        id: schedule.id,
+        line: 'ASSY',
+        schedule_date: schedule.date,
+        start_time: schedule.startTime,
+        end_time: schedule.endTime,
+        model_name: schedule.model
+    });
+    const fromRemoteModelSchedule = row => normalizeModelSchedule({
+        id: row.id,
+        date: row.schedule_date,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        model: row.model_name
+    });
     const hasRemoteMigrationFlag = () => {
         try { return localStorage.getItem(REMOTE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
     };
@@ -239,6 +315,12 @@ SMT.assembly = function (ctx) {
     };
     const setMappingMigrationFlag = () => {
         try { localStorage.setItem(MAPPING_MIGRATED_KEY, '1'); } catch (e) {}
+    };
+    const hasModelScheduleMigrationFlag = () => {
+        try { return localStorage.getItem(MODEL_SCHEDULE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
+    };
+    const setModelScheduleMigrationFlag = () => {
+        try { localStorage.setItem(MODEL_SCHEDULE_MIGRATED_KEY, '1'); } catch (e) {}
     };
     const saveBatchRemote = async (batch) => {
         if (!assemblyRemoteReady.value) return false;
@@ -265,6 +347,25 @@ SMT.assembly = function (ctx) {
         const { error } = await _supabase.from(MAPPING_TABLE).upsert(toRemoteMapping(mapping), { onConflict: 'line,log_message' });
         if (error) {
             console.error('組裝測試 LOG 對應共用資料庫寫入失敗', error);
+            return false;
+        }
+        return true;
+    };
+    const saveModelScheduleRemote = async schedule => {
+        if (!assemblyModelScheduleRemoteReady.value) return false;
+        const { error } = await _supabase.from(MODEL_SCHEDULE_TABLE).upsert(toRemoteModelSchedule(schedule), { onConflict: 'id' });
+        if (error) {
+            assemblyModelScheduleRemoteError.value = error.message || '機種時段共用資料庫寫入失敗';
+            console.error('Mylar 機種時段共用資料庫寫入失敗', error);
+            return false;
+        }
+        return true;
+    };
+    const deleteModelScheduleRemote = async id => {
+        if (!assemblyModelScheduleRemoteReady.value) return true;
+        const { error } = await _supabase.from(MODEL_SCHEDULE_TABLE).delete().eq('id', id).eq('line', 'ASSY');
+        if (error) {
+            toast('機種時段共用資料庫刪除失敗：' + error.message, 'error');
             return false;
         }
         return true;
@@ -341,7 +442,7 @@ SMT.assembly = function (ctx) {
 
     const emptyBucket = () => ({
         success: 0, ng: 0, ignored: 0, unclassified: 0, parsedLines: 0,
-        byType: {}, sourceByType: {}, hourlySuccess: {}, hourlyNg: {}, hourlyByType: {}
+        byType: {}, sourceByType: {}, hourlySuccess: {}, hourlyNg: {}, hourlyByType: {}, events: []
     });
     const increment = (map, key, amount = 1) => { if (key) map[key] = (map[key] || 0) + amount; };
 
@@ -375,9 +476,11 @@ SMT.assembly = function (ctx) {
             }
             if (result.type === 'SUCCESS') {
                 bucket.success++;
+                bucket.events.push({ time: parsed.time, type: 'SUCCESS' });
                 increment(bucket.hourlySuccess, hourKey(parsed.time));
             } else {
                 bucket.ng++;
+                bucket.events.push({ time: parsed.time, type: 'NG', category: result.category });
                 increment(bucket.byType, result.category);
                 const sourceMessage = normalizeMessage(parsed.message);
                 const sourceMap = bucket.sourceByType[result.category] || (bucket.sourceByType[result.category] = {});
@@ -393,7 +496,7 @@ SMT.assembly = function (ctx) {
 
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
     const aggregate = (batches, start = '', end = '') => {
-        const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {}, hourlyByType = {};
+        const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {}, hourlyByType = {}, byModel = {};
         const statusNotesByHour = {};
         Object.entries(assemblyStatusNotes.value).forEach(([key, note]) => {
             const separator = key.indexOf('::');
@@ -407,7 +510,7 @@ SMT.assembly = function (ctx) {
         let success = 0, ng = 0, ignored = 0, unclassified = 0, parsedLines = 0;
         (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, source]) => {
             if (!inRange(date, start, end)) return;
-            const day = byDate[date] || (byDate[date] = { date, success: 0, ng: 0, byType: {} });
+            const day = byDate[date] || (byDate[date] = { date, success: 0, ng: 0, byType: {}, byModel: {} });
             success += source.success || 0;
             ng += source.ng || 0;
             ignored += source.ignored || 0;
@@ -429,6 +532,28 @@ SMT.assembly = function (ctx) {
                 const categoryHours = hourlyByType[category] || (hourlyByType[category] = {});
                 Object.entries(hours || {}).forEach(([hour, qty]) => increment(categoryHours, hour, qty));
             });
+            const sourceTotal = (source.success || 0) + (source.ng || 0);
+            const detailedEvents = Array.isArray(source.events) && source.events.length === sourceTotal;
+            const modelEntry = model => byModel[model] || (byModel[model] = { success: 0, ng: 0, byType: {} });
+            if (detailedEvents) {
+                source.events.forEach(event => {
+                    const model = modelForLogTime(date, event.time);
+                    const summary = modelEntry(model);
+                    increment(day.byModel, model);
+                    if (event.type === 'SUCCESS') summary.success++;
+                    else if (event.type === 'NG') {
+                        summary.ng++;
+                        increment(summary.byType, event.category);
+                    }
+                });
+            } else if (sourceTotal > 0) {
+                // 舊批次沒有保存分鐘級 LOG 時間，保留資料並明確歸入未分機種。
+                const summary = modelEntry(NO_MODEL);
+                summary.success += source.success || 0;
+                summary.ng += source.ng || 0;
+                increment(day.byModel, NO_MODEL, sourceTotal);
+                Object.entries(source.byType || {}).forEach(([name, qty]) => increment(summary.byType, name, qty));
+            }
         }));
         const totalRecords = success + ng;
         const byTypeList = Object.entries(byType).map(([name, qty]) => ({
@@ -447,6 +572,19 @@ SMT.assembly = function (ctx) {
                 })
                 .sort((a, b) => a.hour.localeCompare(b.hour))
         })).sort((a, b) => b.qty - a.qty);
+        const byModelList = Object.entries(byModel).map(([name, summary]) => ({
+            name,
+            success: summary.success,
+            ng: summary.ng,
+            total: summary.success + summary.ng,
+            successRate: summary.success + summary.ng ? (summary.success / (summary.success + summary.ng) * 100).toFixed(2) : '100.00',
+            downtimeRate: (summary.success ? summary.ng / summary.success * 100 : 0).toFixed(2),
+            byType: Object.entries(summary.byType || {}).map(([type, qty]) => ({
+                name: type,
+                qty,
+                ratio: summary.ng ? (qty / summary.ng * 100).toFixed(1) : '0.0'
+            })).sort((a, b) => b.qty - a.qty)
+        })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'zh-Hant'));
         const daily = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({
             ...day,
             total: day.success + day.ng,
@@ -474,7 +612,7 @@ SMT.assembly = function (ctx) {
             totalInput: success, totalSuccess: success, totalDefects: ng, totalRecords,
             yieldRate: successRate.toFixed(2),
             downtimeRate: (success ? ng / success * 100 : 0).toFixed(2),
-            byType: byTypeList, daily, hourly, ignored, unclassified, parsedLines,
+            byType: byTypeList, byModel: byModelList, daily, hourly, ignored, unclassified, parsedLines,
             periodDays, totalDays: operationDays, topCause: byTypeList[0] || null
         };
     };
@@ -708,6 +846,70 @@ SMT.assembly = function (ctx) {
         if (currentLine.value !== 'ASSY') return;
         assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
     };
+    const refreshAssemblyModelResults = () => {
+        refreshAssemblyReport();
+        if (assemblyStatsResult.value) assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+        if (ctx.refreshDashboard && currentLine.value === 'ASSY') Promise.resolve(ctx.refreshDashboard()).catch(error => console.warn('Mylar 機種統計更新失敗', error));
+    };
+    const openAssemblyModelScheduleModal = () => {
+        assemblyModelScheduleError.value = '';
+        assemblyModelScheduleForm.value = {
+            startTime: '00:00',
+            endTime: '23:59',
+            model: assemblyModelOptions.value[0] || ''
+        };
+        assemblyModelScheduleModal.value = { show: true };
+    };
+    const closeAssemblyModelScheduleModal = () => {
+        assemblyModelScheduleModal.value = { show: false };
+        assemblyModelScheduleError.value = '';
+    };
+    const addAssemblyModelSchedule = async () => {
+        const form = assemblyModelScheduleForm.value;
+        const start = timeToMinutes(form.startTime);
+        const end = timeToMinutes(form.endTime, true);
+        const model = String(form.model || '').trim();
+        if (start === null || end === null || start >= end) {
+            assemblyModelScheduleError.value = '開始時間必須早於結束時間。';
+            return;
+        }
+        if (!model || !assemblyModelOptions.value.includes(model)) {
+            assemblyModelScheduleError.value = '請選擇共用機種資料庫中的機種。';
+            return;
+        }
+        const overlaps = assemblyModelSchedulesForDate.value.some(item => {
+            const itemStart = timeToMinutes(item.startTime);
+            const itemEnd = timeToMinutes(item.endTime, true);
+            return itemStart !== null && itemEnd !== null && start < itemEnd && itemStart < end;
+        });
+        if (overlaps) {
+            assemblyModelScheduleError.value = '此日期的時間區間與既有設定重疊，請調整後再新增。';
+            return;
+        }
+        const schedule = {
+            id: `ASSY_MODEL_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            date: assemblyUploadDate.value,
+            startTime: form.startTime,
+            endTime: form.endTime,
+            model
+        };
+        assemblyModelSchedules.value = [...assemblyModelSchedules.value, schedule].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+        persistModelSchedules();
+        assemblyModelScheduleForm.value = { startTime: form.endTime === '23:59' ? '00:00' : form.endTime, endTime: '23:59', model: assemblyModelOptions.value[0] || '' };
+        assemblyModelScheduleError.value = '';
+        const remoteSaved = await saveModelScheduleRemote(schedule);
+        refreshAssemblyModelResults();
+        toast(remoteSaved || !assemblyModelScheduleRemoteReady.value ? 'Mylar 機種時段已新增' : '機種時段已儲存本機，共用資料庫寫入失敗', remoteSaved || !assemblyModelScheduleRemoteReady.value ? 'success' : 'warning');
+    };
+    const deleteAssemblyModelSchedule = async id => {
+        const schedule = assemblyModelSchedules.value.find(item => item.id === id);
+        if (!schedule || !confirm(`確定刪除 ${schedule.date} ${schedule.startTime}–${schedule.endTime} 的機種設定？`)) return;
+        if (!(await deleteModelScheduleRemote(id))) return;
+        assemblyModelSchedules.value = assemblyModelSchedules.value.filter(item => item.id !== id);
+        persistModelSchedules();
+        refreshAssemblyModelResults();
+        toast('Mylar 機種時段已刪除', 'info');
+    };
     const getAssemblyReportForDate = (date) => aggregate(assemblyBatches.value, date, date);
     const getAssemblyUploadedDates = (limit = 14) => {
         const dates = new Set();
@@ -732,6 +934,8 @@ SMT.assembly = function (ctx) {
     const loadAssemblyData = async ({ background = false } = {}) => {
         const localState = compactAssemblyBatches(readStorage());
         const localBatches = localState.batches;
+        const localModelSchedules = readModelSchedules();
+        assemblyModelSchedules.value = localModelSchedules;
         if (localState.cleanups.length) persistStorage(localBatches);
         if (currentLine.value !== 'ASSY') {
             assemblyLoadRequestId++;
@@ -750,11 +954,13 @@ SMT.assembly = function (ctx) {
         refreshAssemblyReport();
         const localMappings = readMappingStorage();
         const remotePromise = (async () => {
-            const [{ data: remoteRows, error }, { data: remoteMappingRows, error: mappingError }] = await Promise.all([
+            const [{ data: remoteRows, error }, { data: remoteMappingRows, error: mappingError }, { data: remoteScheduleRows, error: scheduleError }] = await Promise.all([
                 _supabase.from(REMOTE_TABLE)
                     .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100),
                 _supabase.from(MAPPING_TABLE)
-                    .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500)
+                    .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500),
+                _supabase.from(MODEL_SCHEDULE_TABLE)
+                    .select('*').eq('line', 'ASSY').order('schedule_date', { ascending: true }).order('start_time', { ascending: true }).limit(1000)
             ]);
             if (requestId !== assemblyLoadRequestId || currentLine.value !== 'ASSY') return;
             if (error) {
@@ -812,6 +1018,33 @@ SMT.assembly = function (ctx) {
                 }
                 assemblyMappings.value = remoteMappings;
                 persistMappingStorage();
+            }
+            if (scheduleError) {
+                assemblyModelScheduleRemoteReady.value = false;
+                assemblyModelScheduleRemoteError.value = scheduleError.code === 'PGRST205'
+                    ? '尚未建立 Mylar 機種時段資料表'
+                    : (scheduleError.message || '機種時段資料庫讀取失敗');
+                assemblyModelSchedules.value = localModelSchedules;
+            } else {
+                assemblyModelScheduleRemoteReady.value = true;
+                assemblyModelScheduleRemoteError.value = '';
+                let remoteSchedules = (remoteScheduleRows || []).map(fromRemoteModelSchedule);
+                if (!hasModelScheduleMigrationFlag() && localModelSchedules.length && remoteSchedules.length === 0) {
+                    const { error: scheduleMigrationError } = await _supabase.from(MODEL_SCHEDULE_TABLE)
+                        .upsert(localModelSchedules.map(toRemoteModelSchedule), { onConflict: 'id' });
+                    if (!scheduleMigrationError) {
+                        remoteSchedules = localModelSchedules;
+                        setModelScheduleMigrationFlag();
+                    }
+                } else if (!hasModelScheduleMigrationFlag()) {
+                    setModelScheduleMigrationFlag();
+                }
+                const remoteScheduleIds = new Set(remoteSchedules.map(item => item.id));
+                const pendingLocalSchedules = localModelSchedules.filter(item => !remoteScheduleIds.has(item.id));
+                for (const pendingSchedule of pendingLocalSchedules) await saveModelScheduleRemote(pendingSchedule);
+                assemblyModelSchedules.value = [...remoteSchedules, ...pendingLocalSchedules]
+                    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+                persistModelSchedules();
             }
             refreshAssemblyAfterBackgroundLoad();
         })();
@@ -964,6 +1197,8 @@ SMT.assembly = function (ctx) {
         ];
         const daily = [['日期', '生產成功', 'NG 次數', '停機率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.downtimeRate + '%'])];
+        const models = [['機種', '產出成功', 'NG', '總數', '成功率', '停機率'],
+            ...(result.byModel || []).map(row => [row.name, row.success, row.ng, row.total, row.successRate + '%', row.downtimeRate + '%'])];
         const pareto = [['停機／不良現象', '次數', '佔 NG 比例'],
             ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '產出成功', '停機／不良', '良率'],
@@ -980,6 +1215,7 @@ SMT.assembly = function (ctx) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(yieldTrend), '良率趨勢');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(models), '機種統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pareto), 'Pareto分析');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
@@ -1109,6 +1345,7 @@ SMT.assembly = function (ctx) {
     };
 
     assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
+    assemblyModelSchedules.value = readModelSchedules();
     assemblyDefectNotes.value = readDefectNotes();
     assemblyHourlyNotes.value = readHourlyNotes();
     assemblyStatusNotes.value = readStatusNotes();
@@ -1143,6 +1380,8 @@ SMT.assembly = function (ctx) {
     return {
         assemblyUploadDate, assemblyUploadDateLabel, assemblyUploadDateRelative, assemblyBatchesForDate,
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
+        assemblyModelScheduleRemoteReady, assemblyModelScheduleRemoteError, assemblyModelSchedules, assemblyModelSchedulesForDate,
+        assemblyModelOptions, assemblyModelScheduleModal, assemblyModelScheduleForm, assemblyModelScheduleError,
         assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail, assemblyDailyDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectNotes, assemblyHourlyNotes, assemblyStatusNotes, assemblyStatusNoteHours, assemblyStatusNoteEditorOpen, assemblyStatusNoteHour, assemblyStatusNoteDraft, assemblyStatusNoteCurrent,
@@ -1150,6 +1389,7 @@ SMT.assembly = function (ctx) {
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
         calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, openAssemblyReportSourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
+        openAssemblyModelScheduleModal, closeAssemblyModelScheduleModal, addAssemblyModelSchedule, deleteAssemblyModelSchedule,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

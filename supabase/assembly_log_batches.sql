@@ -38,5 +38,22 @@ alter table public.assembly_log_mappings disable row level security;
 grant select, insert, update, delete on public.assembly_log_mappings to anon, authenticated;
 grant usage, select on sequence public.assembly_log_mappings_id_seq to anon, authenticated;
 
+-- Mylar 每日依 LOG 時間套用的機種時段設定；機種名稱來自非 SMT 共用機種資料庫。
+create table if not exists public.assembly_model_schedules (
+    id text primary key,
+    line text not null default 'ASSY',
+    schedule_date text not null,
+    start_time text not null,
+    end_time text not null,
+    model_name text not null,
+    created_at timestamptz not null default now()
+);
+
+create index if not exists assembly_model_schedules_line_date_idx
+    on public.assembly_model_schedules (line, schedule_date, start_time);
+
+alter table public.assembly_model_schedules disable row level security;
+grant select, insert, update, delete on public.assembly_model_schedules to anon, authenticated;
+
 -- 立即讓 Supabase API 重新載入新資料表結構。
 notify pgrst, 'reload schema';

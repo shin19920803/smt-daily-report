@@ -6,7 +6,15 @@ SMT.daf = function (ctx) {
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
-    const MODEL_MAPPING_STORAGE_KEY = 'koya_daf_model_mappings_v1';
+    // 非 SMT 站別共用機種對應；保留舊鍵讀取，避免既有使用者的對應遺失。
+    const MODEL_MAPPING_STORAGE_KEY = 'koya_non_smt_model_mappings_v1';
+    const LEGACY_MODEL_MAPPING_STORAGE_KEYS = [
+        'koya_daf_model_mappings_v1',
+        'koya_ft1_model_mappings_v1',
+        'koya_ft2_model_mappings_v1',
+        'koya_assembly_model_mappings_v1',
+        'koya_lighting_model_mappings_v1'
+    ];
     const LEGACY_COLUMNS = Object.freeze({ workOrder: 2, productCode: 4, dedupKey: 5, date: 6, defect: 8, status: 9, minColumns: 10 });
     const CURRENT_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
     const CURRENT_SOURCE_FORMAT = 'current-v2';
@@ -17,9 +25,7 @@ SMT.daf = function (ctx) {
     const recordColumns = record => record?.sourceFormat === CURRENT_SOURCE_FORMAT || currentLine.value === 'FT1' ? CURRENT_COLUMNS : LEGACY_COLUMNS;
     const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
     const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
-    const currentDafMappingStorageKey = () => ['ASSEMBLY', 'LIGHTING'].includes(currentDafLine())
-        ? `koya_${currentDafLine().toLowerCase()}_model_mappings_v1`
-        : MODEL_MAPPING_STORAGE_KEY;
+    const currentDafMappingStorageKey = () => MODEL_MAPPING_STORAGE_KEY;
     const currentDafLabel = () => currentLineMeta.value.label;
     const defaultDafDefect = () => currentLine.value === 'FT2' ? '偵測失效' : '未填寫不良原因';
 
@@ -71,12 +77,19 @@ SMT.daf = function (ctx) {
     const normalizeText = (value) => cleanText(value).toUpperCase();
     const normalizeModelName = value => normalizeText(value) || '未識別機種';
     const readModelMappings = () => {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(currentDafMappingStorageKey()) || '{}');
-            return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                ? Object.fromEntries(Object.entries(parsed).map(([code, model]) => [normalizeText(code), normalizeModelName(model)]))
-                : {};
-        } catch (e) { return {}; }
+        const merged = {};
+        [currentDafMappingStorageKey(), ...LEGACY_MODEL_MAPPING_STORAGE_KEYS].forEach(key => {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+                Object.entries(parsed).forEach(([code, model]) => {
+                    const normalizedCode = normalizeText(code);
+                    const normalizedModel = normalizeModelName(model);
+                    if (normalizedCode && normalizedModel !== '未識別機種' && !merged[normalizedCode]) merged[normalizedCode] = normalizedModel;
+                });
+            } catch (e) {}
+        });
+        return merged;
     };
     const persistModelMappings = () => {
         try {

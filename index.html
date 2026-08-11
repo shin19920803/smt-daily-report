@@ -944,6 +944,10 @@
                     </div>
                 </div>
                 <div v-else class="text-xs text-gray-500 bg-orange-50 border border-orange-100 rounded-lg p-3">此筆歷史資料尚未保存 LOG 原始細項；重新上傳檔案後即可查看。</div>
+                <div v-if="assemblySourceDetail.dailyTrend.length" class="mt-4 border border-red-100 rounded-xl p-4">
+                    <h4 class="font-black text-red-800 mb-2"><i class="fas fa-chart-line mr-2"></i>{{ assemblySourceDetail.category }} 每日發生次數趨勢</h4>
+                    <div id="assemblySourceTrendChart" style="width:100%;height:260px;"></div>
+                </div>
                 <div class="mt-4 border-t pt-4">
                     <h4 class="font-black text-blue-800 mb-2"><i class="fas fa-clock mr-2"></i>{{ assemblySourceDetail.hourlyTitle }}</h4>
                     <p v-if="assemblySourceDetail.hourlyHint" class="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 mb-2">{{ assemblySourceDetail.hourlyHint }}</p>
@@ -1003,7 +1007,7 @@
                             <div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div>
                         </div>
                         <div class="section-card p-4">
-                            <h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>停機／不良現象 Pareto 圖分析<span v-if="assemblyStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 LOG 原始細項</span></h3>
+                            <h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>停機／不良現象 Pareto 圖分析<span v-if="assemblyStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看每日趨勢與 LOG 原始細項</span></h3>
                             <div v-if="assemblyStatsResult.byType.length" id="assemblyStatsChart" style="width:100%;height:340px;"></div>
                             <div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="title">此區間沒有停機／不良</div></div>
                         </div>
@@ -1077,7 +1081,7 @@
                     <div v-if="dafStatsResult.unknownStatusCount" class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ dafStatsResult.unknownStatusCount }} 筆：{{ dafStatsResult.unknownStatusText }}；不列入投入、良品與不良統計。</div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>不良現象 Pareto 圖分析 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>不良現象 Pareto 圖分析 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看每日趨勢、機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
                     </div>
                     <div class="section-card p-4">
                         <h3 class="card-title"><i class="fas fa-bug text-red-600"></i>不良原因明細</h3>
@@ -1120,6 +1124,10 @@
                             <p class="text-xs text-gray-500 mt-1">此不良共 {{ dafDefectDetail.qty }} 件；以下比例以此不良為分母。</p>
                         </div>
                         <button @click="closeDafDefectDetail" class="btn-ghost text-xs">關閉</button>
+                    </div>
+                    <div v-if="dafDefectDetail.dailyTrend.length" class="border border-red-100 rounded-xl p-4 mb-5">
+                        <h4 class="font-black text-red-800 mb-2"><i class="fas fa-chart-line mr-2"></i>{{ dafDefectDetail.name }} 每日發生次數趨勢</h4>
+                        <div id="dafDefectTrendChart" style="width:100%;height:260px;"></div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div class="border border-purple-100 rounded-xl p-4"><h4 class="font-black text-purple-800 mb-2"><i class="fas fa-microchip mr-2"></i>機種分佈</h4><div v-for="item in dafDefectDetail.byModel" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate">{{ item.name }}</span><span class="font-mono text-purple-700">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div><div v-if="!dafDefectDetail.byModel.length" class="text-xs text-gray-400">無機種資料</div></div>
@@ -1235,7 +1243,7 @@
                     <div class="card-header">
                         <div class="card-header-icon" style="background:var(--danger-soft);color:var(--danger)"><i class="fas fa-sort-amount-down text-xs"></i></div>
                         不良現象 Pareto 圖分析
-                        <span v-if="hasDefects" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看 位置 × 機種 × 工單 分佈</span>
+                        <span v-if="hasDefects" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看每日趨勢與位置 × 機種 × 工單分佈</span>
                     </div>
                     <div v-if="hasDefects" id="paretoChart" style="width:100%;height:340px;"></div>
                     <div v-else class="empty-state" style="padding:48px 20px">
@@ -1401,6 +1409,10 @@
                     </nav>
 
                     <div class="drill-body">
+                        <section v-if="drillView.kind === 'type' && drillView.dailyTrend.length" class="drill-group mb-4">
+                            <h4 class="drill-group-title"><i class="fas fa-chart-line"></i>{{ drillView.key }} 每日發生次數趨勢</h4>
+                            <div id="smtParetoTrendChart" style="width:100%;height:260px;"></div>
+                        </section>
                         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             <section v-for="g in drillView.groups" :key="g.label" class="drill-group">
                                 <h4 class="drill-group-title"><i class="fas" :class="g.icon"></i>{{ g.label }}<span class="drill-group-count">{{ g.items.length }}</span></h4>
@@ -1777,12 +1789,12 @@
 <script src="js/core.js?v=202608111430"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
-<script src="js/assembly.js?v=202608111300"></script>
-<script src="js/daf.js?v=202608111430"></script>
+<script src="js/assembly.js?v=202608111630"></script>
+<script src="js/daf.js?v=202608111630"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608111430"></script>
-<script src="js/stats.js?v=202608071025"></script>
+<script src="js/stats.js?v=202608111630"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608111430"></script>
 <script src="js/app.js?v=202608111300"></script>

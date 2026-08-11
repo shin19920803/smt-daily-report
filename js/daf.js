@@ -55,7 +55,7 @@ SMT.daf = function (ctx) {
     const dafModelMappings = ref({});
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
-    const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] });
+    const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] });
     const dafModelDetail = ref({ show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] });
     const dafWorkOrderDetail = ref({ show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [] });
     const dafOutputDetail = ref({ show: false, title: '', subtitle: '', result: null });
@@ -846,7 +846,7 @@ SMT.daf = function (ctx) {
             try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 統計改用本機快取`, error); }
             if (!wasLoading) loading.value = false;
         }
-        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
         dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] };
         dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [] };
         dafStatsResult.value = buildDafStats();
@@ -856,11 +856,11 @@ SMT.daf = function (ctx) {
     const openDafDefectDetail = name => {
         const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
         dafDefectDetail.value = row
-            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [] }
-            : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [], dailyTrend: (dafStatsResult.value?.daily || []).map(day => ({ date: day.date, qty: day.byType?.[row.name] || 0 })) }
+            : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
     };
     const closeDafDefectDetail = () => {
-        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
+        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
     };
     const openDafModelStatsDetail = name => {
         const row = (dafStatsResult.value?.byModel || []).find(item => item.name === name);
@@ -1041,7 +1041,29 @@ SMT.daf = function (ctx) {
 
     let reasonChart = null;
     let trendChart = null;
+    let defectTrendChart = null;
     const disposeChart = (chart) => { if (chart) chart.dispose(); return null; };
+    const renderDafDefectTrendChart = () => {
+        Vue.nextTick(() => {
+            const el = document.getElementById('dafDefectTrendChart');
+            const trend = dafDefectDetail.value?.dailyTrend || [];
+            if (!el || !dafDefectDetail.value.show || !trend.length) { defectTrendChart = disposeChart(defectTrendChart); return; }
+            if (!defectTrendChart || defectTrendChart.getDom() !== el) { defectTrendChart = disposeChart(defectTrendChart); defectTrendChart = echarts.init(el); }
+            const labels = trend.map(row => row.date.slice(5));
+            const values = trend.map(row => row.qty);
+            defectTrendChart.setOption({
+                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params.map(item => `${item.marker}${item.seriesName}: <b>${Number(item.value || 0).toLocaleString()}</b>`).join('<br/>')}` },
+                legend: { data: ['每日發生次數', '趨勢線'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                grid: { top: 58, right: 20, bottom: 44, left: 48 },
+                xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
+                yAxis: { type: 'value', name: '次數', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                series: [
+                    { name: '每日發生次數', type: 'bar', data: values, barMaxWidth: 24, itemStyle: { color: '#fca5a5', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 9 } },
+                    { name: '趨勢線', type: 'line', data: values, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#dc2626', width: 2.5 }, itemStyle: { color: '#dc2626' } }
+                ]
+            });
+        });
+    };
     const renderDafCharts = () => {
         Vue.nextTick(() => {
             const result = dafStatsResult.value;
@@ -1074,6 +1096,7 @@ SMT.daf = function (ctx) {
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => { if (!applyingDafQuick) dafQuickMode.value = null; });
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });
+    watch(dafDefectDetail, renderDafDefectTrendChart);
     watch(currentTab, tab => {
         if (!isDafLikeLine()) return;
         if (tab === 'stats' && !dafStatsResult.value) calculateDafStats(false);
@@ -1091,7 +1114,7 @@ SMT.daf = function (ctx) {
             if (currentTab.value === 'stats') calculateDafStats(false);
         }
     });
-    window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); });
+    window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
         dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary,

@@ -33,7 +33,7 @@ SMT.assembly = function (ctx) {
     const assemblyStatusNoteDraft = ref('');
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
-    const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '' });
+    const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] });
     const assemblyDailyDetail = ref({ show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] });
     const assemblyQuickMode = ref(null);
     const assemblyQuickOffset = ref(0);
@@ -875,7 +875,7 @@ SMT.assembly = function (ctx) {
         if (assemblyStatsFilter.value.start && assemblyStatsFilter.value.end && assemblyStatsFilter.value.start > assemblyStatsFilter.value.end) {
             return toast('開始日期不能晚於結束日期', 'warning');
         }
-        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '' };
+        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] };
         assemblyDailyDetail.value = { show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] };
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
@@ -896,6 +896,7 @@ SMT.assembly = function (ctx) {
             show: true,
             category,
             items: row?.sourceItems || [],
+            dailyTrend: (result?.daily || []).map(day => ({ date: day.date, qty: day.byType?.[category] || 0 })),
             hourly: (hasCategoryHourly ? categoryHourly : fallbackHourly).map(item => {
                 const note = item.note || assemblyHourlyNotes.value[hourlyNoteKey(category, item.hour)] || '';
                 return { ...item, note };
@@ -909,7 +910,7 @@ SMT.assembly = function (ctx) {
     };
     const openAssemblyReportSourceDetail = category => openAssemblySourceDetail(category, assemblyReportResult.value);
     const closeAssemblySourceDetail = () => {
-        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '' };
+        assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] };
     };
     const openAssemblyDailyDetail = date => {
         const result = aggregate(assemblyBatches.value, date, date);
@@ -1077,6 +1078,36 @@ SMT.assembly = function (ctx) {
         });
     };
 
+    let sourceTrendChart = null;
+    const renderAssemblySourceTrendChart = () => {
+        Vue.nextTick(() => {
+            const el = document.getElementById('assemblySourceTrendChart');
+            const trend = assemblySourceDetail.value?.dailyTrend || [];
+            if (!el || !assemblySourceDetail.value.show || !trend.length) {
+                if (sourceTrendChart) sourceTrendChart.dispose();
+                sourceTrendChart = null;
+                return;
+            }
+            if (!sourceTrendChart || sourceTrendChart.getDom() !== el) {
+                if (sourceTrendChart) sourceTrendChart.dispose();
+                sourceTrendChart = echarts.init(el);
+            }
+            const labels = trend.map(row => row.date.slice(5));
+            const values = trend.map(row => row.qty);
+            sourceTrendChart.setOption({
+                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params.map(item => `${item.marker}${item.seriesName}: <b>${Number(item.value || 0).toLocaleString()}</b>`).join('<br/>')}` },
+                legend: { data: ['每日發生次數', '趨勢線'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                grid: { top: 58, right: 20, bottom: 44, left: 48 },
+                xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
+                yAxis: { type: 'value', name: '次數', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                series: [
+                    { name: '每日發生次數', type: 'bar', data: values, barMaxWidth: 24, itemStyle: { color: '#fca5a5', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 9 } },
+                    { name: '趨勢線', type: 'line', data: values, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#dc2626', width: 2.5 }, itemStyle: { color: '#dc2626' } }
+                ]
+            });
+        });
+    };
+
     assemblyBatches.value = compactAssemblyBatches(readStorage()).batches;
     assemblyDefectNotes.value = readDefectNotes();
     assemblyHourlyNotes.value = readHourlyNotes();
@@ -1091,6 +1122,7 @@ SMT.assembly = function (ctx) {
     });
     watch(assemblyReportResult, renderAssemblyReportChart);
     watch(assemblyStatsResult, renderAssemblyStatsCharts);
+    watch(assemblySourceDetail, renderAssemblySourceTrendChart);
     watch(currentTab, tab => {
         if (tab === 'report' && currentLine.value === 'ASSY') renderAssemblyReportChart();
         if (tab === 'stats' && currentLine.value === 'ASSY') renderAssemblyStatsCharts();
@@ -1105,6 +1137,7 @@ SMT.assembly = function (ctx) {
         if (reportChart) reportChart.resize();
         if (statsChart) statsChart.resize();
         if (statsDailyChart) statsDailyChart.resize();
+        if (sourceTrendChart) sourceTrendChart.resize();
     });
 
     return {

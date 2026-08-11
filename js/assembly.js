@@ -864,6 +864,12 @@ SMT.assembly = function (ctx) {
         assemblyModelScheduleModal.value = { show: false };
         assemblyModelScheduleError.value = '';
     };
+    const formatAssemblyModelScheduleTime = field => {
+        const digits = String(assemblyModelScheduleForm.value[field] || '').replace(/\D/g, '').slice(0, 4);
+        assemblyModelScheduleForm.value[field] = digits.length >= 3
+            ? `${digits.slice(0, 2)}:${digits.slice(2)}`
+            : digits;
+    };
     const addAssemblyModelSchedule = async () => {
         const form = assemblyModelScheduleForm.value;
         const start = timeToMinutes(form.startTime);
@@ -1393,7 +1399,7 @@ SMT.assembly = function (ctx) {
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
         calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, openAssemblyReportSourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
-        openAssemblyModelScheduleModal, closeAssemblyModelScheduleModal, addAssemblyModelSchedule, deleteAssemblyModelSchedule,
+        openAssemblyModelScheduleModal, closeAssemblyModelScheduleModal, formatAssemblyModelScheduleTime, addAssemblyModelSchedule, deleteAssemblyModelSchedule,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts
     };

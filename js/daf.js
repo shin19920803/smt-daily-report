@@ -11,13 +11,15 @@ SMT.daf = function (ctx) {
     const CURRENT_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
-    const isDafLikeLine = () => ['DAF', 'FT1', 'FT2', 'ASSEMBLY'].includes(currentLine.value);
+    const isDafLikeLine = () => ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value);
     const currentDafLine = () => isDafLikeLine() ? currentLine.value : 'DAF';
     const currentDafColumns = () => CURRENT_COLUMNS;
     const recordColumns = record => record?.sourceFormat === CURRENT_SOURCE_FORMAT || currentLine.value === 'FT1' ? CURRENT_COLUMNS : LEGACY_COLUMNS;
     const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
     const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
-    const currentDafMappingStorageKey = () => currentDafLine() === 'ASSEMBLY' ? 'koya_assembly_model_mappings_v1' : MODEL_MAPPING_STORAGE_KEY;
+    const currentDafMappingStorageKey = () => ['ASSEMBLY', 'LIGHTING'].includes(currentDafLine())
+        ? `koya_${currentDafLine().toLowerCase()}_model_mappings_v1`
+        : MODEL_MAPPING_STORAGE_KEY;
     const currentDafLabel = () => currentLineMeta.value.label;
     const defaultDafDefect = () => currentLine.value === 'FT2' ? '偵測失效' : '未填寫不良原因';
 
@@ -1078,7 +1080,7 @@ SMT.daf = function (ctx) {
         else if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
-        if (['DAF', 'FT1', 'FT2', 'ASSEMBLY'].includes(line)) {
+        if (['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(line)) {
             dafModelMappings.value = readModelMappings();
             dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
             dafQuickMode.value = null;

@@ -7,7 +7,8 @@ SMT.LINES = [
     { id: 'DAF',  label: 'DAF',      icon: 'fa-layer-group', canImport: false },
     { id: 'FT1',  label: 'FT1',      icon: 'fa-vial-circle-check', canImport: false },
     { id: 'ASSY', label: 'Mylar',    icon: 'fa-screwdriver-wrench', canImport: false },
-    { id: 'ASSEMBLY', label: '組裝', icon: 'fa-gears',       canImport: false },
+    { id: 'ASSEMBLY', label: '灰度機', icon: 'fa-gears',       canImport: false },
+    { id: 'LIGHTING', label: '點亮測試', icon: 'fa-lightbulb', canImport: false },
     { id: 'FT2',  label: 'FT2',      icon: 'fa-vial',         canImport: false }
 ];
 SMT.LINE_KEY = 'koya_current_line';
@@ -25,12 +26,12 @@ SMT.core = function (ctx) {
         const validLine = (id) => SMT.LINES.some(l => l.id === id) ? id : 'SMT';
         const currentLine = ref(validLine((() => { try { return localStorage.getItem(SMT.LINE_KEY); } catch(e) { return null; } })()));
         const currentLineMeta = computed(() => SMT.LINES.find(l => l.id === currentLine.value) || SMT.LINES[0]);
-        const switchableDafLines = ['DAF', 'FT1', 'FT2', 'ASSEMBLY'];
-        const hideLineTools = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY'].includes(currentLine.value));
-        const hideOrders = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY'].includes(currentLine.value));
+        const switchableDafLines = ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'];
+        const hideLineTools = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value));
+        const hideOrders = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value));
         const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
         const hideDailyReport = computed(() => currentLine.value === 'SMT');
-        const hideSettings = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY'].includes(currentLine.value));
+        const hideSettings = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 

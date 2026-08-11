@@ -11,7 +11,8 @@ SMT.settings = function (ctx) {
         const hiddenSettingKeysByLine = {
             ASSY: new Set(['defect_locations', 'machines', 'ooc_causes']),
             DAF: new Set(['defect_locations', 'ooc_causes']),
-            ASSEMBLY: new Set(['defect_locations', 'ooc_causes'])
+            ASSEMBLY: new Set(['defect_locations', 'ooc_causes']),
+            LIGHTING: new Set(['defect_locations', 'ooc_causes'])
         };
         const visibleSettingConfig = computed(() => {
             const hiddenKeys = hiddenSettingKeysByLine[currentLine.value];

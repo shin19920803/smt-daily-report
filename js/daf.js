@@ -835,8 +835,15 @@ SMT.daf = function (ctx) {
         dafQuickOffset.value += delta;
         applyDafQuick();
     };
-    const calculateDafStats = (showToast = true) => {
+    const calculateDafStats = async (showToast = true) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
+        const shouldWaitForRemote = !!dafRemoteLoadPromise && !dafRemoteReady.value;
+        const wasLoading = loading.value;
+        if (shouldWaitForRemote && !wasLoading) loading.value = true;
+        if (shouldWaitForRemote) {
+            try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 統計改用本機快取`, error); }
+            if (!wasLoading) loading.value = false;
+        }
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [] };
         dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] };
         dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [] };

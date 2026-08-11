@@ -869,7 +869,11 @@ SMT.assembly = function (ctx) {
         const start = timeToMinutes(form.startTime);
         const end = timeToMinutes(form.endTime, true);
         const model = String(form.model || '').trim();
-        if (start === null || end === null || start >= end) {
+        if (!/^\d{2}:\d{2}$/.test(String(form.startTime || '')) || !/^\d{2}:\d{2}$/.test(String(form.endTime || '')) || start === null || end === null) {
+            assemblyModelScheduleError.value = '時間請使用 24 小時格式 HH:mm，例如 08:30。';
+            return;
+        }
+        if (start >= end) {
             assemblyModelScheduleError.value = '開始時間必須早於結束時間。';
             return;
         }

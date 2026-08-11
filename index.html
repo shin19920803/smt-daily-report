@@ -401,8 +401,8 @@
                             <button @click="closeAssemblyModelScheduleModal" class="btn-ghost text-xs whitespace-nowrap">關閉</button>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                            <label><span class="block text-xs font-bold text-gray-500 mb-1">開始時間</span><input type="time" step="60" v-model="assemblyModelScheduleForm.startTime" class="w-full border border-gray-200 p-2 rounded-lg"></label>
-                            <label><span class="block text-xs font-bold text-gray-500 mb-1">結束時間</span><input type="time" step="60" v-model="assemblyModelScheduleForm.endTime" class="w-full border border-gray-200 p-2 rounded-lg"></label>
+                            <label><span class="block text-xs font-bold text-gray-500 mb-1">開始時間（24 小時）</span><input type="text" inputmode="numeric" maxlength="5" pattern="(?:[01]\d|2[0-3]):[0-5]\d" placeholder="00:00" v-model="assemblyModelScheduleForm.startTime" class="w-full border border-gray-200 p-2 rounded-lg font-mono" aria-label="開始時間（24 小時）"></label>
+                            <label><span class="block text-xs font-bold text-gray-500 mb-1">結束時間（24 小時）</span><input type="text" inputmode="numeric" maxlength="5" pattern="(?:[01]\d|2[0-3]):[0-5]\d" placeholder="23:59" v-model="assemblyModelScheduleForm.endTime" class="w-full border border-gray-200 p-2 rounded-lg font-mono" aria-label="結束時間（24 小時）"></label>
                             <label class="md:col-span-2"><span class="block text-xs font-bold text-gray-500 mb-1">機種（DAF 共用資料庫）</span><select v-model="assemblyModelScheduleForm.model" class="w-full border border-gray-200 p-2 rounded-lg bg-white"><option value="" disabled>-- 選擇機種 --</option><option v-for="model in assemblyModelOptions" :key="model" :value="model">{{ model }}</option></select></label>
                             <div class="md:col-span-4 flex justify-end"><button @click="addAssemblyModelSchedule" class="btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增時段</button></div>
                         </div>
@@ -1830,7 +1830,7 @@
 <script src="js/core.js?v=202608111430"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
-<script src="js/assembly.js?v=202608112200"></script>
+<script src="js/assembly.js?v=202608112230"></script>
 <script src="js/daf.js?v=202608112200"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>

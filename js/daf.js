@@ -99,6 +99,7 @@ SMT.daf = function (ctx) {
     const dafStatsFilter = ref({ start: '', end: '', model: 'all', workOrder: 'all' });
     const dafStatsResult = ref(null);
     const dafRemoteReady = ref(false);
+    const dafRemoteChecking = ref(false);
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
     const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, failed: [] });
@@ -648,6 +649,10 @@ SMT.daf = function (ctx) {
     let dafLoadRequestId = 0;
     let dafRemoteLoadPromise = null;
     let dafRemoteLoadLine = '';
+    const probeDafRemote = async lines => {
+        const results = await Promise.all(lines.map(line => _supabase.from(REMOTE_TABLE).select('id').eq('line', line).limit(1)));
+        return results.find(result => result.error)?.error || null;
+    };
     const refreshDafAfterBackgroundLoad = line => {
         if (currentLine.value !== line) return;
         if (dafStatsResult.value) calculateDafStats(false);
@@ -671,17 +676,35 @@ SMT.daf = function (ctx) {
         dafLastUpload.value = localBatches[0] || null;
         if (!isDafLikeLine()) return;
         dafRemoteReady.value = false;
+        dafRemoteChecking.value = true;
         dafRemoteError.value = '';
         dafRemoteLoadLine = line;
         const remotePromise = (async () => {
+            const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [line];
+            const probeError = await probeDafRemote(processLines);
+            if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
+            if (probeError) {
+                dafRemoteReady.value = false;
+                dafRemoteChecking.value = false;
+                dafRemoteError.value = probeError.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (probeError.message || 'DAF 共用資料庫連線失敗');
+                dafBatches.value = deduplicateDafBatches(readStorage()).batches;
+                learnModelMappings(dafBatches.value);
+                dafLastUpload.value = dafBatches.value[0] || null;
+                return;
+            }
+            // 先完成輕量連線確認；完整原始 LOG 在背景載入，避免 Windows 首次開啟時誤顯示本機保存。
+            dafRemoteReady.value = true;
+            dafRemoteChecking.value = false;
             const remoteResults = await Promise.all((isUnifiedTestLine() ? TEST_PROCESS_IDS : [line]).map(processLine => loadDafRemoteRows(processLine)));
             const error = remoteResults.find(result => result.error)?.error || null;
             const remoteRows = remoteResults.flatMap(result => result.data || []);
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
             if (error) {
-                dafRemoteReady.value = false;
-                dafRemoteError.value = error.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (error.message || 'DAF 共用資料庫讀取失敗');
-                dafBatches.value = deduplicateDafBatches(readStorage()).batches;
+                dafRemoteError.value = `資料庫已連線，但部分 LOG 載入失敗：${error.message || '資料讀取失敗'}`;
+                dafBatches.value = deduplicateDafBatches([
+                    ...remoteRows.map(fromRemote),
+                    ...deduplicateDafBatches(readStorage()).batches
+                ]).batches;
             } else {
                 dafRemoteReady.value = true;
                 dafRemoteError.value = '';
@@ -1228,7 +1251,7 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary,
+        dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,

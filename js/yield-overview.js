@@ -2,18 +2,79 @@ window.SMT = window.SMT || {};
 
 // 跨製程良率總覽：只讀取各製程既有資料，不改動原資料表。
 SMT.yieldOverview = function (ctx) {
-    const { currentTab, switchLine, toast } = ctx;
+    const { currentTab, toast } = ctx;
     const processLines = SMT.LINES.map(line => ({ id: line.id, label: line.label }));
     const dafLines = ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'];
     const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const dateDaysAgo = days => { const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - days); return fmtDate(date); };
     const overviewFilter = ref({ start: dateDaysAgo(6), end: fmtDate(new Date()) });
+    const quickMode = ref(null);
+    const quickOffset = ref(0);
     const overviewResult = ref(null);
     const overviewLoading = ref(false);
     let requestId = 0;
 
     const emptyProcess = line => ({ id: line.id, label: line.label, input: 0, output: 0, defects: 0, yieldRate: '0.00', defectRate: '0.00', days: 0 });
     const inRange = (date, start, end) => (!date || (!start || date >= start) && (!end || date <= end));
+    const quickRange = (mode, offset) => {
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+        if (mode === 'day') {
+            const date = new Date(now); date.setDate(date.getDate() + offset);
+            return { start: date, end: date };
+        }
+        if (mode === 'week') {
+            const start = new Date(now);
+            start.setDate(start.getDate() - start.getDay() + offset * 7);
+            const end = new Date(start); end.setDate(end.getDate() + 6);
+            return { start, end };
+        }
+        const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+        return { start, end };
+    };
+    const WEEKDAY_TW = ['日', '一', '二', '三', '四', '五', '六'];
+    const quickLabel = computed(() => {
+        if (!quickMode.value) return '';
+        const { start, end } = quickRange(quickMode.value, quickOffset.value);
+        if (quickMode.value === 'day') return `${fmtDate(start)} (週${WEEKDAY_TW[start.getDay()]})`;
+        if (quickMode.value === 'week') {
+            const sameYear = start.getFullYear() === end.getFullYear();
+            return `${fmtDate(start)} ~ ${sameYear ? fmtDate(end).slice(5) : fmtDate(end)}`;
+        }
+        return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月`;
+    });
+    const quickRelative = computed(() => {
+        if (!quickMode.value) return '';
+        const offset = quickOffset.value;
+        const unit = { day: '日', week: '週', month: '月' }[quickMode.value];
+        if (offset === 0) return `本${unit}`;
+        if (offset === -1) return `上一${unit}`;
+        if (offset === 1) return `下一${unit}`;
+        return offset < 0 ? `${Math.abs(offset)} ${unit}前` : `${offset} ${unit}後`;
+    });
+    let applyingQuick = false;
+    const applyQuick = async () => {
+        const { start, end } = quickRange(quickMode.value, quickOffset.value);
+        applyingQuick = true;
+        overviewFilter.value.start = fmtDate(start);
+        overviewFilter.value.end = fmtDate(end);
+        await Vue.nextTick();
+        applyingQuick = false;
+        await loadOverview();
+    };
+    const setQuickMode = mode => {
+        quickMode.value = mode;
+        quickOffset.value = { day: 0, week: -1, month: -1 }[mode];
+        applyQuick();
+    };
+    const shiftQuick = delta => {
+        if (!quickMode.value) return;
+        quickOffset.value += delta;
+        applyQuick();
+    };
+    watch(() => [overviewFilter.value.start, overviewFilter.value.end], () => {
+        if (!applyingQuick) quickMode.value = null;
+    });
     const fetchRows = async (table, columns, configure = query => query) => {
         const rows = [];
         const pageSize = 1000;
@@ -61,19 +122,48 @@ SMT.yieldOverview = function (ctx) {
 
     const loadDafLike = async () => {
         const result = Object.fromEntries(dafLines.map(id => [id, {}]));
-        const data = await fetchRows('daf_log_batches', 'line, records', query => query.in('line', dafLines).order('uploaded_at', { ascending: false }));
-        (data || []).forEach(batch => (batch.records || []).forEach(record => {
-            if (!inRange(record.date, overviewFilter.value.start, overviewFilter.value.end) || !record.inputIncluded) return;
+        const localBatches = [];
+        dafLines.forEach(line => {
+            try {
+                const key = line === 'DAF' ? 'koya_daf_log_batches_v1' : `koya_${line.toLowerCase()}_log_batches_v1`;
+                const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+                if (Array.isArray(parsed)) localBatches.push(...parsed.map(batch => ({ ...batch, line })));
+            } catch (error) { console.warn(`${line} 本機資料讀取失敗`, error); }
+        });
+        let remoteBatches = [];
+        try {
+            remoteBatches = await fetchRows('daf_log_batches', 'id, line, uploaded_at, records', query => query.in('line', dafLines).order('uploaded_at', { ascending: false }));
+        } catch (error) { console.warn('DAF 類製程共用資料讀取失敗，改用本機資料', error); }
+        const batchesById = new Map(localBatches.map(batch => [batch.id, batch]));
+        (remoteBatches || []).forEach(batch => batchesById.set(batch.id, batch));
+        const seenRecords = new Set();
+        [...batchesById.values()].forEach(batch => (batch.records || []).forEach((record, index) => {
+            const status = String(record.status || '').trim().toUpperCase();
+            const inputIncluded = record.inputIncluded === undefined ? ['GOOD', 'FAIL'].includes(status) : record.inputIncluded;
+            if (!inRange(record.date, overviewFilter.value.start, overviewFilter.value.end) || !inputIncluded || !['GOOD', 'FAIL'].includes(status)) return;
+            const recordKey = record.dedupKey || `${batch.line}|${record.date}|${record.workOrder || ''}|${record.productCode || ''}|${record.dedupTime || index}`;
+            if (seenRecords.has(recordKey)) return;
+            seenRecords.add(recordKey);
             const dayMap = result[batch.line] || (result[batch.line] = {});
-            add(dayMap, record.date, 1, record.status === 'GOOD' ? 1 : 0, record.status === 'FAIL' ? 1 : 0);
+            add(dayMap, record.date, 1, status === 'GOOD' ? 1 : 0, status === 'FAIL' ? 1 : 0);
         }));
         return Object.fromEntries(dafLines.map(id => [id, finalize(processLines.find(line => line.id === id), result[id])]));
     };
 
     const loadAssembly = async () => {
-        const data = await fetchRows('assembly_log_batches', 'line, buckets', query => query.eq('line', 'ASSY').order('uploaded_at', { ascending: false }));
+        const localBatches = [];
+        try {
+            const parsed = JSON.parse(localStorage.getItem('koya_assy_log_batches_v1') || '[]');
+            if (Array.isArray(parsed)) localBatches.push(...parsed);
+        } catch (error) { console.warn('Mylar 本機資料讀取失敗', error); }
+        let remoteBatches = [];
+        try {
+            remoteBatches = await fetchRows('assembly_log_batches', 'id, line, uploaded_at, buckets', query => query.eq('line', 'ASSY').order('uploaded_at', { ascending: false }));
+        } catch (error) { console.warn('Mylar 共用資料讀取失敗，改用本機資料', error); }
+        const batchesById = new Map(localBatches.map(batch => [batch.id, batch]));
+        (remoteBatches || []).forEach(batch => batchesById.set(batch.id, batch));
         const dayMap = {};
-        (data || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, bucket]) => {
+        [...batchesById.values()].forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, bucket]) => {
             if (!inRange(date, overviewFilter.value.start, overviewFilter.value.end)) return;
             const output = Number(bucket.success) || 0;
             const defects = Number(bucket.ng) || 0;
@@ -124,13 +214,11 @@ SMT.yieldOverview = function (ctx) {
         overviewFilter.value = { start: dateDaysAgo(6), end: fmtDate(new Date()) };
         loadOverview();
     };
-    const openProcessOverview = line => { if (line?.id) Promise.resolve(switchLine(line.id)).then(() => { currentTab.value = 'dashboard'; }); };
-
     watch(currentTab, tab => { if (tab === 'yieldOverview' && !overviewResult.value) loadOverview(); });
     if (currentTab.value === 'yieldOverview') loadOverview();
 
     return {
-        processLines, overviewFilter, overviewResult, overviewLoading,
-        loadOverview, resetOverviewRange, openProcessOverview
+        processLines, overviewFilter, quickMode, quickLabel, quickRelative, overviewResult, overviewLoading,
+        loadOverview, resetOverviewRange, setQuickMode, shiftQuick
     };
 };

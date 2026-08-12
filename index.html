@@ -37,6 +37,9 @@
                 <h1 class="text-lg font-black text-white tracking-wide">科雅光電</h1>
             </div>
             <p class="text-[10px] text-slate-500 font-mono text-center mb-3">生產管理系統</p>
+            <button @click="currentTab = 'yieldOverview'" :class="currentTab === 'yieldOverview' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'" class="w-full rounded-lg px-3 py-2.5 mb-3 text-left text-xs font-bold transition flex items-center gap-2">
+                <i class="fas fa-gauge-high w-5 text-center"></i><span>科雅生產良率總覽</span>
+            </button>
             <!-- 產線切換：各線資料完全獨立 -->
             <div class="line-switch" role="group" aria-label="產線切換">
                 <button v-for="l in visibleLines" :key="l.id" @click="switchLine(l.id)"
@@ -47,9 +50,6 @@
             </div>
         </div>
         <nav class="flex-1 py-3 overflow-y-auto px-3 space-y-0.5">
-            <a @click="currentTab = 'yieldOverview'" :class="{'active': currentTab === 'yieldOverview'}" class="sidebar-link rounded-lg">
-                <i class="fas fa-gauge-high w-5 text-center mr-3 text-sm"></i> <span class="text-sm">科雅生產良率總覽</span>
-            </a>
             <a @click="currentTab = 'dashboard'" :class="{'active': currentTab === 'dashboard'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-th-large w-5 text-center mr-3 text-sm"></i> <span class="text-sm">總覽儀表板</span>
             </a>
@@ -101,8 +101,22 @@
                 <button @click="loadOverview(true)" class="btn-ghost text-sm" :disabled="overviewLoading"><i class="fas fa-sync-alt" :class="overviewLoading ? 'fa-spin' : ''"></i> 更新</button>
             </div>
 
-            <div class="section-card p-4">
-                <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
+                <div class="section-card p-4">
+                    <div class="quick-bar mb-4">
+                        <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
+                        <div class="quick-seg" role="group" aria-label="良率總覽快捷統計區間">
+                            <button @click="setQuickMode('day')" :class="{ 'is-active': quickMode === 'day' }" :aria-pressed="quickMode === 'day'">日</button>
+                            <button @click="setQuickMode('week')" :class="{ 'is-active': quickMode === 'week' }" :aria-pressed="quickMode === 'week'">週</button>
+                            <button @click="setQuickMode('month')" :class="{ 'is-active': quickMode === 'month' }" :aria-pressed="quickMode === 'month'">月</button>
+                        </div>
+                        <div v-if="quickMode" class="quick-nav">
+                            <button @click="shiftQuick(-1)" class="quick-arrow" :title="'上一' + (quickMode === 'day' ? '日' : quickMode === 'week' ? '週' : '月')" aria-label="上一期"><i class="fas fa-chevron-left"></i></button>
+                            <div class="quick-range"><span class="quick-range-text font-mono">{{ quickLabel }}</span><span class="quick-range-rel">{{ quickRelative }}</span></div>
+                            <button @click="shiftQuick(1)" class="quick-arrow" :title="'下一' + (quickMode === 'day' ? '日' : quickMode === 'week' ? '週' : '月')" aria-label="下一期"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                        <span v-else class="quick-hint">選擇後可用 <i class="fas fa-chevron-left mx-0.5"></i><i class="fas fa-chevron-right mx-0.5"></i> 快速切換期間</span>
+                    </div>
+                    <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
                     <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="overviewFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                     <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="overviewFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                     <div class="flex gap-2"><button @click="loadOverview(true)" class="btn-primary text-sm"><i class="fas fa-magnifying-glass mr-1"></i>查詢</button><button @click="resetOverviewRange" class="btn-ghost text-sm">近 7 日</button></div>
@@ -119,10 +133,10 @@
                 </div>
 
                 <div class="section-card p-4">
-                    <div class="flex items-center justify-between mb-3"><h3 class="card-title mb-0"><i class="fas fa-industry text-emerald-600"></i>各製程產出與良率</h3><span class="text-xs text-gray-400">點擊列可前往該製程頁面</span></div>
+                    <div class="flex items-center justify-between mb-3"><h3 class="card-title mb-0"><i class="fas fa-industry text-emerald-600"></i>各製程產出與良率</h3><span class="text-xs text-gray-400">各站統計資料</span></div>
                     <div class="table-wrap"><table class="data-table min-w-[720px]"><thead><tr><th>製程</th><th class="text-right">投入／產能</th><th class="text-right">良品／產出</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th><th>狀態</th></tr></thead><tbody>
-                        <tr v-for="row in overviewResult.process" :key="row.id" @click="openProcessOverview(row)" class="cursor-pointer hover:bg-emerald-50">
-                            <td class="font-bold text-gray-800"><i class="fas fa-chevron-right text-[10px] text-gray-300 mr-2"></i>{{ row.label }}</td>
+                        <tr v-for="row in overviewResult.process" :key="row.id">
+                            <td class="font-bold text-gray-800">{{ row.label }}</td>
                             <td class="text-right font-mono">{{ row.input.toLocaleString() }}</td>
                             <td class="text-right font-mono text-green-700 font-bold">{{ row.output.toLocaleString() }}</td>
                             <td class="text-right font-mono text-red-600">{{ row.defects.toLocaleString() }}</td>
@@ -1887,18 +1901,18 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608111430"></script>
+<script src="js/core.js?v=202608121600"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
-<script src="js/assembly.js?v=202608112300"></script>
-<script src="js/daf.js?v=202608112200"></script>
+<script src="js/assembly.js?v=202608121600"></script>
+<script src="js/daf.js?v=202608121600"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608111430"></script>
-<script src="js/stats.js?v=202608111630"></script>
-<script src="js/yield-overview.js?v=202608121000"></script>
+<script src="js/stats.js?v=202608121600"></script>
+<script src="js/yield-overview.js?v=202608121600"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608111430"></script>
-<script src="js/app.js?v=202608111300"></script>
+<script src="js/app.js?v=202608121600"></script>
 </body>
 </html>

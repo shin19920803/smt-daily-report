@@ -127,21 +127,22 @@
                 </div>
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 Mylar LOG</div><div class="hint">前往「每日報工」上傳 LOG 檔案</div></div></div>
             </div>
-            <div v-else-if="['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="space-y-6 animate-fade-in">
+            <div v-else-if="currentLine === 'TEST'" class="space-y-6 animate-fade-in">
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <div>
-                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-purple-600 rounded inline-block"></span>{{ currentLineMeta.label }} 總覽儀表板</h2>
-                        <p class="text-xs text-gray-400 mt-1">依 {{ currentLineMeta.label }} LOG 顯示投入、產出、不良與工單狀況</p>
+                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-purple-600 rounded inline-block"></span>測試站總覽儀表板</h2>
+                        <p class="text-xs text-gray-400 mt-1">依所選測試製程顯示投入、產出、不良與工單狀況</p>
                     </div>
                     <div class="flex items-center gap-2">
+                        <label class="flex items-center gap-2 bg-white border border-purple-200 rounded-lg px-3 py-1.5 text-xs font-bold text-purple-700"><i class="fas fa-filter"></i><select v-model="dafProcess" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" aria-label="選擇測試製程"><option v-for="process in dafProcessOptions" :key="process.id" :value="process.id">{{ process.label }}</option></select></label>
                         <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left text-xs"></i></button>
                         <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5"><i class="fas fa-calendar-day text-purple-500 text-sm"></i><input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;"></div>
                         <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right text-xs"></i></button>
                         <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
                 </div>
-                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} {{ currentLineMeta.label }} 生產概況</p>
-                <div v-if="dafDashboardResult && !dafDashboardResult.sourceFiles.length" class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800"><i class="fas fa-info-circle mr-1"></i>選擇日期沒有 {{ currentLineMeta.label }} 報工；當日數據顯示 0，週統計與近 14 個有投入日期仍會保留。</div>
+                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} {{ dafProcessMeta.label }} 生產概況</p>
+                <div v-if="dafDashboardResult && !dafDashboardResult.sourceFiles.length" class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800"><i class="fas fa-info-circle mr-1"></i>選擇日期沒有 {{ dafProcessMeta.label }} 報工；當日數據顯示 0，週統計與近 14 個有投入日期仍會保留。</div>
                 <div v-if="dafDashboardResult" class="space-y-5">
                     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <div class="kpi-card cursor-pointer" @click="openDafInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafDashboardResult.totalInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
@@ -160,7 +161,7 @@
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="dafDashboardResult.byWorkOrder.length" class="space-y-2"><button v-for="row in dafDashboardResult.byWorkOrder" :key="row.name" @click="openDafWorkOrderDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-blue-50 rounded-lg p-1"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 {{ currentLineMeta.label }} LOG</div><div class="hint">前往「每日報工」上傳檔案；有資料日期會自動出現在近 14 日統計</div></div></div>
+                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 {{ dafProcessMeta.label }} LOG</div><div class="hint">前往「每日報工」上傳檔案；系統會依 A 欄自動分類到五個測試製程</div></div></div>
             </div>
             <div v-else>
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -395,19 +396,19 @@
                 <div v-else class="section-card"><div class="empty-state py-12"><i class="fas fa-file-circle-question"></i><div class="title">尚無此日期的 LOG 統計</div><div class="hint">請上傳機台 LOG 檔案，系統會自動偵測日期</div></div></div>
             </div>
 
-            <div v-else-if="['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="space-y-4 animate-fade-in">
+            <div v-else-if="currentLine === 'TEST'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4 md:p-6 border-l-4 border-purple-500">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
-                            <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>{{ currentLineMeta.label }} 檔案報工</h3>
-                            <p class="text-xs text-gray-400 mt-1">後續新檔案統一忽略第一列標題，讀取 B／D／E／F／H／I 欄：工單、產品代碼、去重識別碼、日期、不良原因、GOOD／FAIL；既有資料維持原解析結果。</p>
+                            <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>測試站檔案報工</h3>
+                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，請填入 DAF外觀檢查、功能一測試、功能二測試、外觀檢查點亮測試或輝度機測試；系統會自動分類保存，既有資料維持不變。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else class="badge-hint text-orange-700" :title="dafRemoteError"><i class="fas fa-laptop"></i>目前僅本機保存</span>
                     </div>
                     <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
                         <label class="btn-primary cursor-pointer text-center" style="background:#7c3aed">
-                            <i class="fas fa-upload mr-1"></i>選擇多份 {{ currentLineMeta.label }} 檔案
+                            <i class="fas fa-upload mr-1"></i>選擇多份測試站檔案
                             <input type="file" accept=".xlsx,.xls,.xlsm,.csv,.txt" multiple @change="uploadDafFiles" class="hidden">
                         </label>
                         <button @click="loadDafData" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
@@ -454,7 +455,7 @@
                         </div>
                     </div>
                 </div>
-                <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚未上傳 {{ currentLineMeta.label }} 檔案</div><div class="hint">可一次選擇多份檔案，系統會自動分類整理</div></div></div>
+                    <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚未上傳測試站檔案</div><div class="hint">可一次選擇多份檔案，系統會依 A 欄自動分類整理</div></div></div>
                 <div v-if="dafUnknownModelModal.show" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4">
                     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-5 md:p-6">
                         <div class="flex items-center justify-between border-b pb-3 mb-4">
@@ -1031,11 +1032,15 @@
                     </div>
                 </template>
             </div>
-            <div v-else-if="['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="space-y-4 animate-fade-in">
+            <div v-else-if="currentLine === 'TEST'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-gray-100">
+                        <div><h3 class="font-black text-purple-800"><i class="fas fa-filter mr-2"></i>測試製程</h3><p class="text-xs text-gray-400 mt-1">總覽與統計共用目前選擇的製程</p></div>
+                        <select v-model="dafProcess" class="border border-purple-200 rounded-lg p-2 text-sm font-bold text-purple-800 bg-white" aria-label="選擇統計測試製程"><option v-for="process in dafProcessOptions" :key="process.id" :value="process.id">{{ process.label }}</option></select>
+                    </div>
                     <div class="quick-bar mb-4">
                         <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
-                        <div class="quick-seg" role="group" :aria-label="currentLineMeta.label + ' 快捷統計區間'">
+                        <div class="quick-seg" role="group" :aria-label="dafProcessMeta.label + ' 快捷統計區間'">
                             <button @click="setDafQuickMode('day')" :class="{ 'is-active': dafQuickMode === 'day' }" :aria-pressed="dafQuickMode === 'day'">日</button>
                             <button @click="setDafQuickMode('week')" :class="{ 'is-active': dafQuickMode === 'week' }" :aria-pressed="dafQuickMode === 'week'">週</button>
                             <button @click="setDafQuickMode('month')" :class="{ 'is-active': dafQuickMode === 'month' }" :aria-pressed="dafQuickMode === 'month'">月</button>
@@ -1056,7 +1061,7 @@
                     </div>
                     <p class="text-xs text-gray-400 mt-3"><i class="fas fa-info-circle mr-1"></i>統計依 Python 規則：GOOD／FAIL 列入投入數，FAIL 依 H 欄統計不良原因；其他狀態另列。</p>
                 </div>
-                <div v-if="!dafStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行 DAF 統計</div><div class="hint">設定篩選條件後點擊「執行統計」</div></div></div>
+                <div v-if="!dafStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行 {{ dafProcessMeta.label }} 統計</div><div class="hint">設定篩選條件後點擊「執行統計」</div></div></div>
                 <template v-if="dafStatsResult">
                     <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
                         <div class="kpi-card cursor-pointer" @click="openDafOutputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafStatsResult.totalInput.toLocaleString() }}</div><div class="kpi-label">投入數</div></div>
@@ -1082,7 +1087,7 @@
                 </template>
             </div>
 
-            <div v-if="dafOutputDetail.show && ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafOutputDetail">
+            <div v-if="dafOutputDetail.show && currentLine === 'TEST'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafOutputDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-center justify-between border-b pb-3 mb-4">
                         <div><h3 class="text-lg font-black text-purple-800"><i class="fas fa-cubes mr-2 text-purple-500"></i>{{ dafOutputDetail.title }}</h3><p class="text-xs text-gray-500 mt-1">{{ dafOutputDetail.subtitle }}</p></div>
@@ -1103,7 +1108,7 @@
                 </div>
             </div>
 
-            <div v-if="dafDefectDetail.show && ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafDefectDetail">
+            <div v-if="dafDefectDetail.show && currentLine === 'TEST'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafDefectDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-center justify-between border-b pb-3 mb-4">
                         <div>
@@ -1123,7 +1128,7 @@
                 </div>
             </div>
 
-            <div v-if="dafModelDetail.show && ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafModelStatsDetail">
+            <div v-if="dafModelDetail.show && currentLine === 'TEST'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafModelStatsDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
                         <div><h3 class="text-lg font-black text-purple-800"><i class="fas fa-microchip mr-2 text-purple-600"></i>{{ dafModelDetail.name }} NG 細項</h3><p class="text-xs text-gray-500 mt-1">以下 NG 項目、數量與占此機種 NG 比例。</p></div>
@@ -1145,7 +1150,7 @@
                 </div>
             </div>
 
-            <div v-if="dafWorkOrderDetail.show && ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafWorkOrderStatsDetail">
+            <div v-if="dafWorkOrderDetail.show && currentLine === 'TEST'" class="fixed inset-0 bg-black/50 modal-backdrop flex justify-center items-center z-50 p-4" @click.self="closeDafWorkOrderStatsDetail">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl p-5 md:p-6 max-h-[90vh] overflow-y-auto">
                     <div class="flex items-start justify-between gap-3 border-b pb-3 mb-4">
                         <div><h3 class="text-lg font-black text-blue-800"><i class="fas fa-file-alt mr-2 text-blue-600"></i>{{ dafWorkOrderDetail.workOrder }} 詳細分析</h3><p class="text-xs text-gray-500 mt-1">第一層工單統計的連動資料；以下拆分 NG 項目與機種。</p></div>
@@ -1173,7 +1178,7 @@
                 </div>
             </div>
 
-            <div v-if="!['ASSY', 'DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine)">
+            <div v-if="!['ASSY', 'TEST'].includes(currentLine)">
             <div class="section-card p-4 mb-5">
                 <!-- 快捷區間：日 / 週(日–六) / 月，左右鍵快速切換上下一期 -->
                 <div class="quick-bar">
@@ -1773,14 +1778,14 @@
 </div>
 
 <script src="js/supabase-client.js?v=202608041323"></script>
-<script src="js/core.js?v=202608121600"></script>
+<script src="js/core.js?v=202608121603"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
 <script src="js/assembly.js?v=202608121509"></script>
-<script src="js/daf.js?v=202608121600"></script>
+<script src="js/daf.js?v=202608121603"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608111430"></script>
+<script src="js/dashboard.js?v=202608121603"></script>
 <script src="js/stats.js?v=202608121600"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608111430"></script>

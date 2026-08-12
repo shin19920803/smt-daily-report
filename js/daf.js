@@ -4,6 +4,7 @@ window.SMT = window.SMT || {};
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentLineMeta, currentTab, data, loadBaseData } = ctx;
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
+    const TEST_STORAGE_KEY = 'koya_test_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
     // 非 SMT 站別共用機種對應；保留舊鍵讀取，避免既有使用者的對應遺失。
@@ -19,15 +20,58 @@ SMT.daf = function (ctx) {
     const CURRENT_COLUMNS = Object.freeze({ workOrder: 1, productCode: 3, dedupKey: 4, date: 5, defect: 7, status: 8, minColumns: 9 });
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
-    const isDafLikeLine = () => ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value);
-    const currentDafLine = () => isDafLikeLine() ? currentLine.value : 'DAF';
+    const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
+        { id: 'DAF', label: 'DAF外觀檢查', shortLabel: 'DAF' },
+        { id: 'FT1', label: '功能一測試', shortLabel: 'FT1' },
+        { id: 'FT2', label: '功能二測試', shortLabel: 'FT2' },
+        { id: 'LIGHTING', label: '外觀檢查點亮測試', shortLabel: '點亮測試' },
+        { id: 'ASSEMBLY', label: '輝度機測試', shortLabel: '輝度機' }
+    ];
+    const TEST_PROCESS_IDS = TEST_PROCESS_OPTIONS.map(item => item.id);
+    const TEST_PROCESS_STORAGE_KEY = 'koya_test_process_v1';
+    const readStoredTestProcess = () => {
+        try {
+            const saved = localStorage.getItem(TEST_PROCESS_STORAGE_KEY);
+            if (TEST_PROCESS_IDS.includes(saved)) return saved;
+            const legacyLine = localStorage.getItem(SMT.LINE_KEY);
+            return TEST_PROCESS_IDS.includes(legacyLine) ? legacyLine : 'DAF';
+        } catch (e) { return 'DAF'; }
+    };
+    const dafProcess = ref(readStoredTestProcess());
+    const dafProcessMeta = computed(() => TEST_PROCESS_OPTIONS.find(item => item.id === dafProcess.value) || TEST_PROCESS_OPTIONS[0]);
+    const isUnifiedTestLine = () => currentLine.value === 'TEST';
+    const isDafLikeLine = () => isUnifiedTestLine() || TEST_PROCESS_IDS.includes(currentLine.value);
+    const currentDafLine = () => isUnifiedTestLine() ? dafProcess.value : (isDafLikeLine() ? currentLine.value : 'DAF');
     const currentDafColumns = () => CURRENT_COLUMNS;
-    const recordColumns = record => record?.sourceFormat === CURRENT_SOURCE_FORMAT || currentLine.value === 'FT1' ? CURRENT_COLUMNS : LEGACY_COLUMNS;
-    const currentDafStorageKey = () => currentDafLine() === 'DAF' ? STORAGE_KEY : `koya_${currentDafLine().toLowerCase()}_log_batches_v1`;
-    const currentDafMigrationKey = () => currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`;
+    const recordColumns = record => record?.sourceFormat === CURRENT_SOURCE_FORMAT || currentDafLine() === 'FT1' ? CURRENT_COLUMNS : LEGACY_COLUMNS;
+    const legacyStorageKey = line => line === 'DAF' ? STORAGE_KEY : `koya_${line.toLowerCase()}_log_batches_v1`;
+    const currentDafStorageKey = () => isUnifiedTestLine() ? TEST_STORAGE_KEY : legacyStorageKey(currentDafLine());
+    const currentDafMigrationKey = () => isUnifiedTestLine() ? 'koya_test_log_remote_migrated_v1' : (currentDafLine() === 'DAF' ? REMOTE_MIGRATED_KEY : `koya_${currentDafLine().toLowerCase()}_log_remote_migrated_v1`);
     const currentDafMappingStorageKey = () => MODEL_MAPPING_STORAGE_KEY;
-    const currentDafLabel = () => currentLineMeta.value.label;
-    const defaultDafDefect = () => currentLine.value === 'FT2' ? '偵測失效' : '未填寫不良原因';
+    const currentDafLabel = () => isUnifiedTestLine() ? dafProcessMeta.value.label : currentLineMeta.value.label;
+    const processLabel = line => TEST_PROCESS_OPTIONS.find(item => item.id === line)?.label || line;
+    const defaultDafDefect = processLine => processLine === 'FT2' ? '偵測失效' : '未填寫不良原因';
+    const detectTestProcess = value => {
+        const text = normalizeText(value).replace(/\s+/g, '');
+        if (!text) return null;
+        if (/LIGHTING|點亮測試|外觀檢查點亮測試/.test(text)) return 'LIGHTING';
+        if (/FT2|功能二測試/.test(text)) return 'FT2';
+        if (/FT1|功能一測試/.test(text)) return 'FT1';
+        if (/ASSEMBLY|輝度機|灰度機/.test(text)) return 'ASSEMBLY';
+        if (/DAF|DAF外觀檢查/.test(text)) return 'DAF';
+        return null;
+    };
+    const setDafProcess = line => {
+        if (!TEST_PROCESS_IDS.includes(line)) return;
+        dafProcess.value = line;
+        try { localStorage.setItem(TEST_PROCESS_STORAGE_KEY, line); } catch (e) {}
+        closeDafDefectDetail();
+        closeDafModelStatsDetail();
+        closeDafWorkOrderStatsDetail();
+        closeDafOutputDetail();
+        if (dafStatsResult.value) calculateDafStats(false);
+        if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
+    };
 
     const MODEL_MAPPING = {
         'FP-D01607MB11': 'TK14-Goodix',
@@ -165,7 +209,7 @@ SMT.daf = function (ctx) {
         };
     };
     const normalizeBatchModels = batch => {
-        const sourceFormat = batch.sourceFormat || (currentDafLine() === 'FT1' ? CURRENT_SOURCE_FORMAT : LEGACY_SOURCE_FORMAT);
+        const sourceFormat = batch.sourceFormat || (batch.line === 'FT1' ? CURRENT_SOURCE_FORMAT : LEGACY_SOURCE_FORMAT);
         const records = (batch.records || []).map(record => normalizeDafRecord({ ...record, sourceFormat: record.sourceFormat || sourceFormat }));
         return {
             ...batch,
@@ -278,78 +322,103 @@ SMT.daf = function (ctx) {
         const columns = currentDafColumns();
         const { rows: sourceRows, columnCount } = await readFileRows(file);
         const dataRows = sourceRows.slice(1);
-        const rows = deduplicateRows(dataRows);
-        const duplicateCount = dataRows.length - rows.length;
-        const model = detectModel(rows);
-        const dateRange = detectDateRange(rows);
-        const statuses = rows.map(row => normalizeText(row[columns.status]));
-        const goodCount = statuses.filter(status => status === 'GOOD').length;
-        const failCount = statuses.filter(status => status === 'FAIL').length;
-        const inputCount = goodCount + failCount;
-        const unknownStatuses = [...new Set(statuses.filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
-        const workOrders = [...new Set(rows.map(row => cleanText(row[columns.workOrder])).filter(Boolean))];
-        const workOrderDisplay = workOrders.length ? workOrders.join('、') : '未識別工單';
-        const workOrderFileName = workOrders.length === 1 ? workOrders[0] : workOrders.length ? `${workOrders[0]}等${workOrders.length}筆工單` : '未識別工單';
-        const records = rows.map(row => {
-            const status = normalizeText(row[columns.status]);
-            const parsedDateTime = parseDateTime(row[columns.date]);
-            const parsedDate = parsedDateTime ? fmtDate(parsedDateTime) : '';
-            const isDefect = status === 'FAIL';
+        const groupedRows = new Map();
+        const unrecognizedRows = [];
+        dataRows.forEach(row => {
+            const processLine = detectTestProcess(row[0]);
+            if (!processLine) {
+                if (row.some(cell => cleanText(cell) !== '')) unrecognizedRows.push(row);
+                return;
+            }
+            const rows = groupedRows.get(processLine) || [];
+            rows.push(row);
+            groupedRows.set(processLine, rows);
+        });
+        if (unrecognizedRows.length) throw new Error(`A欄有 ${unrecognizedRows.length} 列無法辨識製程；請填入 DAF外觀檢查、功能一測試、功能二測試、外觀檢查點亮測試或輝度機測試`);
+        if (!groupedRows.size) throw new Error('檔案沒有可辨識的製程資料，請確認 A 欄內容');
+        const buildBatch = (processLine, sourceRowsForProcess) => {
+            const rows = deduplicateRows(sourceRowsForProcess);
+            const duplicateCount = sourceRowsForProcess.length - rows.length;
+            const model = detectModel(rows);
+            const dateRange = detectDateRange(rows);
+            const statuses = rows.map(row => normalizeText(row[columns.status]));
+            const goodCount = statuses.filter(status => status === 'GOOD').length;
+            const failCount = statuses.filter(status => status === 'FAIL').length;
+            const inputCount = goodCount + failCount;
+            const unknownStatuses = [...new Set(statuses.filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
+            const workOrders = [...new Set(rows.map(row => cleanText(row[columns.workOrder])).filter(Boolean))];
+            const workOrderDisplay = workOrders.length ? workOrders.join('、') : '未識別工單';
+            const workOrderFileName = workOrders.length === 1 ? workOrders[0] : workOrders.length ? `${workOrders[0]}等${workOrders.length}筆工單` : '未識別工單';
+            const records = rows.map(row => {
+                const status = normalizeText(row[columns.status]);
+                const parsedDateTime = parseDateTime(row[columns.date]);
+                const parsedDate = parsedDateTime ? fmtDate(parsedDateTime) : '';
+                const isDefect = status === 'FAIL';
+                return {
+                    workOrder: cleanText(row[columns.workOrder]) || '未識別工單',
+                    productCode: cleanText(row[columns.productCode]),
+                    dedupKey: normalizeText(row[columns.dedupKey]),
+                    dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
+                    date: parsedDate,
+                    defect: isDefect ? (cleanText(row[columns.defect]) || defaultDafDefect(processLine)) : '',
+                    status,
+                    model: resolveDafModel(row[columns.productCode]),
+                    sourceFormat: CURRENT_SOURCE_FORMAT,
+                    machine: '',
+                    inputIncluded: ['GOOD', 'FAIL'].includes(status),
+                    isDefect,
+                    raw: Array.from({ length: columnCount }, (_, index) => displayCell(row[index]))
+                };
+            });
             return {
-                workOrder: cleanText(row[columns.workOrder]) || '未識別工單',
-                productCode: cleanText(row[columns.productCode]),
-                dedupKey: normalizeText(row[columns.dedupKey]),
-                dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
-                date: parsedDate,
-                defect: isDefect ? (cleanText(row[columns.defect]) || defaultDafDefect()) : '',
-                status,
-                model: resolveDafModel(row[columns.productCode]),
+                id: `${Date.now()}_${processLine}_${Math.random().toString(36).slice(2, 9)}`,
+                line: processLine,
                 sourceFormat: CURRENT_SOURCE_FORMAT,
                 machine: '',
-                inputIncluded: ['GOOD', 'FAIL'].includes(status),
-                isDefect,
-                raw: Array.from({ length: columnCount }, (_, index) => displayCell(row[index]))
+                fileName: file.name,
+                uploadedAt: new Date().toISOString(),
+                modelName: normalizeModelName(model.model),
+                productCode: model.productCode,
+                workOrder: workOrderDisplay,
+                workOrderFileName,
+                reportDate: dateRange.display,
+                dateStart: dateRange.start,
+                dateEnd: dateRange.end,
+                inputCount,
+                goodCount,
+                failCount,
+                yieldRate: inputCount ? (goodCount / inputCount * 100).toFixed(2) : '0.00',
+                defectRate: inputCount ? (failCount / inputCount * 100).toFixed(2) : '0.00',
+                unknownStatusCount: unknownStatuses.reduce((count, status) => count + statuses.filter(item => item === status).length, 0),
+                unknownStatusText: unknownStatuses.join('、') || '無',
+                rowCount: rows.length,
+                rawColumnCount: columnCount,
+                unknownProductCodes: model.unknownProductCodes,
+                unknownProductDetails: model.unknownProductDetails,
+                duplicateCount,
+                rawRowCount: sourceRowsForProcess.length,
+                records
             };
-        });
-        return {
-            id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-            line: currentDafLine(),
-            sourceFormat: CURRENT_SOURCE_FORMAT,
-            machine: '',
-            fileName: file.name,
-            uploadedAt: new Date().toISOString(),
-            modelName: normalizeModelName(model.model),
-            productCode: model.productCode,
-            workOrder: workOrderDisplay,
-            workOrderFileName,
-            reportDate: dateRange.display,
-            dateStart: dateRange.start,
-            dateEnd: dateRange.end,
-            inputCount,
-            goodCount,
-            failCount,
-            yieldRate: inputCount ? (goodCount / inputCount * 100).toFixed(2) : '0.00',
-            defectRate: inputCount ? (failCount / inputCount * 100).toFixed(2) : '0.00',
-            unknownStatusCount: unknownStatuses.reduce((count, status) => count + statuses.filter(item => item === status).length, 0),
-            unknownStatusText: unknownStatuses.join('、') || '無',
-            rowCount: rows.length,
-            rawColumnCount: columnCount,
-            unknownProductCodes: model.unknownProductCodes,
-            unknownProductDetails: model.unknownProductDetails,
-            duplicateCount,
-            rawRowCount: dataRows.length,
-            records
         };
+        return [...groupedRows.entries()].map(([processLine, rows]) => buildBatch(processLine, rows));
     };
 
-    const readStorage = () => {
+    const readStorageKey = (key, line = '') => {
         try {
-            const parsed = JSON.parse(localStorage.getItem(currentDafStorageKey()) || '[]');
+            const parsed = JSON.parse(localStorage.getItem(key) || '[]');
             if (!Array.isArray(parsed)) return [];
-            const line = currentDafLine();
-            const scoped = parsed.filter(batch => line === 'DAF' ? (!batch.line || batch.line === 'DAF') : batch.line === line);
-            return scoped.map(normalizeBatchModels);
+            const scoped = line
+                ? parsed.filter(batch => line === 'DAF' ? (!batch.line || batch.line === 'DAF') : batch.line === line)
+                : parsed;
+            return scoped.map(batch => normalizeBatchModels({ ...batch, line: batch.line || line || 'DAF' }));
         } catch (e) { return []; }
+    };
+    const readStorage = () => {
+        if (!isUnifiedTestLine()) return readStorageKey(currentDafStorageKey(), currentDafLine());
+        return [
+            ...TEST_PROCESS_IDS.flatMap(line => readStorageKey(legacyStorageKey(line), line)),
+            ...readStorageKey(TEST_STORAGE_KEY)
+        ];
     };
     // 本機只保存統計所需欄位；原始 raw 欄位由 Supabase 批次資料保留，避免大量 LOG 撐滿 localStorage。
     const compactDafBatch = batch => ({
@@ -380,7 +449,7 @@ SMT.daf = function (ctx) {
         try { localStorage.setItem(currentDafMigrationKey(), '1'); } catch (e) {}
     };
     const toRemote = (batch) => ({
-        id: batch.id, line: currentDafLine(), file_name: batch.fileName, uploaded_at: batch.uploadedAt,
+        id: batch.id, line: batch.line || currentDafLine(), file_name: batch.fileName, uploaded_at: batch.uploadedAt,
         model_name: batch.modelName, product_code: batch.productCode, work_order: batch.workOrder,
         report_date: batch.reportDate, date_start: batch.dateStart || null, date_end: batch.dateEnd || null,
         input_count: batch.inputCount, good_count: batch.goodCount, fail_count: batch.failCount,
@@ -404,9 +473,10 @@ SMT.daf = function (ctx) {
         if (error) { dafRemoteError.value = error.message || `${currentDafLabel()} 共用資料庫寫入失敗`; return false; }
         return true;
     };
-    const deleteRemote = async (id) => {
+    const deleteRemote = async (id, batchOverride = null) => {
         if (!dafRemoteReady.value) return true;
-        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', currentDafLine());
+        const batch = batchOverride || dafBatches.value.find(item => item.id === id);
+        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', batch?.line || currentDafLine());
         if (error) { toast(`${currentDafLabel()} 共用資料庫刪除失敗：` + error.message, 'error'); return false; }
         return true;
     };
@@ -464,15 +534,16 @@ SMT.daf = function (ctx) {
         normalized.forEach(batch => (batch.records || []).forEach(record => {
             if (!record.dedupKey) return;
             const timestamp = recordTimestamp(record);
-            const previous = selected.get(record.dedupKey);
+            const key = `${batch.line || currentDafLine()}::${record.dedupKey}`;
+            const previous = selected.get(key);
             if (!previous) {
-                selected.set(record.dedupKey, { record, timestamp });
+                selected.set(key, { record, timestamp });
                 return;
             }
             duplicateCount++;
             if (timestamp < previous.timestamp) {
                 duplicates.add(previous.record);
-                selected.set(record.dedupKey, { record, timestamp });
+                selected.set(key, { record, timestamp });
             } else {
                 duplicates.add(record);
             }
@@ -507,7 +578,7 @@ SMT.daf = function (ctx) {
         for (const oldBatch of before || []) {
             const nextBatch = afterById.get(oldBatch.id);
             if (!nextBatch) {
-                if (!(await deleteRemote(oldBatch.id))) success = false;
+                if (!(await deleteRemote(oldBatch.id, oldBatch))) success = false;
             } else if (dafBatchSignature(oldBatch) !== dafBatchSignature(nextBatch)) {
                 if (!(await saveRemote(nextBatch))) success = false;
             }
@@ -521,21 +592,26 @@ SMT.daf = function (ctx) {
         const before = dafBatches.value.map(rebuildDafBatch);
         const existingByKey = new Map();
         before.forEach(batch => (batch.records || []).forEach(record => {
-            const key = normalizeText(record.dedupKey);
-            if (!key) return;
+            const rawKey = normalizeText(record.dedupKey);
+            if (!rawKey) return;
+            const key = `${batch.line || currentDafLine()}::${rawKey}`;
             if (!existingByKey.has(key)) existingByKey.set(key, []);
             existingByKey.get(key).push(record);
         }));
-        const incomingKeys = new Set((incoming.records || []).map(record => normalizeText(record.dedupKey)).filter(Boolean));
+        const incomingKeys = new Set((incoming.records || []).map(record => {
+            const rawKey = normalizeText(record.dedupKey);
+            return rawKey ? `${incoming.line || currentDafLine()}::${rawKey}` : null;
+        }).filter(Boolean));
         const keepExisting = new Set();
         const keepIncoming = new Set();
         let duplicateCount = 0;
         (incoming.records || []).forEach(record => {
-            const key = normalizeText(record.dedupKey);
-            if (!key) {
+            const rawKey = normalizeText(record.dedupKey);
+            if (!rawKey) {
                 keepIncoming.add(record);
                 return;
             }
+            const key = `${incoming.line || currentDafLine()}::${rawKey}`;
             const existingRecords = existingByKey.get(key) || [];
             if (!existingRecords.length) {
                 keepIncoming.add(record);
@@ -548,8 +624,10 @@ SMT.daf = function (ctx) {
         });
         const retained = before.map(batch => {
             const records = (batch.records || []).filter(record => {
-                const key = normalizeText(record.dedupKey);
-                return !key || !incomingKeys.has(key) || keepExisting.has(record);
+                const rawKey = normalizeText(record.dedupKey);
+                if (!rawKey) return true;
+                const key = `${batch.line || currentDafLine()}::${rawKey}`;
+                return !incomingKeys.has(key) || keepExisting.has(record);
             });
             return { ...batch, records };
         }).filter(batch => batch.records.length);
@@ -580,7 +658,7 @@ SMT.daf = function (ctx) {
         }).catch(error => console.warn(`${currentDafLabel()} 儀表板背景更新失敗`, error));
     };
     const loadDafData = async ({ background = false } = {}) => {
-        const line = currentDafLine();
+        const line = isUnifiedTestLine() ? 'TEST' : currentDafLine();
         if (dafRemoteLoadPromise && dafRemoteLoadLine === line) {
             if (background) return true;
             await dafRemoteLoadPromise;
@@ -596,8 +674,10 @@ SMT.daf = function (ctx) {
         dafRemoteError.value = '';
         dafRemoteLoadLine = line;
         const remotePromise = (async () => {
-            const { data: remoteRows, error } = await loadDafRemoteRows(line);
-            if (requestId !== dafLoadRequestId || line !== currentDafLine()) return;
+            const remoteResults = await Promise.all((isUnifiedTestLine() ? TEST_PROCESS_IDS : [line]).map(processLine => loadDafRemoteRows(processLine)));
+            const error = remoteResults.find(result => result.error)?.error || null;
+            const remoteRows = remoteResults.flatMap(result => result.data || []);
+            if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
             if (error) {
                 dafRemoteReady.value = false;
                 dafRemoteError.value = error.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (error.message || 'DAF 共用資料庫讀取失敗');
@@ -609,11 +689,9 @@ SMT.daf = function (ctx) {
                 const remoteState = deduplicateDafBatches(remoteBatches);
                 let batches = remoteState.batches;
                 const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
-                const pendingLocalBatches = latestLocalBatches.filter(batch => !localBatchIdsAtStart.has(batch.id));
-                if (!hasMigrationFlag() && localBatches.length && batches.length === 0) {
-                    const { error: migrationError } = await _supabase.from(REMOTE_TABLE).upsert(latestLocalBatches.map(toRemote), { onConflict: 'id' });
-                    if (!migrationError) { batches = localBatches; setMigrationFlag(); }
-                } else if (!hasMigrationFlag()) setMigrationFlag();
+                const remoteIds = new Set(batches.map(batch => batch.id));
+                const pendingLocalBatches = latestLocalBatches.filter(batch => !remoteIds.has(batch.id) || !localBatchIdsAtStart.has(batch.id));
+                if (!hasMigrationFlag()) setMigrationFlag();
                 if (pendingLocalBatches.length) {
                     batches = deduplicateDafBatches([...batches, ...pendingLocalBatches]).batches;
                     await syncDafRemoteChanges(remoteBatches, batches);
@@ -647,19 +725,21 @@ SMT.daf = function (ctx) {
     const allRecords = () => {
         if (allRecordsCacheSource !== dafBatches.value) {
             allRecordsCacheSource = dafBatches.value;
-            allRecordsCacheRows = dafBatches.value.flatMap(batch => (batch.records || []).map(record => ({ ...record, fileName: batch.fileName, batchId: batch.id })));
+        allRecordsCacheRows = dafBatches.value.flatMap(batch => (batch.records || []).map(record => ({ ...record, processLine: batch.line || 'DAF', fileName: batch.fileName, batchId: batch.id })));
         }
         return allRecordsCacheRows;
     };
     let dafDateIndexSource = null;
+    let dafDateIndexProcess = '';
     let dafRowsByDate = new Map();
     let dafInputCountByDate = new Map();
     const ensureDafDateIndex = () => {
-        if (dafDateIndexSource === dafBatches.value) return;
+        if (dafDateIndexSource === dafBatches.value && dafDateIndexProcess === currentDafLine()) return;
         dafDateIndexSource = dafBatches.value;
+        dafDateIndexProcess = currentDafLine();
         dafRowsByDate = new Map();
         dafInputCountByDate = new Map();
-        allRecords().forEach(row => {
+        allRecords().filter(row => row.processLine === currentDafLine()).forEach(row => {
             if (!row.date) return;
             if (!dafRowsByDate.has(row.date)) dafRowsByDate.set(row.date, []);
             dafRowsByDate.get(row.date).push(row);
@@ -672,7 +752,7 @@ SMT.daf = function (ctx) {
     };
     const dafBatchesByDate = computed(() => {
         const groups = {};
-        dafBatches.value.forEach(batch => {
+        dafBatches.value.filter(batch => (batch.line || 'DAF') === currentDafLine()).forEach(batch => {
             const records = batch.records || [];
             const dates = [...new Set(records.map(record => record.date).filter(Boolean))];
             if (!dates.length) dates.push(batch.dateStart || '未識別日期');
@@ -696,13 +776,13 @@ SMT.daf = function (ctx) {
         return Object.values(groups).sort((a, b) => String(b.date).localeCompare(String(a.date)));
     });
     const dafModelOptions = computed(() => [...new Set([
-        ...allRecords().map(row => normalizeModelName(row.model)),
+        ...allRecords().filter(row => row.processLine === currentDafLine()).map(row => normalizeModelName(row.model)),
         ...(data?.value?.models || []).map(model => normalizeModelName(model.name)),
         ...Object.values(dafModelMappings.value).map(normalizeModelName),
         ...Object.values(MODEL_MAPPING).map(normalizeModelName)
     ].filter(model => model && model !== '未識別機種'))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
-    const dafWorkOrderOptions = computed(() => [...new Set(allRecords().map(row => row.workOrder).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
-    const filterRecords = () => allRecords().filter(row => {
+    const dafWorkOrderOptions = computed(() => [...new Set(allRecords().filter(row => row.processLine === currentDafLine()).map(row => row.workOrder).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
+    const filterRecords = () => allRecords().filter(row => row.processLine === currentDafLine()).filter(row => {
         if (dafStatsFilter.value.start && (!row.date || row.date < dafStatsFilter.value.start)) return false;
         if (dafStatsFilter.value.end && (!row.date || row.date > dafStatsFilter.value.end)) return false;
         if (dafStatsFilter.value.model !== 'all' && row.model !== dafStatsFilter.value.model) return false;
@@ -725,7 +805,7 @@ SMT.daf = function (ctx) {
         const workOrderMap = {};
         const dayMap = {};
         failRows.forEach(row => {
-            const defect = row.defect || defaultDafDefect();
+            const defect = row.defect || defaultDafDefect(currentDafLine());
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
             defectMap[defect] = (defectMap[defect] || 0) + 1;
@@ -754,7 +834,7 @@ SMT.daf = function (ctx) {
                 if (!dayMap[row.date]) dayMap[row.date] = { date: row.date, input: 0, good: 0, defects: 0, byType: {} };
                 dayMap[row.date].input++;
                 if (row.status === 'GOOD') dayMap[row.date].good++;
-                if (row.status === 'FAIL') { dayMap[row.date].defects++; const defect = row.defect || defaultDafDefect(); dayMap[row.date].byType[defect] = (dayMap[row.date].byType[defect] || 0) + 1; }
+                if (row.status === 'FAIL') { dayMap[row.date].defects++; const defect = row.defect || defaultDafDefect(currentDafLine()); dayMap[row.date].byType[defect] = (dayMap[row.date].byType[defect] || 0) + 1; }
             }
         });
         const detailRows = map => Object.entries(map || {}).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, Object.values(map).reduce((sum, value) => sum + value, 0)) })).sort((a, b) => b.qty - a.qty);
@@ -902,13 +982,15 @@ SMT.daf = function (ctx) {
         dafOutputDetail.value = { show: false, title: '', subtitle: '', result: null };
     };
     const ensureDafBaseSettings = async batch => {
+        const processLine = batch.line || currentDafLine();
+        const label = processLabel(processLine);
         const modelNames = [...new Set((batch.records || []).flatMap(record => cleanText(record.model).split('、').map(cleanText).filter(model => model && model !== '未識別機種')))];
         const defectNames = [...new Set((batch.records || []).filter(record => record.isDefect).map(record => cleanText(record.defect)).filter(Boolean))];
         if (!modelNames.length && !defectNames.length) return;
         try {
             const [{ data: existingModels, error: modelReadError }, { data: existingDefects, error: defectReadError }] = await Promise.all([
-                _supabase.from('models').select('name').eq('line', currentDafLine()),
-                _supabase.from('defect_types').select('name').eq('line', currentDafLine())
+                _supabase.from('models').select('name').eq('line', processLine),
+                _supabase.from('defect_types').select('name').eq('line', processLine)
             ]);
             if (modelReadError || defectReadError) throw modelReadError || defectReadError;
             const modelSet = new Set((existingModels || []).map(row => normalizeText(row.name)));
@@ -917,20 +999,20 @@ SMT.daf = function (ctx) {
             const missingDefects = defectNames.filter(name => !defectSet.has(normalizeText(name)));
             let created = 0;
             for (const name of missingModels) {
-                const { error } = await _supabase.from('models').insert({ name, line: currentDafLine() });
+                const { error } = await _supabase.from('models').insert({ name, line: processLine });
                 if (!error) created++;
             }
             for (const name of missingDefects) {
-                const { error } = await _supabase.from('defect_types').insert({ name, line: currentDafLine() });
+                const { error } = await _supabase.from('defect_types').insert({ name, line: processLine });
                 if (!error) created++;
             }
             if (created && loadBaseData) await loadBaseData();
             if (missingModels.length || missingDefects.length) {
-                toast(`${currentDafLabel()} 已自動新增基礎設定：機種 ${missingModels.length} 項、不良現象 ${missingDefects.length} 項`, 'info');
+                toast(`${label} 已自動新增基礎設定：機種 ${missingModels.length} 項、不良現象 ${missingDefects.length} 項`, 'info');
             }
         } catch (error) {
-            console.warn(`${currentDafLabel()} 基礎設定自動同步失敗`, error);
-            toast(`${currentDafLabel()} 檔案已分析，但基礎設定自動新增失敗`, 'warning');
+            console.warn(`${label} 基礎設定自動同步失敗`, error);
+            toast(`${label} 檔案已分析，但基礎設定自動新增失敗`, 'warning');
         }
     };
     const finishDafUploadQueue = queue => {
@@ -944,23 +1026,26 @@ SMT.daf = function (ctx) {
         for (let index = queue.index; index < queue.files.length; index++) {
             const file = queue.files[index];
             try {
-                const batch = await analyzeFile(file);
-                if (batch.unknownProductDetails?.length || batch.unknownProductCodes?.length) {
+                const batches = await analyzeFile(file);
+                const unknownBatches = batches.filter(batch => batch.unknownProductDetails?.length || batch.unknownProductCodes?.length);
+                if (unknownBatches.length) {
                     queue.index = index;
                     pendingDafUpload.value = queue;
-                    const items = batch.unknownProductDetails?.length
+                    const items = unknownBatches.flatMap(batch => (batch.unknownProductDetails?.length
                         ? batch.unknownProductDetails
-                        : batch.unknownProductCodes.map(code => ({ code, workOrders: [] }));
+                        : batch.unknownProductCodes.map(code => ({ code, workOrders: [] }))));
                     dafUnknownModelModal.value = { show: true, fileName: file.name, items, currentIndex: 0, selectedModel: '', newModel: '' };
                     toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
-                await ensureDafBaseSettings(batch);
-                const merged = await mergeDafBatch(batch);
-                queue.rows += merged.batch?.rowCount || 0;
-                queue.duplicates += (batch.duplicateCount || 0) + merged.duplicateCount;
+                for (const batch of batches) {
+                    await ensureDafBaseSettings(batch);
+                    const merged = await mergeDafBatch(batch);
+                    queue.rows += merged.batch?.rowCount || 0;
+                    queue.duplicates += (batch.duplicateCount || 0) + merged.duplicateCount;
+                    if (dafRemoteReady.value && !merged.remoteSaved) queue.failed.push(`${file.name}（${processLabel(batch.line)}）：共用資料庫寫入失敗`);
+                }
                 queue.success++;
-                if (dafRemoteReady.value && !merged.remoteSaved) queue.failed.push(`${file.name}：共用資料庫寫入失敗`);
             } catch (error) { queue.failed.push(`${file.name}：${error.message}`); }
         }
         finishDafUploadQueue(queue);
@@ -1120,7 +1205,7 @@ SMT.daf = function (ctx) {
         else if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
-        if (['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(line)) {
+        if (line === 'TEST') {
             dafModelMappings.value = readModelMappings();
             dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
             dafQuickMode.value = null;
@@ -1131,11 +1216,21 @@ SMT.daf = function (ctx) {
             if (currentTab.value === 'stats') calculateDafStats(false);
         }
     });
+    watch(dafProcess, () => {
+        try { localStorage.setItem(TEST_PROCESS_STORAGE_KEY, dafProcess.value); } catch (e) {}
+        dafDateIndexSource = null;
+        dafDashboardCache.clear();
+        dafStatsResult.value = null;
+        dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
+        if (currentTab.value === 'stats') calculateDafStats(false);
+        if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
+    });
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
         dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteError, dafLastUpload, dafUploadSummary,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
+        dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate,

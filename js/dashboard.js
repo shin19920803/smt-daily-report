@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dafDashboardResult = ref(null);
@@ -36,7 +36,7 @@ SMT.dashboard = function (ctx) {
             .sort((a, b) => b.qty - a.qty);
         const mapIncrement = (map, key, qty = 1) => { if (key) map[key] = (map[key] || 0) + qty; };
         const toMetric = (label, value, tone = 'slate') => ({ label, value: Number(value) || 0, tone });
-        const currentDafLabel = () => ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value) ? currentLineMeta.value.label : 'DAF';
+        const currentDafLabel = () => currentLine.value === 'TEST' ? dafProcessMeta.value.label : 'DAF';
         const makeProductionDetail = row => ({
             title: `${row.workOrder || '未識別工單'} 生產明細`,
             subtitle: `${row.model || '未識別機種'} · ${row.date || dashDate.value}`,
@@ -85,7 +85,7 @@ SMT.dashboard = function (ctx) {
         const invalidateDashboardDateCache = () => { smtUploadedDatesCache = null; };
         const loadDashboardAvailableDates = async line => {
             if (line === 'ASSY') return getAssemblyUploadedDates ? getAssemblyUploadedDates(2000) : [];
-            if (['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(line)) return getDafUploadedDates ? getDafUploadedDates(2000) : [];
+            if (line === 'TEST') return getDafUploadedDates ? getDafUploadedDates(2000) : [];
             if (line === 'SMT') return loadSmtUploadedDates();
             return [];
         };
@@ -290,7 +290,7 @@ SMT.dashboard = function (ctx) {
                 dashboardRecentOoc.value = [];
                 return requestId === dashboardRefreshId;
             }
-            if (['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value)) {
+            if (currentLine.value === 'TEST') {
                 if (!getDafDashboardForDate) {
                     dafDashboardResult.value = null;
                 } else {
@@ -572,7 +572,7 @@ SMT.dashboard = function (ctx) {
                 await initAssemblyDashboardCharts(requestId, line);
                 return;
             }
-            if (['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(line)) {
+            if (line === 'TEST') {
                 dashYieldChartInst = disposeChart(dashYieldChartInst);
                 dashInputChartInst = disposeChart(dashInputChartInst);
                 dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);

@@ -1,15 +1,19 @@
 window.SMT = window.SMT || {};
 
 // ===== 產線（多線隔離的唯一依據）=====
-// 每張根資料表都有 line 欄位，預設 'SMT'，所以既有資料自動歸屬 SMT。
+// 測試五站共用同一個頁面，資料仍以原本的 line 值分開保存，避免既有資料混線。
+SMT.TEST_PROCESSES = [
+    { id: 'DAF', label: 'DAF外觀檢查', shortLabel: 'DAF', icon: 'fa-layer-group' },
+    { id: 'FT1', label: '功能一測試', shortLabel: 'FT1', icon: 'fa-flask' },
+    { id: 'FT2', label: '功能二測試', shortLabel: 'FT2', icon: 'fa-flask' },
+    { id: 'LIGHTING', label: '外觀檢查點亮測試', shortLabel: '點亮測試', icon: 'fa-lightbulb' },
+    { id: 'ASSEMBLY', label: '輝度機測試', shortLabel: '輝度機', icon: 'fa-gears' }
+];
+SMT.TEST_PROCESS_IDS = SMT.TEST_PROCESSES.map(item => item.id);
 SMT.LINES = [
-    { id: 'SMT',  label: 'SMT',      icon: 'fa-microchip',   canImport: true  },
-    { id: 'DAF',  label: 'DAF',      icon: 'fa-layer-group', canImport: false },
-    { id: 'FT1',  label: 'FT1',      icon: 'fa-flask',              canImport: false },
-    { id: 'ASSY', label: 'Mylar',    icon: 'fa-screwdriver-wrench', canImport: false },
-    { id: 'ASSEMBLY', label: '灰度機', icon: 'fa-gears',       canImport: false },
-    { id: 'LIGHTING', label: '點亮測試', icon: 'fa-lightbulb', canImport: false },
-    { id: 'FT2',  label: 'FT2',      icon: 'fa-flask',              canImport: false }
+    { id: 'SMT', label: 'SMT', icon: 'fa-microchip', canImport: true },
+    { id: 'TEST', label: '測試站', icon: 'fa-vials', canImport: false },
+    { id: 'ASSY', label: 'Mylar', icon: 'fa-screwdriver-wrench', canImport: false }
 ];
 SMT.LINE_KEY = 'koya_current_line';
 
@@ -23,15 +27,15 @@ SMT.core = function (ctx) {
         // --- 產線切換 ---
         const lines = SMT.LINES;
         const visibleLines = computed(() => lines);
-        const validLine = (id) => SMT.LINES.some(l => l.id === id) ? id : 'SMT';
+        const validLine = (id) => SMT.LINES.some(l => l.id === id) ? id : SMT.TEST_PROCESS_IDS.includes(id) ? 'TEST' : 'SMT';
         const currentLine = ref(validLine((() => { try { return localStorage.getItem(SMT.LINE_KEY); } catch(e) { return null; } })()));
         const currentLineMeta = computed(() => SMT.LINES.find(l => l.id === currentLine.value) || SMT.LINES[0]);
-        const switchableDafLines = ['DAF', 'FT1', 'FT2', 'ASSEMBLY', 'LIGHTING'];
-        const hideLineTools = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value));
-        const hideOrders = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value));
+        const switchableDafLines = ['TEST'];
+        const hideLineTools = computed(() => ['TEST', 'ASSY'].includes(currentLine.value));
+        const hideOrders = computed(() => ['TEST', 'ASSY'].includes(currentLine.value));
         const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
         const hideDailyReport = computed(() => currentLine.value === 'SMT');
-        const hideSettings = computed(() => ['DAF', 'FT1', 'ASSY', 'FT2', 'ASSEMBLY', 'LIGHTING'].includes(currentLine.value));
+        const hideSettings = computed(() => ['TEST', 'ASSY'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -83,15 +87,13 @@ SMT.core = function (ctx) {
         const todayStr = new Date().toISOString().split('T')[0];
         const loadBaseData = async () => {
             const L = currentLine.value;
-            if (L === 'FT2') {
-                const [dafModels, ft2Models, dafDefects, ft2Defects] = await Promise.all([
-                    _supabase.from('models').select('*').eq('line', 'DAF'),
-                    _supabase.from('models').select('*').eq('line', L),
-                    _supabase.from('defect_types').select('*').eq('line', 'DAF'),
-                    _supabase.from('defect_types').select('*').eq('line', L)
+            if (L === 'TEST') {
+                const [modelResults, defectResults] = await Promise.all([
+                    Promise.all(SMT.TEST_PROCESS_IDS.map(line => _supabase.from('models').select('*').eq('line', line))),
+                    Promise.all(SMT.TEST_PROCESS_IDS.map(line => _supabase.from('defect_types').select('*').eq('line', line)))
                 ]);
                 const uniqueByName = rows => [...new Map((rows || []).map(row => [String(row.name || '').trim().toUpperCase(), row])).values()];
-                data.value = { workOrders: [], models: uniqueByName([...(dafModels.data || []), ...(ft2Models.data || [])]), defectTypes: uniqueByName([...(dafDefects.data || []), ...(ft2Defects.data || [])]), defectLocations: [], machines: [], oocCauses: [] };
+                data.value = { workOrders: [], models: uniqueByName(modelResults.flatMap(result => result.data || [])), defectTypes: uniqueByName(defectResults.flatMap(result => result.data || [])), defectLocations: [], machines: [], oocCauses: [] };
                 return;
             }
             if (L !== 'SMT') {

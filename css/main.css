@@ -90,6 +90,9 @@
 
 body { background: var(--bg-main); color: var(--text-primary); }
 
+/* Vue 掛載完成前不要顯示尚未編譯的模板內容 */
+[v-cloak] { display: none !important; }
+
 /* 語意化文字色（供 Vue :class 綁定使用） */
 .text-danger  { color: var(--danger) !important; }
 .text-success { color: var(--success) !important; }

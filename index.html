@@ -37,9 +37,6 @@
                 <h1 class="text-lg font-black text-white tracking-wide">科雅光電</h1>
             </div>
             <p class="text-[10px] text-slate-500 font-mono text-center mb-3">生產管理系統</p>
-            <button @click="currentTab = 'yieldOverview'" :class="currentTab === 'yieldOverview' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'" class="w-full rounded-lg px-3 py-2.5 mb-3 text-left text-xs font-bold transition flex items-center gap-2">
-                <i class="fas fa-gauge-high w-5 text-center"></i><span>科雅生產良率總覽</span>
-            </button>
             <!-- 產線切換：各線資料完全獨立 -->
             <div class="line-switch" role="group" aria-label="產線切換">
                 <button v-for="l in visibleLines" :key="l.id" @click="switchLine(l.id)"
@@ -90,73 +87,6 @@
         </div>
 
         <div class="p-4 md:p-6 max-w-6xl mx-auto">
-
-        <!-- ==================== YIELD OVERVIEW ==================== -->
-        <div v-if="currentTab === 'yieldOverview'" class="space-y-5 animate-fade-in">
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                    <h2 class="text-xl md:text-2xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-6 rounded bg-emerald-500"></span>科雅生產良率總覽</h2>
-                    <p class="text-xs text-gray-400 mt-1">快速查看各製程產出、良品、不良與良率</p>
-                </div>
-                <button @click="loadOverview(true)" class="btn-ghost text-sm" :disabled="overviewLoading"><i class="fas fa-sync-alt" :class="overviewLoading ? 'fa-spin' : ''"></i> 更新</button>
-            </div>
-
-                <div class="section-card p-4">
-                    <div class="quick-bar mb-4">
-                        <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
-                        <div class="quick-seg" role="group" aria-label="良率總覽快捷統計區間">
-                            <button @click="setQuickMode('day')" :class="{ 'is-active': quickMode === 'day' }" :aria-pressed="quickMode === 'day'">日</button>
-                            <button @click="setQuickMode('week')" :class="{ 'is-active': quickMode === 'week' }" :aria-pressed="quickMode === 'week'">週</button>
-                            <button @click="setQuickMode('month')" :class="{ 'is-active': quickMode === 'month' }" :aria-pressed="quickMode === 'month'">月</button>
-                        </div>
-                        <div v-if="quickMode" class="quick-nav">
-                            <button @click="shiftQuick(-1)" class="quick-arrow" :title="'上一' + (quickMode === 'day' ? '日' : quickMode === 'week' ? '週' : '月')" aria-label="上一期"><i class="fas fa-chevron-left"></i></button>
-                            <div class="quick-range"><span class="quick-range-text font-mono">{{ quickLabel }}</span><span class="quick-range-rel">{{ quickRelative }}</span></div>
-                            <button @click="shiftQuick(1)" class="quick-arrow" :title="'下一' + (quickMode === 'day' ? '日' : quickMode === 'week' ? '週' : '月')" aria-label="下一期"><i class="fas fa-chevron-right"></i></button>
-                        </div>
-                        <span v-else class="quick-hint">選擇後可用 <i class="fas fa-chevron-left mx-0.5"></i><i class="fas fa-chevron-right mx-0.5"></i> 快速切換期間</span>
-                    </div>
-                    <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-end">
-                    <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">開始日期</label><input type="date" v-model="overviewFilter.start" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
-                    <div class="flex-1"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="overviewFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
-                    <div class="flex gap-2"><button @click="loadOverview(true)" class="btn-primary text-sm"><i class="fas fa-magnifying-glass mr-1"></i>查詢</button><button @click="resetOverviewRange" class="btn-ghost text-sm">近 7 日</button></div>
-                </div>
-                <p class="text-xs text-gray-400 mt-3"><i class="fas fa-circle-info mr-1"></i>統計區間：{{ overviewFilter.start || '不限' }} ~ {{ overviewFilter.end || '不限' }}；Mylar 以成功／NG 作為產出與良率計算基準。</p>
-            </div>
-
-            <div v-if="overviewResult" class="space-y-5">
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ overviewResult.totalInput.toLocaleString() }}</div><div class="kpi-label">總投入／總產能</div></div>
-                    <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ overviewResult.totalOutput.toLocaleString() }}</div><div class="kpi-label">總良品／產出</div></div>
-                    <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ overviewResult.totalDefects.toLocaleString() }}</div><div class="kpi-label">總不良</div></div>
-                    <div class="kpi-card"><div class="kpi-icon purple"><i class="fas fa-chart-pie"></i></div><div class="kpi-value" :class="overviewResult.yieldRate >= 98 ? 'text-success' : overviewResult.yieldRate >= 95 ? 'text-warning' : 'text-danger'">{{ overviewResult.yieldRate }}%</div><div class="kpi-label">總良率</div></div>
-                </div>
-
-                <div class="section-card p-4">
-                    <div class="flex items-center justify-between mb-3"><h3 class="card-title mb-0"><i class="fas fa-industry text-emerald-600"></i>各製程產出與良率</h3><span class="text-xs text-gray-400">各站統計資料</span></div>
-                    <div class="table-wrap"><table class="data-table min-w-[720px]"><thead><tr><th>製程</th><th class="text-right">投入／產能</th><th class="text-right">良品／產出</th><th class="text-right">不良</th><th class="text-right">良率</th><th class="text-right">不良率</th><th>狀態</th></tr></thead><tbody>
-                        <tr v-for="row in overviewResult.process" :key="row.id">
-                            <td class="font-bold text-gray-800">{{ row.label }}</td>
-                            <td class="text-right font-mono">{{ row.input.toLocaleString() }}</td>
-                            <td class="text-right font-mono text-green-700 font-bold">{{ row.output.toLocaleString() }}</td>
-                            <td class="text-right font-mono text-red-600">{{ row.defects.toLocaleString() }}</td>
-                            <td class="text-right font-mono font-bold" :class="row.input ? (parseFloat(row.yieldRate) >= 98 ? 'text-success' : parseFloat(row.yieldRate) >= 95 ? 'text-warning' : 'text-danger') : 'text-gray-400'">{{ row.input ? row.yieldRate + '%' : '-' }}</td>
-                            <td class="text-right font-mono text-red-600">{{ row.input ? row.defectRate + '%' : '-' }}</td>
-                            <td><span v-if="row.input" class="text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">{{ row.daysCount }} 天</span><span v-else class="text-xs text-gray-400">無資料</span></td>
-                        </tr>
-                    </tbody></table></div>
-                    <div v-if="overviewResult.errors" class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2"><i class="fas fa-triangle-exclamation mr-1"></i>部分製程資料來源尚未建立或讀取失敗，該製程暫以 0 顯示。</div>
-                </div>
-
-                <div v-if="overviewResult.days.length" class="section-card p-4">
-                    <h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>全廠每日產出與良率</h3>
-                    <div class="table-wrap"><table class="data-table min-w-[560px]"><thead><tr><th>日期</th><th class="text-right">投入／產能</th><th class="text-right">良品／產出</th><th class="text-right">不良</th><th class="text-right">良率</th></tr></thead><tbody>
-                        <tr v-for="day in overviewResult.days" :key="day.date"><td class="font-mono font-bold">{{ day.date }}</td><td class="text-right font-mono">{{ day.input.toLocaleString() }}</td><td class="text-right font-mono text-green-700">{{ day.output.toLocaleString() }}</td><td class="text-right font-mono text-red-600">{{ day.defects.toLocaleString() }}</td><td class="text-right font-mono font-bold">{{ day.input ? (day.output / day.input * 100).toFixed(2) + '%' : '-' }}</td></tr>
-                    </tbody></table></div>
-                </div>
-            </div>
-            <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-line"></i><div class="title">正在載入生產良率資料</div><div class="hint">請稍候或調整統計日期區間</div></div></div>
-        </div>
 
         <!-- ==================== DASHBOARD ==================== -->
         <div v-if="currentTab === 'dashboard'" class="space-y-6 animate-fade-in">
@@ -1866,9 +1796,6 @@
 
     <!-- Mobile Bottom Nav (5 items + more menu) -->
     <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around px-1 py-1 z-50 shadow-lg">
-        <a @click="currentTab = 'yieldOverview'" :class="currentTab === 'yieldOverview' ? 'active text-emerald-600' : 'text-gray-400'" class="mobile-nav-item">
-            <i class="fas fa-gauge-high text-base"></i><span class="text-[10px] mt-0.5 font-bold">良率</span>
-        </a>
         <a @click="currentTab = 'dashboard'" :class="currentTab === 'dashboard' ? 'active text-blue-600' : 'text-gray-400'" class="mobile-nav-item">
             <i class="fas fa-th-large text-base"></i><span class="text-[10px] mt-0.5 font-bold">總覽</span>
         </a>
@@ -1888,7 +1815,6 @@
                 <a v-if="!hideOoc" @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
                 <a v-if="!hideLineTools" @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
-                <a @click="currentTab='yieldOverview'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='yieldOverview' ? 'text-emerald-600 bg-emerald-50' : 'text-gray-600'"><i class="fas fa-gauge-high w-5 mr-2"></i>良率總覽</a>
                 <a v-if="!hideSettings" @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
                 <div class="border-t border-gray-100 mt-2 pt-2">
                     <div class="px-4 pb-1 text-[10px] font-bold text-gray-400">切換產線</div>
@@ -1910,7 +1836,6 @@
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608111430"></script>
 <script src="js/stats.js?v=202608121600"></script>
-<script src="js/yield-overview.js?v=202608121600"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608111430"></script>
 <script src="js/app.js?v=202608121600"></script>

@@ -14,7 +14,7 @@ SMT.LINES = [
 SMT.LINE_KEY = 'koya_current_line';
 
 SMT.core = function (ctx) {
-        const currentTab = ref('yieldOverview');
+        const currentTab = ref('dashboard');
         const loading = ref(false);
         const showWoModal = ref(false);
         const showMobileMore = ref(false);

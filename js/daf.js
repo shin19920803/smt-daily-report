@@ -29,6 +29,7 @@ SMT.daf = function (ctx) {
     ];
     const TEST_PROCESS_IDS = TEST_PROCESS_OPTIONS.map(item => item.id);
     const TEST_PROCESS_STORAGE_KEY = 'koya_test_process_v1';
+    const TEST_LOCAL_RESET_KEY = 'koya_test_log_reset_v2';
     const readStoredTestProcess = () => {
         try {
             const saved = localStorage.getItem(TEST_PROCESS_STORAGE_KEY);
@@ -51,15 +52,16 @@ SMT.daf = function (ctx) {
     const currentDafLabel = () => isUnifiedTestLine() ? dafProcessMeta.value.label : currentLineMeta.value.label;
     const processLabel = line => TEST_PROCESS_OPTIONS.find(item => item.id === line)?.label || line;
     const defaultDafDefect = processLine => processLine === 'FT2' ? '偵測失效' : '未填寫不良原因';
+    const TEST_PROCESS_ALIASES = Object.freeze({
+        DAF: 'DAF', 'DAF外觀檢查': 'DAF',
+        FT1: 'FT1', '功能一測試': 'FT1',
+        FT2: 'FT2', '功能二測試': 'FT2',
+        LIGHTING: 'LIGHTING', '點亮測試': 'LIGHTING', '外觀檢查點亮測試': 'LIGHTING',
+        ASSEMBLY: 'ASSEMBLY', '輝度機': 'ASSEMBLY', '輝度機測試': 'ASSEMBLY'
+    });
     const detectTestProcess = value => {
         const text = normalizeText(value).replace(/\s+/g, '');
-        if (!text) return null;
-        if (/LIGHTING|點亮測試|外觀檢查點亮測試/.test(text)) return 'LIGHTING';
-        if (/FT2|功能二測試/.test(text)) return 'FT2';
-        if (/FT1|功能一測試/.test(text)) return 'FT1';
-        if (/ASSEMBLY|輝度機|灰度機/.test(text)) return 'ASSEMBLY';
-        if (/DAF|DAF外觀檢查/.test(text)) return 'DAF';
-        return null;
+        return text ? TEST_PROCESS_ALIASES[text] || null : null;
     };
     const setDafProcess = line => {
         if (!TEST_PROCESS_IDS.includes(line)) return;
@@ -324,18 +326,13 @@ SMT.daf = function (ctx) {
         const { rows: sourceRows, columnCount } = await readFileRows(file);
         const dataRows = sourceRows.slice(1);
         const groupedRows = new Map();
-        const unrecognizedRows = [];
         dataRows.forEach(row => {
             const processLine = detectTestProcess(row[0]);
-            if (!processLine) {
-                if (row.some(cell => cleanText(cell) !== '')) unrecognizedRows.push(row);
-                return;
-            }
+            if (!processLine) return;
             const rows = groupedRows.get(processLine) || [];
             rows.push(row);
             groupedRows.set(processLine, rows);
         });
-        if (unrecognizedRows.length) throw new Error(`A欄有 ${unrecognizedRows.length} 列無法辨識製程；請填入 DAF外觀檢查、功能一測試、功能二測試、外觀檢查點亮測試或輝度機測試`);
         if (!groupedRows.size) throw new Error('檔案沒有可辨識的製程資料，請確認 A 欄內容');
         const buildBatch = (processLine, sourceRowsForProcess) => {
             const rows = deduplicateRows(sourceRowsForProcess);
@@ -420,6 +417,13 @@ SMT.daf = function (ctx) {
             ...TEST_PROCESS_IDS.flatMap(line => readStorageKey(legacyStorageKey(line), line)),
             ...readStorageKey(TEST_STORAGE_KEY)
         ];
+    };
+    const clearTestLocalCacheOnce = () => {
+        try {
+            if (localStorage.getItem(TEST_LOCAL_RESET_KEY) === '1') return;
+            [TEST_STORAGE_KEY, ...TEST_PROCESS_IDS.map(legacyStorageKey)].forEach(key => localStorage.removeItem(key));
+            localStorage.setItem(TEST_LOCAL_RESET_KEY, '1');
+        } catch (e) {}
     };
     // 本機只保存統計所需欄位；原始 raw 欄位由 Supabase 批次資料保留，避免大量 LOG 撐滿 localStorage。
     const compactDafBatch = batch => ({
@@ -1216,6 +1220,7 @@ SMT.daf = function (ctx) {
             } else trendChart = disposeChart(trendChart);
         });
     };
+    clearTestLocalCacheOnce();
     dafModelMappings.value = readModelMappings();
     dafBatches.value = deduplicateDafBatches(readStorage()).batches;
     learnModelMappings(dafBatches.value);

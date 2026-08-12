@@ -264,7 +264,7 @@ SMT.daf = function (ctx) {
         if (!sheet) throw new Error('檔案沒有可讀取的工作表');
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' })
             .filter(row => row.some(cell => cleanText(cell) !== ''));
-        const columnCount = Math.max(0, ...rows.map(row => row.length));
+        const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
         const minColumns = currentDafColumns().minColumns;
         if (columnCount < minColumns) throw new Error(`${currentDafLabel()} 檔案目前只有 ${columnCount} 欄，至少需要 ${minColumns} 欄才能讀取狀態欄`);
         return { rows, columnCount };
@@ -1152,7 +1152,7 @@ SMT.daf = function (ctx) {
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
         const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期', '原始欄位格式'];
         const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, row.sourceFormat === CURRENT_SOURCE_FORMAT ? '新格式 B／D／E／F／H／I' : '舊格式 C／E／F／G／I／J', ...(row.raw || [])]);
-        const rawColumns = Math.max(LEGACY_COLUMNS.minColumns, CURRENT_COLUMNS.minColumns, ...result.rows.map(row => (row.raw || []).length));
+        const rawColumns = result.rows.reduce((max, row) => Math.max(max, (row.raw || []).length), Math.max(LEGACY_COLUMNS.minColumns, CURRENT_COLUMNS.minColumns));
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄`);
         const wb = XLSX.utils.book_new();
         const sheets = [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['每日統計', daily], ['原始資料', [rawHeader, ...rawRows]]];

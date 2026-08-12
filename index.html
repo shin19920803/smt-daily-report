@@ -134,12 +134,14 @@
                         <p class="text-xs text-gray-400 mt-1">依所選製程顯示投入、產出、不良與工單狀況</p>
                     </div>
                     <div class="flex items-center gap-2">
-                        <label class="flex items-center gap-2 bg-white border border-purple-200 rounded-lg px-3 py-1.5 text-xs font-bold text-purple-700"><i class="fas fa-filter"></i><select v-model="dafProcess" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" aria-label="選擇測試製程"><option v-for="process in dafProcessOptions" :key="process.id" :value="process.id">{{ process.label }}</option></select></label>
                         <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left text-xs"></i></button>
                         <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5"><i class="fas fa-calendar-day text-purple-500 text-sm"></i><input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;"></div>
                         <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right text-xs"></i></button>
                         <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2" role="tablist" aria-label="選擇製程">
+                    <button v-for="process in dafProcessOptions" :key="process.id" @click="setDafProcess(process.id)" :class="dafProcess === process.id ? 'bg-purple-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:border-purple-300 hover:text-purple-700'" class="rounded-lg px-3 py-2.5 text-sm font-bold transition" role="tab" :aria-selected="dafProcess === process.id">{{ process.label }}</button>
                 </div>
                 <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} {{ dafProcessMeta.label }} 生產概況</p>
                 <div v-if="dafDashboardResult && !dafDashboardResult.sourceFiles.length" class="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800"><i class="fas fa-info-circle mr-1"></i>選擇日期沒有 {{ dafProcessMeta.label }} 報工；當日數據顯示 0，週統計與近 14 個有投入日期仍會保留。</div>
@@ -1035,9 +1037,11 @@
             </div>
             <div v-else-if="currentLine === 'TEST'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4">
-                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-gray-100">
+                    <div class="mb-4 pb-4 border-b border-gray-100">
                         <div><h3 class="font-black text-purple-800"><i class="fas fa-filter mr-2"></i>各製程</h3><p class="text-xs text-gray-400 mt-1">總覽與統計共用目前選擇的製程</p></div>
-                        <select v-model="dafProcess" class="border border-purple-200 rounded-lg p-2 text-sm font-bold text-purple-800 bg-white" aria-label="選擇各製程"><option v-for="process in dafProcessOptions" :key="process.id" :value="process.id">{{ process.label }}</option></select>
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3" role="tablist" aria-label="選擇各製程">
+                            <button v-for="process in dafProcessOptions" :key="process.id" @click="setDafProcess(process.id)" :class="dafProcess === process.id ? 'bg-purple-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:border-purple-300 hover:text-purple-700'" class="rounded-lg px-3 py-2.5 text-sm font-bold transition" role="tab" :aria-selected="dafProcess === process.id">{{ process.label }}</button>
+                        </div>
                     </div>
                     <div class="quick-bar mb-4">
                         <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>

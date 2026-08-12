@@ -12,7 +12,7 @@ SMT.TEST_PROCESSES = [
 SMT.TEST_PROCESS_IDS = SMT.TEST_PROCESSES.map(item => item.id);
 SMT.LINES = [
     { id: 'SMT', label: 'SMT', icon: 'fa-microchip', canImport: true },
-    { id: 'TEST', label: '測試站', icon: 'fa-vials', canImport: false },
+    { id: 'TEST', label: 'DAF/組裝測試', icon: 'fa-vials', canImport: false },
     { id: 'ASSY', label: 'Mylar', icon: 'fa-screwdriver-wrench', canImport: false }
 ];
 SMT.LINE_KEY = 'koya_current_line';

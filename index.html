@@ -161,98 +161,38 @@
                 <div v-else class="section-card"><div class="empty-state py-16"><i class="fas fa-file-circle-question"></i><div class="title">尚無 {{ currentLineMeta.label }} LOG</div><div class="hint">前往「每日報工」上傳檔案；有資料日期會自動出現在近 14 日統計</div></div></div>
             </div>
             <div v-else>
-            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-                <div>
-                    <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-blue-600 rounded inline-block"></span>總覽儀表板</h2>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-left text-xs"></i></button>
-                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
-                        <i class="fas fa-calendar-day text-blue-500 text-sm"></i>
-                        <input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;">
+                <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                    <div>
+                        <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-blue-600 rounded inline-block"></span>SMT 總覽儀表板</h2>
+                        <p class="text-xs text-gray-400 mt-1">依 SMT 生產資料顯示投入、產出、不良與工單狀況</p>
                     </div>
-                    <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition"><i class="fas fa-chevron-right text-xs"></i></button>
-                    <button @click="dashDate = new Date().toISOString().split('T')[0]" class="px-2 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition">今天</button>
-                    <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
-                </div>
-            </div>
-            <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} — {{ dashDate === new Date().toISOString().split('T')[0] ? '今日' : '' }}生產概況</p>
-
-            <!-- KPI Cards -->
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <div class="kpi-card cursor-pointer" @click="openSmtActiveWoDetail">
-                    <div class="kpi-icon blue"><i class="fas fa-layer-group"></i></div>
-                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.activeWoCount }}</div>
-                    <div class="text-xs text-gray-400 font-medium">進行中工單</div>
-                </div>
-                <div class="kpi-card cursor-pointer" @click="openSmtInputDetail">
-                    <div class="kpi-icon green"><i class="fas fa-cubes"></i></div>
-                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.todayInput }}</div>
-                    <div class="text-xs text-gray-400 font-medium">當日投入</div>
-                </div>
-                <div class="kpi-card cursor-pointer" @click="openSmtYieldDetail">
-                    <div class="kpi-icon purple"><i class="fas fa-chart-pie"></i></div>
-                    <div class="text-2xl font-black mb-0.5" :class="dashboard.todayYield >= 98 ? 'text-green-600' : dashboard.todayYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.todayYield }}%</div>
-                    <div class="text-xs text-gray-400 font-medium">當日良率</div>
-                </div>
-                <div class="kpi-card cursor-pointer" @click="openSmtDefectDetail">
-                    <div class="kpi-icon red"><i class="fas fa-times-circle"></i></div>
-                    <div class="text-2xl font-black text-gray-900 mb-0.5">{{ dashboard.todayDefects }}</div>
-                    <div class="text-xs text-gray-400 font-medium">當日不良</div>
-                </div>
-                <div class="kpi-card cursor-pointer" @click="openSmtWeekDetail">
-                    <div class="kpi-icon cyan"><i class="fas fa-chart-line"></i></div>
-                    <div class="text-2xl font-black mb-0.5" :class="dashboard.weekAvgYield >= 98 ? 'text-green-600' : dashboard.weekAvgYield >= 95 ? 'text-yellow-600' : 'text-red-600'">{{ dashboard.weekAvgYield }}%</div>
-                    <div class="text-xs text-gray-400 font-medium">本週均良率</div>
-                </div>
-            </div>
-
-            <!-- Dashboard ECharts -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div class="section-card">
-                    <div class="card-header">
-                        <div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-chart-line text-xs"></i></div>
-                        近 14 日產出與良率
-                    </div>
-                    <div id="dashYieldChart" style="width:100%;height:220px;"></div>
-                </div>
-                <div class="section-card">
-                    <div class="card-header">
-                        <div class="card-header-icon" style="background:#dcfce7;color:#16a34a"><i class="fas fa-chart-bar text-xs"></i></div>
-                        當日不良原因排行
-                    </div>
-                    <div id="dashInputChart" style="width:100%;height:220px;"></div>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <!-- Recent Activity -->
-                <div class="section-card">
-                    <div class="card-header"><div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-clock text-xs"></i></div>近期生產動態</div>
-                    <div class="p-3 space-y-2 max-h-64 overflow-y-auto">
-                        <button v-for="rec in dashboardRecentProds" :key="rec.id" @click="openDashboardDetail(rec.detail)" class="w-full flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 text-sm border border-transparent hover:border-gray-100 transition text-left">
-                            <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">{{ rec.date.slice(8) }}</div>
-                                <div>
-                                    <div class="font-bold text-gray-700">{{ rec.workOrder }}</div>
-                                    <div class="text-xs text-gray-400">{{ rec.model }}</div>
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <div class="font-bold font-mono">{{ rec.input }}</div>
-                                <div v-if="rec.defects > 0" class="text-xs text-red-500">不良 {{ rec.defects }}</div>
-                                <div v-else class="text-xs text-green-500">無不良</div>
-                            </div>
-                        </button>
-                        <div v-if="dashboardRecentProds.length === 0" class="empty-state py-8">
-                            <i class="fas fa-inbox"></i>
-                            <div class="title">尚無生產紀錄</div>
-                            <div class="hint">前往「每日報工」開始記錄</div>
-                        </div>
+                    <div class="flex items-center gap-2">
+                        <button @click="changeDashDate(-1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="前一天" aria-label="前一天"><i class="fas fa-chevron-left text-xs"></i></button>
+                        <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5"><i class="fas fa-calendar-day text-blue-500 text-sm"></i><input type="date" v-model="dashDate" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" style="font-size:14px !important;"></div>
+                        <button @click="changeDashDate(1)" class="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition" title="後一天" aria-label="後一天"><i class="fas fa-chevron-right text-xs"></i></button>
+                        <button @click="dashDate = new Date().toISOString().split('T')[0]" class="px-2 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition">今天</button>
+                        <button @click="refreshDashboardAndCharts" class="btn-ghost text-sm"><i class="fas fa-sync-alt"></i></button>
                     </div>
                 </div>
-
-            </div>
+                <p class="text-xs text-gray-400 -mt-4">{{ dashDate }} SMT 生產概況</p>
+                <div class="space-y-5">
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                        <div class="kpi-card cursor-pointer" @click="openSmtInputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dashboard.todayInput.toLocaleString() }}</div><div class="kpi-label">當日投入</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openSmtYieldDetail"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ smtGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openSmtDefectDetail"><div class="kpi-icon red"><i class="fas fa-triangle-exclamation"></i></div><div class="kpi-value text-danger">{{ dashboard.todayDefects.toLocaleString() }}</div><div class="kpi-label">不良數</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openSmtYieldDetail"><div class="kpi-icon red"><i class="fas fa-chart-pie"></i></div><div class="kpi-value text-danger">{{ smtDefectRate }}%</div><div class="kpi-label">不良率</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openSmtWeekDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value text-purple-700">{{ smtWeekInput.toLocaleString() }}</div><div class="kpi-label">本週投入</div></div>
+                        <div class="kpi-card cursor-pointer" @click="openSmtWeekDetail"><div class="kpi-icon purple"><i class="fas fa-calendar-week"></i></div><div class="kpi-value text-success">{{ dashboard.weekAvgYield }}%</div><div class="kpi-label">本週平均良率</div></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#dbeafe;color:#2563eb"><i class="fas fa-chart-line text-xs"></i></div>近 14 日投入量與良率</div><div id="dashYieldChart" style="width:100%;height:240px;"></div></div>
+                        <div class="section-card"><div class="card-header"><div class="card-header-icon" style="background:#fee2e2;color:#dc2626"><i class="fas fa-chart-bar text-xs"></i></div>當日不良原因排行</div><div id="dashInputChart" style="width:100%;height:240px;"></div><div v-if="!smtDashboardData.byType.length" class="empty-state py-5"><div class="hint">當日沒有不良資料</div></div></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-microchip text-purple-600"></i>當日機種分佈</h3><div v-if="smtDashboardData.byModel.length" class="space-y-2"><button v-for="row in smtDashboardData.byModel" :key="row.name" @click="openSmtModelDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-purple-50 rounded-lg p-1"><span class="flex-1 truncate font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無機種資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-file-alt text-blue-600"></i>當日工單分佈</h3><div v-if="smtDashboardData.byWorkOrder.length" class="space-y-2"><button v-for="row in smtDashboardData.byWorkOrder" :key="row.name" @click="openSmtWorkOrderDetail(row)" class="w-full flex items-center gap-2 text-sm text-left hover:bg-blue-50 rounded-lg p-1"><span class="flex-1 truncate font-mono font-bold">{{ row.name }}</span><span class="font-mono">{{ row.qty }} 件</span><span class="font-mono text-xs text-green-600 w-16 text-right">良率 {{ row.yieldRate }}%</span></button></div><div v-else class="empty-state py-8"><div class="hint">無工單資料</div></div></div>
+                    </div>
+                </div>
             </div>
         </div>
 

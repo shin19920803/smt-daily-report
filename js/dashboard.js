@@ -13,6 +13,9 @@ SMT.dashboard = function (ctx) {
         const assemblyWeekDays = ref([]);
         const dafWeekDays = ref([]);
         const dafWeekInput = computed(() => dafWeekDays.value.reduce((sum, day) => sum + (Number(day.report?.totalInput) || 0), 0));
+        const smtWeekInput = computed(() => smtDashboardData.value.weekDays.reduce((sum, day) => sum + (Number(day.input) || 0), 0));
+        const smtGood = computed(() => Math.max(0, (Number(dashboard.value.todayInput) || 0) - (Number(dashboard.value.todayDefects) || 0)));
+        const smtDefectRate = computed(() => dashboard.value.todayInput ? ((dashboard.value.todayDefects / dashboard.value.todayInput) * 100).toFixed(2) : '0.00');
         const dashboardAvailableDates = ref([]);
 
         const closeDashboardDetail = () => {
@@ -237,12 +240,15 @@ SMT.dashboard = function (ctx) {
                 day.defects += row.defects;
             });
             const weekDays = Object.values(weekMap).filter(day => day.input > 0).sort((a, b) => a.date.localeCompare(b.date)).map(day => ({ ...day, yieldRate: calcYield(day.input, day.defects), detail: buildSmtDateDetail(day.date, weekRows.filter(row => row.production_date === day.date)) }));
+            const byModel = listFromMap(Object.fromEntries(Object.entries(modelAgg).map(([key, value]) => [key, value.input])), input, (key) => modelDetail(key, modelAgg[key]))
+                .map(row => ({ ...row, name: row.key, good: modelAgg[row.key].input - modelAgg[row.key].defects, defects: modelAgg[row.key].defects, yieldRate: calcYield(modelAgg[row.key].input, modelAgg[row.key].defects) }));
+            const byWorkOrder = listFromMap(Object.fromEntries(Object.entries(workOrderAgg).map(([key, value]) => [key, value.input])), input, (key) => workOrderDetail(key, workOrderAgg[key]))
+                .map(row => ({ ...row, name: row.key, good: workOrderAgg[row.key].input - workOrderAgg[row.key].defects, defects: workOrderAgg[row.key].defects, yieldRate: calcYield(workOrderAgg[row.key].input, workOrderAgg[row.key].defects) }));
             return {
                 production: normalized.map(row => ({ ...row, detail: makeProductionDetail(row) })),
                 byType: listFromMap(Object.fromEntries(Object.entries(typeAgg).map(([key, value]) => [key, value.qty])), defects, (key) => typeDetail(key, typeAgg[key])),
                 byLocation: listFromMap(Object.fromEntries(Object.entries(locationAgg).map(([key, value]) => [key, value.qty])), defects, (key) => locationDetail(key, locationAgg[key])),
-                byModel: listFromMap(Object.fromEntries(Object.entries(modelAgg).map(([key, value]) => [key, value.input])), input, (key) => modelDetail(key, modelAgg[key])),
-                byWorkOrder: listFromMap(Object.fromEntries(Object.entries(workOrderAgg).map(([key, value]) => [key, value.input])), input, (key) => workOrderDetail(key, workOrderAgg[key])),
+                byModel, byWorkOrder,
                 weekDays, trendDays: buildSmtTrendData(trendRows), weekRange
             };
         };
@@ -363,6 +369,8 @@ SMT.dashboard = function (ctx) {
             title: '進行中工單', subtitle: '目前尚未完成的工單',
             sections: [makeDistributionSection('工單清單', 'fa-file-alt', data.value.workOrders.filter(wo => !wo.is_closed && (wo.target_quantity - (wo.current_input || 0)) > 0).map(wo => ({ label: wo.wo_number, qty: wo.target_quantity - (wo.current_input || 0), ratio: '', meta: wo.models?.name })))]
         });
+        const openSmtModelDetail = row => openDashboardDetail(row?.detail);
+        const openSmtWorkOrderDetail = row => openDashboardDetail(row?.detail);
         const openSmtDateDetail = async date => {
             try {
                 loading.value = true;
@@ -590,7 +598,7 @@ SMT.dashboard = function (ctx) {
                     tooltip:{trigger:'axis',formatter:p=>{let s=p[0]?.axisValue||'';p.forEach(v=>{s+=`<br/>${v.marker}${v.seriesName}: <b>${v.value === null || v.value === undefined ? '無資料' : v.seriesName === '良率' ? v.value + '%' : v.value.toLocaleString()}</b>`;});return s;}},
                     xAxis:{type:'category',data:labels,axisLabel:{fontSize:10,color:'#9ca3af'},axisLine:{lineStyle:{color:'#e5e7eb'}},splitLine:{show:false}},
                     yAxis:[{type:'value',name:'投入',min:0,axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},{type:'value',name:'良率',min:0,max:100,axisLabel:{formatter:'{value}%',fontSize:10,color:'#9ca3af'},splitLine:{show:false}}],
-                    series:[{name:'投入數',type:'bar',data:inputs,barMaxWidth:24,itemStyle:{color:'#bfdbfe',borderRadius:[4,4,0,0]}},{name:'良率',type:'line',yAxisIndex:1,data:yields,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:'#7c3aed',width:2.5},itemStyle:{color:'#7c3aed'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(124,58,237,0.15)'},{offset:1,color:'rgba(124,58,237,0)'}]}}}]
+                    series:[{name:'投入數',type:'bar',data:inputs,barMaxWidth:24,itemStyle:{color:'#c4b5fd',borderRadius:[4,4,0,0]}},{name:'良率',type:'line',yAxisIndex:1,data:yields,smooth:true,symbol:'circle',symbolSize:6,lineStyle:{color:'#7c3aed',width:2.5},itemStyle:{color:'#7c3aed'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(124,58,237,0.16)'},{offset:1,color:'rgba(124,58,237,0)'}]}},label:{show:true,position:'top',formatter:'{c}%',fontSize:9}}]
                 });
                 if (dashYieldChartInst.off) dashYieldChartInst.off('click');
                 if (dashYieldChartInst.on) dashYieldChartInst.on('click', params => { if (days[params.dataIndex]) openSmtDateDetail(days[params.dataIndex]); });
@@ -599,7 +607,7 @@ SMT.dashboard = function (ctx) {
             if (inputEl) {
                 dashInputChartInst = ensureDashboardChart(dashInputChartInst, inputEl);
                 setDashboardOption(dashInputChartInst, {
-                    grid:{top:12,right:24,bottom:24,left:112},
+                    grid:{top:12,right:24,bottom:24,left:120},
                     tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:p=>p[0].name+'<br/><b>'+p[0].value+' 件</b>'},
                     xAxis:{type:'value',minInterval:1,axisLabel:{fontSize:10,color:'#9ca3af'},splitLine:{lineStyle:{color:'#f3f4f6'}}},
                     yAxis:{type:'category',data:currentTypeRows.map(row=>row.label),axisLabel:{fontSize:10,color:'#6b7280'}},
@@ -638,10 +646,10 @@ SMT.dashboard = function (ctx) {
         });
         return {
             dashboard, assemblyDashboardResult, dafDashboardResult, dashboardRecentProds, dashboardRecentOoc, dashDate, dashboardAvailableDates,
-            dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays, dafWeekInput,
+            dashboardDetail, smtDashboardData, assemblyWeekDays, dafWeekDays, dafWeekInput, smtWeekInput, smtGood, smtDefectRate,
             changeDashDate, refreshDashboard, refreshDashboardAndCharts, initDashboardCharts, invalidateDashboardDateCache,
             openDashboardDetail, openDashboardDetailItem, closeDashboardDetail, saveDashboardNote,
-            openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail,
+            openSmtInputDetail, openSmtYieldDetail, openSmtDefectDetail, openSmtWeekDetail, openSmtActiveWoDetail, openSmtModelDetail, openSmtWorkOrderDetail,
             openDafInputDetail, openDafYieldDetail, openDafDefectDashboardDetail, openDafWeekDetail,
             openDafModelDetail, openDafWorkOrderDetail,
             openAssemblyInputDetail, openAssemblyRateDetail, openAssemblyDefectDashboardDetail, openAssemblyReasonDashboard, openAssemblyHourDetail, openAssemblyWeekDetail

@@ -996,6 +996,10 @@
                         </div>
                     </div>
                     <div class="section-card p-4">
+                        <h3 class="card-title"><i class="fas fa-bug text-red-600"></i>不良原因明細 <span v-if="assemblyStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊查看 LOG 細項</span></h3>
+                        <div class="table-wrap"><table class="data-table min-w-[620px]"><thead><tr><th>不良原因</th><th class="text-right">不良數</th><th class="text-right">占總紀錄比例</th><th class="text-right">占不良比例</th></tr></thead><tbody><tr v-for="row in assemblyStatsResult.byType" :key="row.name" @click="openAssemblySourceDetail(row.name)" class="cursor-pointer hover:bg-red-50"><td class="font-bold">{{ row.name }}</td><td class="text-right font-mono text-danger font-bold">{{ row.qty }}</td><td class="text-right font-mono">{{ row.inputRatio }}%</td><td class="text-right font-mono">{{ row.ratio }}%</td></tr><tr v-if="!assemblyStatsResult.byType.length"><td colspan="4" class="text-center text-gray-400 py-6">無不良資料</td></tr></tbody></table></div>
+                    </div>
+                    <div class="section-card p-4">
                             <h3 class="card-title"><i class="fas fa-clock text-blue-500"></i>每小時統計（每日平均）</h3>
                             <div class="table-wrap max-h-80">
                                 <table class="data-table min-w-[420px]"><thead><tr><th>時段</th><th class="text-right">平均成功</th><th class="text-right">平均 NG</th><th class="text-right">停機率</th></tr></thead>
@@ -1772,7 +1776,7 @@
 <script src="js/core.js?v=202608121600"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
-<script src="js/assembly.js?v=202608121600"></script>
+<script src="js/assembly.js?v=202608121509"></script>
 <script src="js/daf.js?v=202608121600"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>

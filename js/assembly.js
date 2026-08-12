@@ -557,7 +557,9 @@ SMT.assembly = function (ctx) {
         }));
         const totalRecords = success + ng;
         const byTypeList = Object.entries(byType).map(([name, qty]) => ({
-            name, qty, ratio: ng ? (qty / ng * 100).toFixed(1) : '0.0',
+            name, qty,
+            inputRatio: totalRecords ? (qty / totalRecords * 100).toFixed(1) : '0.0',
+            ratio: ng ? (qty / ng * 100).toFixed(1) : '0.0',
             sourceItems: Object.entries(sourceByType[name] || {})
                 .map(([message, sourceQty]) => ({ message, qty: sourceQty, ratio: qty ? (sourceQty / qty * 100).toFixed(1) : '0.0' }))
                 .sort((a, b) => b.qty - a.qty),
@@ -1202,8 +1204,8 @@ SMT.assembly = function (ctx) {
             ['統計區間', range], ['產出成功', result.totalSuccess], ['NG / 停機不良', result.totalDefects],
             ['停機率', result.downtimeRate + '%'], ['LOG 總紀錄', result.totalRecords], ['每小時平均天數', result.periodDays],
             ['忽略行數', result.ignored], ['未分類行數', result.unclassified], [],
-            ['停機／不良原因', '次數', '佔 NG 比例'],
-            ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])
+            ['停機／不良原因', '次數', '占總紀錄比例', '佔 NG 比例'],
+            ...result.byType.map(row => [row.name, row.qty, row.inputRatio + '%', row.ratio + '%'])
         ];
         const daily = [['日期', '生產成功', 'NG 次數', '停機率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.downtimeRate + '%'])];
@@ -1211,6 +1213,8 @@ SMT.assembly = function (ctx) {
             ...(result.byModel || []).map(row => [row.name, row.success, row.ng, row.total, row.successRate + '%', row.downtimeRate + '%'])];
         const pareto = [['停機／不良現象', '次數', '佔 NG 比例'],
             ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
+        const defectDetails = [['不良原因', '不良數', '占總紀錄比例', '占不良比例'],
+            ...result.byType.map(row => [row.name, row.qty, row.inputRatio + '%', row.ratio + '%'])];
         const yieldTrend = [['日期', '產出成功', '停機／不良', '良率'],
             ...result.daily.map(row => [row.date, row.success, row.ng, row.successRate + '%'])];
         const outputTrend = [['日期', '產出數', '停機／不良'],
@@ -1229,6 +1233,7 @@ SMT.assembly = function (ctx) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pareto), 'Pareto分析');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daily), '每日統計');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hourly), '每小時統計');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(defectDetails), '不良原因明細');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dailyDefects), '每日NG細項');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceDetails), 'LOG原始細項');
         XLSX.writeFile(wb, 'KOYA_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');

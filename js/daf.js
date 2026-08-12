@@ -486,15 +486,23 @@ SMT.daf = function (ctx) {
         return true;
     };
     const loadDafRemoteRows = async (line = currentDafLine()) => {
-        const pageSize = 500;
+        let pageSize = 3;
         const rows = [];
-        for (let offset = 0; ; offset += pageSize) {
+        let offset = 0;
+        for (;;) {
             const { data: page, error } = await _supabase.from(REMOTE_TABLE)
                 .select('*').eq('line', line).order('uploaded_at', { ascending: false })
                 .range(offset, offset + pageSize - 1);
-            if (error) return { data: null, error };
+            if (error) {
+                if (pageSize > 1 && /timeout|statement/i.test(error.message || '')) {
+                    pageSize = 1;
+                    continue;
+                }
+                return { data: rows, error };
+            }
             rows.push(...(page || []));
             if (!page || page.length < pageSize) return { data: rows, error: null };
+            offset += page.length;
         }
     };
     const rebuildDafBatch = batch => {
@@ -699,7 +707,8 @@ SMT.daf = function (ctx) {
             // 先完成輕量連線確認；完整原始 LOG 在背景載入，避免 Windows 首次開啟時誤顯示本機保存。
             dafRemoteReady.value = true;
             dafRemoteChecking.value = false;
-            const remoteResults = await Promise.all((isUnifiedTestLine() ? TEST_PROCESS_IDS : [line]).map(processLine => loadDafRemoteRows(processLine)));
+            const remoteResults = [];
+            for (const processLine of processLines) remoteResults.push(await loadDafRemoteRows(processLine));
             const error = remoteResults.find(result => result.error)?.error || null;
             const remoteRows = remoteResults.flatMap(result => result.data || []);
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;

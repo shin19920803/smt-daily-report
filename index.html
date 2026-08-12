@@ -131,7 +131,7 @@
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <div>
                         <h2 class="text-xl font-black text-gray-900 flex items-center gap-2"><span class="w-1 h-5 bg-purple-600 rounded inline-block"></span>總覽儀表板</h2>
-                        <p class="text-xs text-gray-400 mt-1">依所選測試製程顯示投入、產出、不良與工單狀況</p>
+                        <p class="text-xs text-gray-400 mt-1">依所選製程顯示投入、產出、不良與工單狀況</p>
                     </div>
                     <div class="flex items-center gap-2">
                         <label class="flex items-center gap-2 bg-white border border-purple-200 rounded-lg px-3 py-1.5 text-xs font-bold text-purple-700"><i class="fas fa-filter"></i><select v-model="dafProcess" class="border-0 p-0 text-sm font-bold text-gray-700 bg-transparent" aria-label="選擇測試製程"><option v-for="process in dafProcessOptions" :key="process.id" :value="process.id">{{ process.label }}</option></select></label>

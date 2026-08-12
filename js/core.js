@@ -5,16 +5,16 @@ window.SMT = window.SMT || {};
 SMT.LINES = [
     { id: 'SMT',  label: 'SMT',      icon: 'fa-microchip',   canImport: true  },
     { id: 'DAF',  label: 'DAF',      icon: 'fa-layer-group', canImport: false },
-    { id: 'FT1',  label: 'FT1',      icon: 'fa-vial-circle-check', canImport: false },
+    { id: 'FT1',  label: 'FT1',      icon: 'fa-flask',              canImport: false },
     { id: 'ASSY', label: 'Mylar',    icon: 'fa-screwdriver-wrench', canImport: false },
     { id: 'ASSEMBLY', label: '灰度機', icon: 'fa-gears',       canImport: false },
     { id: 'LIGHTING', label: '點亮測試', icon: 'fa-lightbulb', canImport: false },
-    { id: 'FT2',  label: 'FT2',      icon: 'fa-vial',         canImport: false }
+    { id: 'FT2',  label: 'FT2',      icon: 'fa-flask',              canImport: false }
 ];
 SMT.LINE_KEY = 'koya_current_line';
 
 SMT.core = function (ctx) {
-        const currentTab = ref('dashboard');
+        const currentTab = ref('yieldOverview');
         const loading = ref(false);
         const showWoModal = ref(false);
         const showMobileMore = ref(false);

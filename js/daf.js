@@ -869,7 +869,7 @@ SMT.daf = function (ctx) {
     const openDafDefectDetail = name => {
         const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
         dafDefectDetail.value = row
-            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [], dailyTrend: (dafStatsResult.value?.daily || []).map(day => ({ date: day.date, qty: day.byType?.[row.name] || 0 })) }
+            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [], dailyTrend: (dafStatsResult.value?.daily || []).map(day => ({ date: day.date, qty: day.byType?.[row.name] || 0, ratio: day.defects ? ((day.byType?.[row.name] || 0) / day.defects * 100).toFixed(2) : '0.00' })) }
             : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
     };
     const closeDafDefectDetail = () => {
@@ -1063,16 +1063,20 @@ SMT.daf = function (ctx) {
             if (!el || !dafDefectDetail.value.show || !trend.length) { defectTrendChart = disposeChart(defectTrendChart); return; }
             if (!defectTrendChart || defectTrendChart.getDom() !== el) { defectTrendChart = disposeChart(defectTrendChart); defectTrendChart = echarts.init(el); }
             const labels = trend.map(row => row.date.slice(5));
-            const values = trend.map(row => row.qty);
+            const quantities = trend.map(row => row.qty);
+            const ratios = trend.map(row => Number(row.ratio));
             defectTrendChart.setOption({
-                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params.map(item => `${item.marker}${item.seriesName}: <b>${Number(item.value || 0).toLocaleString()}</b>`).join('<br/>')}` },
-                legend: { data: ['每日發生次數', '趨勢線'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
-                grid: { top: 58, right: 20, bottom: 44, left: 48 },
+                tooltip: { trigger: 'axis', formatter: params => `${params[0]?.axisValue || ''}<br/>${params.map(item => `${item.marker}${item.seriesName}: <b>${item.seriesName === '不良比例' ? Number(item.value || 0).toFixed(2) + '%' : Number(item.value || 0).toLocaleString()}</b>`).join('<br/>')}` },
+                legend: { data: ['每日發生次數', '不良比例'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
+                grid: { top: 58, right: 58, bottom: 44, left: 48 },
                 xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10, color: '#9ca3af' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-                yAxis: { type: 'value', name: '次數', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                yAxis: [
+                    { type: 'value', name: '次數', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+                    { type: 'value', name: '比例', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10, color: '#9ca3af' }, splitLine: { show: false } }
+                ],
                 series: [
-                    { name: '每日發生次數', type: 'bar', data: values, barMaxWidth: 24, itemStyle: { color: '#fca5a5', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 9 } },
-                    { name: '趨勢線', type: 'line', data: values, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#dc2626', width: 2.5 }, itemStyle: { color: '#dc2626' } }
+                    { name: '每日發生次數', type: 'bar', data: quantities, barMaxWidth: 24, itemStyle: { color: '#fca5a5', borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 9 } },
+                    { name: '不良比例', type: 'line', yAxisIndex: 1, data: ratios, smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#dc2626', width: 2.5 }, itemStyle: { color: '#dc2626' }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }
                 ]
             });
         });

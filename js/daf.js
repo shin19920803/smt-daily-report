@@ -495,12 +495,12 @@ SMT.daf = function (ctx) {
     });
     const saveRemote = async (batch) => {
         if (!dafRemoteReady.value) return false;
-        const { error } = await _supabase.from(REMOTE_TABLE).upsert(toRemote(batch), { onConflict: 'id' });
-        if (error) { dafRemoteError.value = error.message || `${currentDafLabel()} 共用資料庫寫入失敗`; return false; }
-        return true;
+        const { data, error } = await _supabase.from(REMOTE_TABLE).upsert(toRemote(batch), { onConflict: 'id' }).select('id').maybeSingle();
+        if (error || !data?.id) { dafRemoteError.value = error?.message || `${currentDafLabel()} 共用資料庫未確認寫入`; return false; }
+        return data.id === batch.id;
     };
     const deleteRemote = async (id, batchOverride = null) => {
-        if (!dafRemoteReady.value) return true;
+        if (!dafRemoteReady.value) return false;
         const batch = batchOverride || dafBatches.value.find(item => item.id === id);
         const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', batch?.line || currentDafLine());
         if (error) { toast(`${currentDafLabel()} 共用資料庫刪除失敗：` + error.message, 'error'); return false; }
@@ -618,7 +618,7 @@ SMT.daf = function (ctx) {
         record.workOrder, record.productCode, record.defect, record.model
     ].join('|')).join('\n');
     const syncDafRemoteChanges = async (before, after) => {
-        if (!dafRemoteReady.value) return true;
+        if (!dafRemoteReady.value) return false;
         const beforeIds = new Set((before || []).map(batch => batch.id));
         const afterById = new Map((after || []).map(batch => [batch.id, batch]));
         let success = true;
@@ -637,6 +637,7 @@ SMT.daf = function (ctx) {
     };
     const mergeDafBatch = async incoming => {
         const before = dafBatches.value.map(rebuildDafBatch);
+        const incomingLine = incoming.line || currentDafLine();
         const existingByKey = new Map();
         before.forEach(batch => (batch.records || []).forEach(record => {
             const rawKey = normalizeText(record.dedupKey);
@@ -677,11 +678,16 @@ SMT.daf = function (ctx) {
                 return !incomingKeys.has(key) || keepExisting.has(record);
             });
             return { ...batch, records };
-        }).filter(batch => batch.records.length);
+        }).filter(batch => batch.records.length || (batch.line || currentDafLine()) !== incomingLine || Number(batch.rowCount) > 0);
         const incomingBatch = { ...incoming, records: (incoming.records || []).filter(record => keepIncoming.has(record)) };
         const merged = deduplicateDafBatches([...retained, incomingBatch]);
         const batches = merged.batches.filter(batch => !(batch.id === incoming.id && incoming.records?.length && !batch.records.length));
         const remoteSaved = await syncDafRemoteChanges(before, batches);
+        if (!remoteSaved) return {
+            batch: null,
+            duplicateCount: duplicateCount + merged.duplicateCount,
+            remoteSaved: false
+        };
         dafBatches.value = batches;
         persistStorage();
         dafLastUpload.value = batches.find(batch => batch.id === incoming.id) || batches[0] || null;
@@ -702,11 +708,11 @@ SMT.daf = function (ctx) {
         return results.find(result => result.error)?.error || null;
     };
     const ensureDafRemoteConnection = async () => {
-        if (dafRemoteReady.value) return true;
         if (dafRemoteLoadPromise) {
             try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 共用資料庫連線等待失敗`, error); }
             if (dafRemoteReady.value) return true;
         }
+        if (dafRemoteReady.value) return true;
         dafRemoteChecking.value = true;
         const probeError = await probeDafRemote(TEST_PROCESS_IDS);
         if (probeError) {
@@ -763,8 +769,8 @@ SMT.daf = function (ctx) {
         const requestId = ++dafLoadRequestId;
         const localBatches = deduplicateDafBatches(readStorage()).batches;
         const localBatchIdsAtStart = new Set(localBatches.map(batch => batch.id));
-        dafBatches.value = localBatches;
-        dafLastUpload.value = localBatches[0] || null;
+        dafBatches.value = [];
+        dafLastUpload.value = null;
         if (!isDafLikeLine()) return;
         dafRemoteReady.value = false;
         dafRemoteChecking.value = true;
@@ -778,14 +784,11 @@ SMT.daf = function (ctx) {
                 dafRemoteReady.value = false;
                 dafRemoteChecking.value = false;
                 dafRemoteError.value = probeError.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (probeError.message || 'DAF 共用資料庫連線失敗');
-                dafBatches.value = deduplicateDafBatches(readStorage()).batches;
-                learnModelMappings(dafBatches.value);
-                dafLastUpload.value = dafBatches.value[0] || null;
+                dafBatches.value = [];
+                dafLastUpload.value = null;
                 return;
             }
-            // 先完成輕量連線確認；完整原始 LOG 在背景載入，避免 Windows 首次開啟時誤顯示本機保存。
-            dafRemoteReady.value = true;
-            dafRemoteChecking.value = false;
+            // 先完成輕量連線確認；摘要與完整 LOG 讀取完成前，不允許上傳流程誤判為已同步。
             const remoteResults = [];
             for (const processLine of processLines) remoteResults.push(await loadDafRemoteRows(processLine));
             const error = remoteResults.find(result => result.error)?.error || null;
@@ -793,12 +796,10 @@ SMT.daf = function (ctx) {
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
             if (error) {
                 dafRemoteError.value = `資料庫已連線，但部分 LOG 載入失敗：${error.message || '資料讀取失敗'}`;
-                dafBatches.value = deduplicateDafBatches([
-                    ...remoteRows.map(fromRemote),
-                    ...deduplicateDafBatches(readStorage()).batches
-                ]).batches;
+                dafBatches.value = deduplicateDafBatches(remoteRows.map(fromRemote)).batches;
             } else {
                 dafRemoteReady.value = true;
+                dafRemoteChecking.value = false;
                 dafRemoteError.value = '';
                 const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
                 const localById = new Map(latestLocalBatches.map(batch => [batch.id, batch]));
@@ -1152,6 +1153,10 @@ SMT.daf = function (ctx) {
                     continue;
                 }
                 const batches = await analyzeFile(file);
+                if (!batches.length) {
+                    queue.failed.push(`${file.name}：A 欄沒有符合的五個製程，未寫入 Supabase`);
+                    continue;
+                }
                 const unknownBatches = batches.filter(batch => batch.unknownProductDetails?.length || batch.unknownProductCodes?.length);
                 if (unknownBatches.length) {
                     queue.index = index;
@@ -1329,7 +1334,6 @@ SMT.daf = function (ctx) {
     };
     clearTestLocalCacheOnce();
     dafModelMappings.value = readModelMappings();
-    dafBatches.value = deduplicateDafBatches(readStorage()).batches;
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => {
         if (!applyingDafQuick) { dafQuickMode.value = null; dafQuickOffset.value = 0; }

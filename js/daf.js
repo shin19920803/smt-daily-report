@@ -73,7 +73,6 @@ SMT.daf = function (ctx) {
         closeDafModelStatsDetail();
         closeDafWorkOrderStatsDetail();
         closeDafOutputDetail();
-        if (dafStatsResult.value) calculateDafStats(false);
         if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
     };
 
@@ -101,6 +100,7 @@ SMT.daf = function (ctx) {
 
     const dafBatches = ref([]);
     const dafStatsFilter = ref({ start: '', end: '', model: 'all', workOrder: 'all' });
+    const DAF_STATS_STATE_KEY = 'koya_test_stats_state_v1';
     const dafStatsResult = ref(null);
     const dafRemoteReady = ref(false);
     const dafRemoteChecking = ref(false);
@@ -117,6 +117,26 @@ SMT.daf = function (ctx) {
     const dafQuickMode = ref(null);
     const dafQuickOffset = ref(0);
     let applyingDafQuick = false;
+    let switchingDafProcess = false;
+    const readDafStatsStates = () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(DAF_STATS_STATE_KEY) || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) { return {}; }
+    };
+    const dafStatsStates = readDafStatsStates();
+    const saveDafStatsState = line => {
+        if (!TEST_PROCESS_IDS.includes(line) || switchingDafProcess) return;
+        dafStatsStates[line] = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 };
+        try { localStorage.setItem(DAF_STATS_STATE_KEY, JSON.stringify(dafStatsStates)); } catch (e) {}
+    };
+    const restoreDafStatsState = line => {
+        const saved = dafStatsStates[line] || {};
+        dafStatsFilter.value = { start: saved.start || '', end: saved.end || '', model: 'all', workOrder: 'all' };
+        dafQuickMode.value = ['day', 'week', 'month'].includes(saved.quickMode) ? saved.quickMode : null;
+        dafQuickOffset.value = Number.isFinite(Number(saved.quickOffset)) ? Number(saved.quickOffset) : 0;
+    };
+    restoreDafStatsState(dafProcess.value);
 
     const cleanText = (value) => {
         if (value === null || value === undefined) return '';
@@ -1312,7 +1332,11 @@ SMT.daf = function (ctx) {
     dafModelMappings.value = readModelMappings();
     dafBatches.value = deduplicateDafBatches(readStorage()).batches;
     learnModelMappings(dafBatches.value);
-    watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => { if (!applyingDafQuick) dafQuickMode.value = null; });
+    watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => {
+        if (!applyingDafQuick) { dafQuickMode.value = null; dafQuickOffset.value = 0; }
+        saveDafStatsState(currentDafLine());
+    });
+    watch(() => [dafQuickMode.value, dafQuickOffset.value], () => saveDafStatsState(currentDafLine()));
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });
     watch(dafDefectDetail, renderDafDefectTrendChart);
     watch(currentTab, tab => {
@@ -1324,21 +1348,25 @@ SMT.daf = function (ctx) {
     watch(currentLine, line => {
         if (line === 'TEST') {
             dafModelMappings.value = readModelMappings();
-            dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
-            dafQuickMode.value = null;
-            dafQuickOffset.value = 0;
+            restoreDafStatsState(dafProcess.value);
             dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [] };
             dafLastUpload.value = null;
             dafStatsResult.value = null;
             if (currentTab.value === 'stats') calculateDafStats(false);
         }
     });
-    watch(dafProcess, () => {
+    watch(dafProcess, (line, previousLine) => {
+        switchingDafProcess = true;
+        if (previousLine && TEST_PROCESS_IDS.includes(previousLine)) {
+            dafStatsStates[previousLine] = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 };
+            try { localStorage.setItem(DAF_STATS_STATE_KEY, JSON.stringify(dafStatsStates)); } catch (e) {}
+        }
+        restoreDafStatsState(line);
+        switchingDafProcess = false;
         try { localStorage.setItem(TEST_PROCESS_STORAGE_KEY, dafProcess.value); } catch (e) {}
         dafDateIndexSource = null;
         dafDashboardCache.clear();
         dafStatsResult.value = null;
-        dafStatsFilter.value = { start: '', end: '', model: 'all', workOrder: 'all' };
         if (currentTab.value === 'stats') calculateDafStats(false);
         if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
     });

@@ -738,21 +738,20 @@ SMT.daf = function (ctx) {
                 return false;
             }
             const remoteBatches = (result.data || []).map(fromRemote);
-            const remoteIds = new Set(remoteBatches.map(batch => batch.id));
-            const localOnly = dafBatches.value.filter(batch => batch.line === line && !remoteIds.has(batch.id));
             const otherLines = dafBatches.value.filter(batch => batch.line !== line);
-            dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches, ...localOnly]).batches;
+            dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches]).batches;
             persistStorage();
             dafDetailLoadedLines.add(line);
             if (dafStatsResult.value && currentDafLine() === line) dafStatsResult.value = buildDafStats();
             return true;
-        })().finally(() => dafDetailLoadPromises.delete(line));
+        })().finally(() => { if (dafDetailLoadPromises.get(line) === request) dafDetailLoadPromises.delete(line); });
         dafDetailLoadPromises.set(line, request);
         return request;
     };
     const refreshDafAfterBackgroundLoad = line => {
         if (currentLine.value !== line) return;
         if (dafStatsResult.value) calculateDafStats(false);
+        if (currentTab.value === 'report') ensureDafProcessDetails(currentDafLine());
         if (!ctx.refreshDashboard) return;
         Promise.resolve(ctx.refreshDashboard()).then(refreshed => {
             if (refreshed !== false && currentTab.value === 'dashboard' && ctx.initDashboardCharts) return ctx.initDashboardCharts();
@@ -768,7 +767,8 @@ SMT.daf = function (ctx) {
         }
         const requestId = ++dafLoadRequestId;
         const localBatches = deduplicateDafBatches(readStorage()).batches;
-        const localBatchIdsAtStart = new Set(localBatches.map(batch => batch.id));
+        dafDetailLoadedLines.clear();
+        dafDetailLoadPromises.clear();
         dafBatches.value = [];
         dafLastUpload.value = null;
         if (!isDafLikeLine()) return;
@@ -802,22 +802,24 @@ SMT.daf = function (ctx) {
                 dafRemoteChecking.value = false;
                 dafRemoteError.value = '';
                 const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
-                const localById = new Map(latestLocalBatches.map(batch => [batch.id, batch]));
                 const remoteBatches = (remoteRows || []).map(row => {
-                    const summary = fromRemote(row);
-                    const local = localById.get(summary.id);
-                    return local?.records?.length ? { ...summary, records: local.records, rawColumnCount: local.rawColumnCount || summary.rawColumnCount } : summary;
+                    return fromRemote(row);
                 });
                 const remoteState = deduplicateDafBatches(remoteBatches);
                 let batches = remoteState.batches;
                 const remoteIds = new Set(batches.map(batch => batch.id));
-                const pendingLocalBatches = latestLocalBatches.filter(batch => !remoteIds.has(batch.id) || !localBatchIdsAtStart.has(batch.id));
+                const pendingLocalBatches = latestLocalBatches.filter(batch => !remoteIds.has(batch.id));
                 if (!hasMigrationFlag()) setMigrationFlag();
                 if (pendingLocalBatches.length) {
-                    batches = deduplicateDafBatches([...batches, ...pendingLocalBatches]).batches;
-                    await syncDafRemoteChanges(remoteBatches, batches);
+                    const candidate = deduplicateDafBatches([...batches, ...pendingLocalBatches]).batches;
+                    if (await syncDafRemoteChanges(remoteBatches, candidate)) batches = candidate;
+                    else dafRemoteError.value = '本機待同步資料未完成寫入，畫面仍以 Supabase 資料為準';
                 }
-                if (remoteState.duplicateCount) await syncDafRemoteChanges(remoteBatches, batches);
+                if (remoteState.duplicateCount) {
+                    const deduplicated = deduplicateDafBatches(batches).batches;
+                    if (await syncDafRemoteChanges(batches, deduplicated)) batches = deduplicated;
+                    else dafRemoteError.value = 'Supabase 重複資料整理未完成，畫面仍以資料庫原始資料為準';
+                }
                 dafBatches.value = batches;
                 persistStorage();
             }
@@ -1366,6 +1368,12 @@ SMT.daf = function (ctx) {
         if (currentTab.value === 'stats') calculateDafStats(false);
         if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
     });
+    const refreshDafFromRemote = () => {
+        if (currentLine.value === 'TEST' && !document.hidden) loadDafData({ background: true });
+    };
+    window.addEventListener('focus', refreshDafFromRemote);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDafFromRemote(); });
+    window.setInterval(refreshDafFromRemote, 60000);
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {

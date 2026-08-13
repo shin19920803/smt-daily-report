@@ -6,6 +6,8 @@ SMT.daf = function (ctx) {
     const STORAGE_KEY = 'koya_daf_log_batches_v1';
     const TEST_STORAGE_KEY = 'koya_test_log_batches_v1';
     const REMOTE_TABLE = 'daf_log_batches';
+    const REMOTE_SUMMARY_COLUMNS = 'id,line,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text,row_count,raw_column_count';
+    const REMOTE_DETAIL_COLUMNS = `${REMOTE_SUMMARY_COLUMNS},records`;
     const REMOTE_MIGRATED_KEY = 'koya_daf_log_remote_migrated_v1';
     // 非 SMT 站別共用機種對應；保留舊鍵讀取，避免既有使用者的對應遺失。
     const MODEL_MAPPING_STORAGE_KEY = 'koya_non_smt_model_mappings_v1';
@@ -485,13 +487,13 @@ SMT.daf = function (ctx) {
         if (error) { toast(`${currentDafLabel()} 共用資料庫刪除失敗：` + error.message, 'error'); return false; }
         return true;
     };
-    const loadDafRemoteRows = async (line = currentDafLine()) => {
-        let pageSize = 3;
+    const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false) => {
+        let pageSize = includeRecords ? 3 : 100;
         const rows = [];
         let offset = 0;
         for (;;) {
             const { data: page, error } = await _supabase.from(REMOTE_TABLE)
-                .select('*').eq('line', line).order('uploaded_at', { ascending: false })
+                .select(includeRecords ? REMOTE_DETAIL_COLUMNS : REMOTE_SUMMARY_COLUMNS).eq('line', line).order('uploaded_at', { ascending: false })
                 .range(offset, offset + pageSize - 1);
             if (error) {
                 if (pageSize > 1 && /timeout|statement/i.test(error.message || '')) {
@@ -506,6 +508,19 @@ SMT.daf = function (ctx) {
         }
     };
     const rebuildDafBatch = batch => {
+        const hasRecords = Array.isArray(batch.records) && batch.records.length > 0;
+        if (!hasRecords && Number(batch.rowCount) > 0) return {
+            ...batch,
+            inputCount: Number(batch.inputCount) || 0,
+            goodCount: Number(batch.goodCount) || 0,
+            failCount: Number(batch.failCount) || 0,
+            yieldRate: Number(batch.yieldRate || 0).toFixed(2),
+            defectRate: Number(batch.defectRate || 0).toFixed(2),
+            unknownStatusCount: Number(batch.unknownStatusCount) || 0,
+            unknownStatusText: batch.unknownStatusText || '無',
+            rowCount: Number(batch.rowCount) || 0,
+            records: []
+        };
         const records = (batch.records || []).map(normalizeDafRecord);
         const inputRecords = records.filter(record => record.inputIncluded);
         const statuses = records.map(record => normalizeText(record.status));
@@ -661,9 +676,37 @@ SMT.daf = function (ctx) {
     let dafLoadRequestId = 0;
     let dafRemoteLoadPromise = null;
     let dafRemoteLoadLine = '';
+    const dafDetailLoadedLines = new Set();
+    const dafDetailLoadPromises = new Map();
     const probeDafRemote = async lines => {
         const results = await Promise.all(lines.map(line => _supabase.from(REMOTE_TABLE).select('id').eq('line', line).limit(1)));
         return results.find(result => result.error)?.error || null;
+    };
+    const ensureDafProcessDetails = async line => {
+        if (!TEST_PROCESS_IDS.includes(line)) return true;
+        if (dafRemoteLoadPromise) {
+            try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${processLabel(line)} 明細等待摘要載入失敗`, error); }
+        }
+        if (dafDetailLoadedLines.has(line)) return true;
+        if (dafDetailLoadPromises.has(line)) return dafDetailLoadPromises.get(line);
+        const request = (async () => {
+            const result = await loadDafRemoteRows(line, true);
+            if (result.error) {
+                dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
+                return false;
+            }
+            const remoteBatches = (result.data || []).map(fromRemote);
+            const remoteIds = new Set(remoteBatches.map(batch => batch.id));
+            const localOnly = dafBatches.value.filter(batch => batch.line === line && !remoteIds.has(batch.id));
+            const otherLines = dafBatches.value.filter(batch => batch.line !== line);
+            dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches, ...localOnly]).batches;
+            persistStorage();
+            dafDetailLoadedLines.add(line);
+            if (dafStatsResult.value && currentDafLine() === line) dafStatsResult.value = buildDafStats();
+            return true;
+        })().finally(() => dafDetailLoadPromises.delete(line));
+        dafDetailLoadPromises.set(line, request);
+        return request;
     };
     const refreshDafAfterBackgroundLoad = line => {
         if (currentLine.value !== line) return;
@@ -721,10 +764,15 @@ SMT.daf = function (ctx) {
             } else {
                 dafRemoteReady.value = true;
                 dafRemoteError.value = '';
-                const remoteBatches = (remoteRows || []).map(fromRemote);
+                const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
+                const localById = new Map(latestLocalBatches.map(batch => [batch.id, batch]));
+                const remoteBatches = (remoteRows || []).map(row => {
+                    const summary = fromRemote(row);
+                    const local = localById.get(summary.id);
+                    return local?.records?.length ? { ...summary, records: local.records, rawColumnCount: local.rawColumnCount || summary.rawColumnCount } : summary;
+                });
                 const remoteState = deduplicateDafBatches(remoteBatches);
                 let batches = remoteState.batches;
-                const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
                 const remoteIds = new Set(batches.map(batch => batch.id));
                 const pendingLocalBatches = latestLocalBatches.filter(batch => !remoteIds.has(batch.id) || !localBatchIdsAtStart.has(batch.id));
                 if (!hasMigrationFlag()) setMigrationFlag();
@@ -738,7 +786,6 @@ SMT.daf = function (ctx) {
             }
             learnModelMappings(dafBatches.value);
             dafLastUpload.value = dafBatches.value[0] || null;
-            refreshDafAfterBackgroundLoad(line);
         })();
         dafRemoteLoadPromise = remotePromise;
         const settled = remotePromise.finally(() => {
@@ -749,10 +796,11 @@ SMT.daf = function (ctx) {
             }
         });
         if (background) {
-            settled.catch(error => console.warn(`${currentDafLabel()} 背景資料同步失敗`, error));
+            settled.then(() => refreshDafAfterBackgroundLoad(line)).catch(error => console.warn(`${currentDafLabel()} 背景資料同步失敗`, error));
             return true;
         }
         await settled;
+        refreshDafAfterBackgroundLoad(line);
         return true;
     };
 
@@ -975,6 +1023,7 @@ SMT.daf = function (ctx) {
             try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 統計改用本機快取`, error); }
             if (!wasLoading) loading.value = false;
         }
+        await ensureDafProcessDetails(currentDafLine());
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
         dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] };
         dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [] };
@@ -1075,6 +1124,7 @@ SMT.daf = function (ctx) {
                     return false;
                 }
                 for (const batch of batches) {
+                    await ensureDafProcessDetails(batch.line || currentDafLine());
                     await ensureDafBaseSettings(batch);
                     const merged = await mergeDafBatch(batch);
                     queue.rows += merged.batch?.rowCount || 0;
@@ -1239,7 +1289,8 @@ SMT.daf = function (ctx) {
     watch(currentTab, tab => {
         if (!isDafLikeLine()) return;
         if (tab === 'stats' && !dafStatsResult.value) calculateDafStats(false);
-        else if (tab === 'stats' || tab === 'report') renderDafCharts();
+        if (tab === 'report') ensureDafProcessDetails(currentDafLine());
+        if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
         if (line === 'TEST') {
@@ -1268,7 +1319,7 @@ SMT.daf = function (ctx) {
         dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
-        uploadDafFiles, loadDafData, calculateDafStats, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
+        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate,
         renderDafCharts

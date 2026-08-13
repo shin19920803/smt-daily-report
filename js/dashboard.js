@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, ensureDafProcessDetails } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, loadDafData } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dafDashboardResult = ref(null);
@@ -270,7 +270,6 @@ SMT.dashboard = function (ctx) {
         const refreshDashboard = async () => {
             const requestId = ++dashboardRefreshId;
             const line = currentLine.value;
-            if (line === 'TEST' && ensureDafProcessDetails) await ensureDafProcessDetails(dafProcess.value);
             const availableDates = await loadDashboardAvailableDates(line);
             if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
             dashboardAvailableDates.value = availableDates;
@@ -627,6 +626,7 @@ SMT.dashboard = function (ctx) {
             [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst, dashDafDailyChartInst, dashDafReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
         const refreshDashboardAndCharts = async () => {
+            if (currentLine.value === 'TEST' && loadDafData) await loadDafData();
             const refreshed = await refreshDashboard();
             if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
         };

@@ -493,6 +493,17 @@ SMT.daf = function (ctx) {
         rowCount: row.row_count || 0, rawColumnCount: row.raw_column_count || 10,
         records: row.records || []
     });
+    const isGhostDafRow = row => Number(row?.row_count) > 0 && Number(row?.input_count || 0) === 0 && Number(row?.good_count || 0) === 0 && Number(row?.fail_count || 0) === 0;
+    const isGhostDafBatch = batch => Number(batch?.rowCount) > 0 && Number(batch?.inputCount || 0) === 0 && Number(batch?.goodCount || 0) === 0 && Number(batch?.failCount || 0) === 0;
+    const cleanGhostDafRemoteRows = async rows => {
+        const ghosts = (rows || []).filter(isGhostDafRow);
+        const validRows = (rows || []).filter(row => !isGhostDafRow(row));
+        for (const row of ghosts) {
+            const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', row.id).eq('line', row.line || currentDafLine());
+            if (error) dafRemoteError.value = `殘留摘要清除失敗：${error.message || '資料庫刪除失敗'}`;
+        }
+        return validRows;
+    };
     const saveRemote = async (batch) => {
         if (!dafRemoteReady.value) return false;
         const { data, error } = await _supabase.from(REMOTE_TABLE).upsert(toRemote(batch), { onConflict: 'id' }).select('id').maybeSingle();
@@ -737,7 +748,7 @@ SMT.daf = function (ctx) {
                 dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
                 return false;
             }
-            const remoteBatches = (result.data || []).map(fromRemote);
+            const remoteBatches = (await cleanGhostDafRemoteRows(result.data || [])).map(fromRemote);
             const otherLines = dafBatches.value.filter(batch => batch.line !== line);
             dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches]).batches;
             persistStorage();
@@ -800,9 +811,7 @@ SMT.daf = function (ctx) {
                 dafRemoteReady.value = true;
                 dafRemoteChecking.value = false;
                 dafRemoteError.value = '';
-                const remoteBatches = (remoteRows || []).map(row => {
-                    return fromRemote(row);
-                });
+                const remoteBatches = (await cleanGhostDafRemoteRows(remoteRows || [])).map(fromRemote);
                 const remoteState = deduplicateDafBatches(remoteBatches);
                 let batches = remoteState.batches;
                 if (remoteState.duplicateCount) {

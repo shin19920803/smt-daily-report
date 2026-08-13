@@ -682,11 +682,28 @@ SMT.daf = function (ctx) {
         const results = await Promise.all(lines.map(line => _supabase.from(REMOTE_TABLE).select('id').eq('line', line).limit(1)));
         return results.find(result => result.error)?.error || null;
     };
+    const ensureDafRemoteConnection = async () => {
+        if (dafRemoteReady.value) return true;
+        if (dafRemoteLoadPromise) {
+            try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 共用資料庫連線等待失敗`, error); }
+            if (dafRemoteReady.value) return true;
+        }
+        dafRemoteChecking.value = true;
+        const probeError = await probeDafRemote(TEST_PROCESS_IDS);
+        if (probeError) {
+            dafRemoteReady.value = false;
+            dafRemoteChecking.value = false;
+            dafRemoteError.value = probeError.code === 'PGRST205' ? '尚未建立 DAF 檔案統計共用資料表' : (probeError.message || '共用資料庫連線失敗');
+            return false;
+        }
+        dafRemoteReady.value = true;
+        dafRemoteChecking.value = false;
+        dafRemoteError.value = '';
+        return true;
+    };
     const ensureDafProcessDetails = async line => {
         if (!TEST_PROCESS_IDS.includes(line)) return true;
-        if (dafRemoteLoadPromise) {
-            try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${processLabel(line)} 明細等待摘要載入失敗`, error); }
-        }
+        if (!(await ensureDafRemoteConnection())) return false;
         if (dafDetailLoadedLines.has(line)) return true;
         if (dafDetailLoadPromises.has(line)) return dafDetailLoadPromises.get(line);
         const request = (async () => {
@@ -1111,6 +1128,10 @@ SMT.daf = function (ctx) {
         for (let index = queue.index; index < queue.files.length; index++) {
             const file = queue.files[index];
             try {
+                if (!(await ensureDafRemoteConnection())) {
+                    queue.failed.push(`${file.name}：共用資料庫未連線，檔案未寫入`);
+                    continue;
+                }
                 const batches = await analyzeFile(file);
                 const unknownBatches = batches.filter(batch => batch.unknownProductDetails?.length || batch.unknownProductCodes?.length);
                 if (unknownBatches.length) {
@@ -1123,15 +1144,23 @@ SMT.daf = function (ctx) {
                     toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
+                let fileSaved = true;
                 for (const batch of batches) {
-                    await ensureDafProcessDetails(batch.line || currentDafLine());
+                    if (!(await ensureDafProcessDetails(batch.line || currentDafLine()))) {
+                        queue.failed.push(`${file.name}（${processLabel(batch.line)}）：明細載入失敗，檔案未完成同步`);
+                        fileSaved = false;
+                        continue;
+                    }
                     await ensureDafBaseSettings(batch);
                     const merged = await mergeDafBatch(batch);
                     queue.rows += merged.batch?.rowCount || 0;
                     queue.duplicates += (batch.duplicateCount || 0) + merged.duplicateCount;
-                    if (dafRemoteReady.value && !merged.remoteSaved) queue.failed.push(`${file.name}（${processLabel(batch.line)}）：共用資料庫寫入失敗`);
+                    if (!merged.remoteSaved) {
+                        queue.failed.push(`${file.name}（${processLabel(batch.line)}）：共用資料庫寫入失敗`);
+                        fileSaved = false;
+                    }
                 }
-                queue.success++;
+                if (fileSaved) queue.success++;
             } catch (error) { queue.failed.push(`${file.name}：${error.message}`); }
         }
         finishDafUploadQueue(queue);

@@ -766,7 +766,6 @@ SMT.daf = function (ctx) {
             return true;
         }
         const requestId = ++dafLoadRequestId;
-        const localBatches = deduplicateDafBatches(readStorage()).batches;
         dafDetailLoadedLines.clear();
         dafDetailLoadPromises.clear();
         dafBatches.value = [];
@@ -801,20 +800,11 @@ SMT.daf = function (ctx) {
                 dafRemoteReady.value = true;
                 dafRemoteChecking.value = false;
                 dafRemoteError.value = '';
-                const latestLocalBatches = deduplicateDafBatches(readStorage()).batches;
                 const remoteBatches = (remoteRows || []).map(row => {
                     return fromRemote(row);
                 });
                 const remoteState = deduplicateDafBatches(remoteBatches);
                 let batches = remoteState.batches;
-                const remoteIds = new Set(batches.map(batch => batch.id));
-                const pendingLocalBatches = latestLocalBatches.filter(batch => !remoteIds.has(batch.id));
-                if (!hasMigrationFlag()) setMigrationFlag();
-                if (pendingLocalBatches.length) {
-                    const candidate = deduplicateDafBatches([...batches, ...pendingLocalBatches]).batches;
-                    if (await syncDafRemoteChanges(remoteBatches, candidate)) batches = candidate;
-                    else dafRemoteError.value = '本機待同步資料未完成寫入，畫面仍以 Supabase 資料為準';
-                }
                 if (remoteState.duplicateCount) {
                     const deduplicated = deduplicateDafBatches(batches).batches;
                     if (await syncDafRemoteChanges(batches, deduplicated)) batches = deduplicated;
@@ -1369,7 +1359,7 @@ SMT.daf = function (ctx) {
         if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
     });
     const refreshDafFromRemote = () => {
-        if (currentLine.value === 'TEST' && !document.hidden) loadDafData({ background: true });
+        if (currentLine.value === 'TEST' && !document.hidden && !loading.value) loadDafData({ background: true });
     };
     window.addEventListener('focus', refreshDafFromRemote);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDafFromRemote(); });

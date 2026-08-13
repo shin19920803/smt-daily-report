@@ -742,7 +742,6 @@ SMT.daf = function (ctx) {
             const remoteBatches = filterGhostDafRows(result.data || []).map(fromRemote);
             const otherLines = dafBatches.value.filter(batch => batch.line !== line);
             dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches]).batches;
-            persistStorage();
             dafDetailLoadedLines.add(line);
             if (dafStatsResult.value && currentDafLine() === line) dafStatsResult.value = buildDafStats();
             return true;
@@ -806,7 +805,6 @@ SMT.daf = function (ctx) {
                 const remoteState = deduplicateDafBatches(remoteBatches);
                 const batches = remoteState.batches;
                 dafBatches.value = batches;
-                persistStorage();
             }
             learnModelMappings(dafBatches.value);
             dafLastUpload.value = dafBatches.value[0] || null;

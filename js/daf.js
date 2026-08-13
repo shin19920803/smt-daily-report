@@ -117,26 +117,25 @@ SMT.daf = function (ctx) {
     const dafQuickMode = ref(null);
     const dafQuickOffset = ref(0);
     let applyingDafQuick = false;
-    let switchingDafProcess = false;
-    const readDafStatsStates = () => {
+    const readDafStatsState = () => {
         try {
             const parsed = JSON.parse(localStorage.getItem(DAF_STATS_STATE_KEY) || '{}');
-            return parsed && typeof parsed === 'object' ? parsed : {};
+            if (parsed && typeof parsed === 'object' && ('start' in parsed || 'end' in parsed)) return parsed;
+            if (parsed && typeof parsed === 'object') return parsed[dafProcess.value] || Object.values(parsed).find(item => item && typeof item === 'object') || {};
+            return {};
         } catch (e) { return {}; }
     };
-    const dafStatsStates = readDafStatsStates();
-    const saveDafStatsState = line => {
-        if (!TEST_PROCESS_IDS.includes(line) || switchingDafProcess) return;
-        dafStatsStates[line] = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 };
-        try { localStorage.setItem(DAF_STATS_STATE_KEY, JSON.stringify(dafStatsStates)); } catch (e) {}
+    const dafStatsState = readDafStatsState();
+    const saveDafStatsState = () => {
+        Object.assign(dafStatsState, { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 });
+        try { localStorage.setItem(DAF_STATS_STATE_KEY, JSON.stringify(dafStatsState)); } catch (e) {}
     };
-    const restoreDafStatsState = line => {
-        const saved = dafStatsStates[line] || {};
-        dafStatsFilter.value = { start: saved.start || '', end: saved.end || '', model: 'all', workOrder: 'all' };
-        dafQuickMode.value = ['day', 'week', 'month'].includes(saved.quickMode) ? saved.quickMode : null;
-        dafQuickOffset.value = Number.isFinite(Number(saved.quickOffset)) ? Number(saved.quickOffset) : 0;
+    const restoreDafStatsState = () => {
+        dafStatsFilter.value = { start: dafStatsState.start || '', end: dafStatsState.end || '', model: 'all', workOrder: 'all' };
+        dafQuickMode.value = ['day', 'week', 'month'].includes(dafStatsState.quickMode) ? dafStatsState.quickMode : null;
+        dafQuickOffset.value = Number.isFinite(Number(dafStatsState.quickOffset)) ? Number(dafStatsState.quickOffset) : 0;
     };
-    restoreDafStatsState(dafProcess.value);
+    restoreDafStatsState();
 
     const cleanText = (value) => {
         if (value === null || value === undefined) return '';
@@ -1334,9 +1333,9 @@ SMT.daf = function (ctx) {
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => {
         if (!applyingDafQuick) { dafQuickMode.value = null; dafQuickOffset.value = 0; }
-        saveDafStatsState(currentDafLine());
+        saveDafStatsState();
     });
-    watch(() => [dafQuickMode.value, dafQuickOffset.value], () => saveDafStatsState(currentDafLine()));
+    watch(() => [dafQuickMode.value, dafQuickOffset.value], () => saveDafStatsState());
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });
     watch(dafDefectDetail, renderDafDefectTrendChart);
     watch(currentTab, tab => {
@@ -1348,21 +1347,14 @@ SMT.daf = function (ctx) {
     watch(currentLine, line => {
         if (line === 'TEST') {
             dafModelMappings.value = readModelMappings();
-            restoreDafStatsState(dafProcess.value);
+            restoreDafStatsState();
             dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [] };
             dafLastUpload.value = null;
             dafStatsResult.value = null;
             if (currentTab.value === 'stats') calculateDafStats(false);
         }
     });
-    watch(dafProcess, (line, previousLine) => {
-        switchingDafProcess = true;
-        if (previousLine && TEST_PROCESS_IDS.includes(previousLine)) {
-            dafStatsStates[previousLine] = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 };
-            try { localStorage.setItem(DAF_STATS_STATE_KEY, JSON.stringify(dafStatsStates)); } catch (e) {}
-        }
-        restoreDafStatsState(line);
-        switchingDafProcess = false;
+    watch(dafProcess, () => {
         try { localStorage.setItem(TEST_PROCESS_STORAGE_KEY, dafProcess.value); } catch (e) {}
         dafDateIndexSource = null;
         dafDashboardCache.clear();

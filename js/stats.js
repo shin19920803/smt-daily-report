@@ -2,8 +2,12 @@ window.SMT = window.SMT || {};
 SMT.stats = function (ctx) {
         const { toast, loading, currentTab, fpyTargets, currentLine, currentLineMeta } = ctx;
 
-        const statsFilter = ref({ start: '', end: '', modelId: 'all', woId: 'all' });
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayValue = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+        const statsFilter = ref({ start: yesterdayValue, end: yesterdayValue, modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
+        let smtStatsDataCache = null;
 
         // 本區間是否真的有不良資料（決定圖表要不要顯示，避免殘留上一次查詢結果）
         const hasDefects = computed(() => !!statsResult.value && statsResult.value.byType.length > 0);
@@ -58,8 +62,8 @@ SMT.stats = function (ctx) {
         const sortedTrend   = computed(() => applySort(statsResult.value?.trend, trendSort));
 
         // ================= 快捷區間：日 / 週(日–六) / 月 =================
-        const quickMode = ref(null);     // 'day' | 'week' | 'month' | null(自訂)
-        const quickOffset = ref(0);      // 0=本期，-1=上一期
+        const quickMode = ref('day');     // 'day' | 'week' | 'month' | null(自訂)
+        const quickOffset = ref(-1);      // 0=本期，-1=上一期
         let applyingQuick = false;
 
         // 用本地時間格式化，避免 toISOString() 的 UTC 位移導致跨日
@@ -236,17 +240,44 @@ SMT.stats = function (ctx) {
             return idx >= 0 ? trendColors[idx % trendColors.length] : '#6b7280';
         };
 
+        const filterSmtRows = rows => (rows || []).filter(row => {
+            if (statsFilter.value.start && String(row.production_date) < statsFilter.value.start) return false;
+            if (statsFilter.value.end && String(row.production_date) > statsFilter.value.end) return false;
+            if (statsFilter.value.modelId !== 'all' && row.work_orders?.model_id != statsFilter.value.modelId) return false;
+            if (statsFilter.value.woId !== 'all' && row.work_orders?.wo_number !== statsFilter.value.woId) return false;
+            return true;
+        });
+        const loadSmtStatsData = async (force = false) => {
+            if (!force && smtStatsDataCache) return smtStatsDataCache;
+            if (window.koyaFetchCachedJson) {
+                try {
+                    const data = await window.koyaFetchCachedJson('/api/smt-data', { force });
+                    if (Array.isArray(data?.production) && Array.isArray(data?.fpy)) {
+                        smtStatsDataCache = data;
+                        return data;
+                    }
+                } catch (error) { console.warn('SMT 共用統計快取讀取失敗，改由 Supabase 直讀', error); }
+            }
+            return null;
+        };
+
         // --- 主統計 ---
-        const calculateStats = async (showToast = true) => {
+        const calculateStats = async (showToast = true, { refreshRemote = showToast } = {}) => {
             loading.value = true;
             try {
-                let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
-                if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start);
-                if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end);
-                const { data: rows } = await query;
-                let filtered = rows || [];
-                if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
-                if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                const sharedData = await loadSmtStatsData(refreshRemote);
+                let filtered;
+                if (sharedData) {
+                    filtered = filterSmtRows(sharedData.production);
+                } else {
+                    let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
+                    if (statsFilter.value.start) query = query.gte('production_date', statsFilter.value.start);
+                    if (statsFilter.value.end) query = query.lte('production_date', statsFilter.value.end);
+                    const { data: rows } = await query;
+                    filtered = rows || [];
+                    if (statsFilter.value.modelId !== 'all') filtered = filtered.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                    if (statsFilter.value.woId !== 'all') filtered = filtered.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                }
 
                 let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {};
                 const typeLocMap = {};   // { 現象: { 位置: qty } }
@@ -342,13 +373,18 @@ SMT.stats = function (ctx) {
                 // --- FPY 趨勢 (每日平均 SPI/AOI) ---
                 let fpyTrend = [];
                 try {
-                    let fq = _supabase.from('daily_fpy').select('production_date, spi_rate, aoi_rate, work_orders!inner(wo_number, model_id)').eq('line', currentLine.value);
-                    if (statsFilter.value.start) fq = fq.gte('production_date', statsFilter.value.start);
-                    if (statsFilter.value.end) fq = fq.lte('production_date', statsFilter.value.end);
-                    const { data: fpyRows } = await fq;
-                    let ff = fpyRows || [];
-                    if (statsFilter.value.modelId !== 'all') ff = ff.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
-                    if (statsFilter.value.woId !== 'all') ff = ff.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                    let ff;
+                    if (sharedData) {
+                        ff = filterSmtRows(sharedData.fpy);
+                    } else {
+                        let fq = _supabase.from('daily_fpy').select('production_date, spi_rate, aoi_rate, work_orders!inner(wo_number, model_id)').eq('line', currentLine.value);
+                        if (statsFilter.value.start) fq = fq.gte('production_date', statsFilter.value.start);
+                        if (statsFilter.value.end) fq = fq.lte('production_date', statsFilter.value.end);
+                        const { data: fpyRows } = await fq;
+                        ff = fpyRows || [];
+                        if (statsFilter.value.modelId !== 'all') ff = ff.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                        if (statsFilter.value.woId !== 'all') ff = ff.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                    }
                     const fpyDayMap = {};
                     ff.forEach(r => {
                         if (!fpyDayMap[r.production_date]) fpyDayMap[r.production_date] = { spi: [], aoi: [] };
@@ -374,9 +410,11 @@ SMT.stats = function (ctx) {
 
         // --- Excel 導出 (原三分頁格式完全保留，僅新增「交叉分析」分頁) ---
         const exportToExcel = async () => {
+            await calculateStats(false, { refreshRemote: true });
             if (!statsResult.value) return toast("請先執行統計", "warning");
             loading.value = true;
             try {
+                const sharedData = await loadSmtStatsData(false);
                 const combinedData = [["=== 總結報告 ==="], ["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], ["總投入數", statsResult.value.totalInput], ["總不良數", statsResult.value.totalDefects], ["良率", `${statsResult.value.yieldRate}%`], [], ["=== 不良現象分析 ==="], ["不良現象", "數量", "佔比"], ...statsResult.value.byType.map(d => [d.name, d.qty, `${d.ratio}%`]), [], ["=== 位置異常分析 ==="], ["位置", "數量"], ...statsResult.value.byLocation.map(d => [d.code, d.qty])];
                 const wb = XLSX.utils.book_new();
                 const wsYield = XLSX.utils.aoa_to_sheet(combinedData);
@@ -390,13 +428,18 @@ SMT.stats = function (ctx) {
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(paretoData), "Pareto分析");
 
                 // === 每日明細分頁 ===
-                let dailyQuery = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
-                if (statsFilter.value.start) dailyQuery = dailyQuery.gte('production_date', statsFilter.value.start);
-                if (statsFilter.value.end) dailyQuery = dailyQuery.lte('production_date', statsFilter.value.end);
-                const { data: dailyRows } = await dailyQuery;
-                let filteredDaily = dailyRows || [];
-                if (statsFilter.value.modelId !== 'all') filteredDaily = filteredDaily.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
-                if (statsFilter.value.woId !== 'all') filteredDaily = filteredDaily.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                let filteredDaily;
+                if (sharedData) {
+                    filteredDaily = filterSmtRows(sharedData.production);
+                } else {
+                    let dailyQuery = _supabase.from('daily_production').select(`production_date, input_quantity, work_orders!inner (wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
+                    if (statsFilter.value.start) dailyQuery = dailyQuery.gte('production_date', statsFilter.value.start);
+                    if (statsFilter.value.end) dailyQuery = dailyQuery.lte('production_date', statsFilter.value.end);
+                    const { data: dailyRows } = await dailyQuery;
+                    filteredDaily = dailyRows || [];
+                    if (statsFilter.value.modelId !== 'all') filteredDaily = filteredDaily.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                    if (statsFilter.value.woId !== 'all') filteredDaily = filteredDaily.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
+                }
                 filteredDaily.sort((a, b) => a.production_date.localeCompare(b.production_date) || a.work_orders.wo_number.localeCompare(b.work_orders.wo_number));
                 const dailyData = [["統計區間", `${statsFilter.value.start || '不限'} ~ ${statsFilter.value.end || '不限'}`], [], ["日期", "工單號碼", "機種", "投入量", "NG 數", "良率", "NG 項目明細", "NG 位置明細"]];
                 filteredDaily.forEach(r => {
@@ -414,13 +457,17 @@ SMT.stats = function (ctx) {
                 const wsDaily = XLSX.utils.aoa_to_sheet(dailyData);
                 XLSX.utils.book_append_sheet(wb, wsDaily, "每日明細");
 
-                let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').eq('line', currentLine.value);
-                if (statsFilter.value.start) fpyQuery = fpyQuery.gte('production_date', statsFilter.value.start);
-                if (statsFilter.value.end) fpyQuery = fpyQuery.lte('production_date', statsFilter.value.end);
-                const { data: fpyRows } = await fpyQuery;
-
-                let filteredFpy = fpyRows || [];
-                if (statsFilter.value.modelId !== 'all') filteredFpy = filteredFpy.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                let filteredFpy;
+                if (sharedData) {
+                    filteredFpy = filterSmtRows(sharedData.fpy);
+                } else {
+                    let fpyQuery = _supabase.from('daily_fpy').select('*, work_orders(wo_number, models(name))').eq('line', currentLine.value);
+                    if (statsFilter.value.start) fpyQuery = fpyQuery.gte('production_date', statsFilter.value.start);
+                    if (statsFilter.value.end) fpyQuery = fpyQuery.lte('production_date', statsFilter.value.end);
+                    const { data: fpyRows } = await fpyQuery;
+                    filteredFpy = fpyRows || [];
+                    if (statsFilter.value.modelId !== 'all') filteredFpy = filteredFpy.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
+                }
 
                 filteredFpy.sort((a, b) => {
                     const woA = a.work_orders.wo_number;

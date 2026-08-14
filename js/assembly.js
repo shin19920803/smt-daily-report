@@ -16,12 +16,15 @@ SMT.assembly = function (ctx) {
     const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
     const STATUS_NOTES_STORAGE_KEY = 'koya_assy_log_status_notes_v1';
     const today = () => new Date().toISOString().split('T')[0];
+    const previousDay = new Date();
+    previousDay.setDate(previousDay.getDate() - 1);
+    const previousDayValue = `${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, '0')}-${String(previousDay.getDate()).padStart(2, '0')}`;
 
     const assemblyUploadDate = ref(today());
     const assemblyBatches = ref([]);
     const assemblyLastFile = ref('');
     const assemblyReportResult = ref(null);
-    const assemblyStatsFilter = ref({ start: '', end: '' });
+    const assemblyStatsFilter = ref({ start: previousDayValue, end: previousDayValue });
     const assemblyStatsResult = ref(null);
     const assemblyRemoteReady = ref(false);
     const assemblyRemoteError = ref('');
@@ -44,8 +47,8 @@ SMT.assembly = function (ctx) {
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] });
     const assemblyDailyDetail = ref({ show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] });
-    const assemblyQuickMode = ref(null);
-    const assemblyQuickOffset = ref(0);
+    const assemblyQuickMode = ref('day');
+    const assemblyQuickOffset = ref(-1);
     let applyingAssemblyQuick = false;
 
     const NO_MODEL = '無機種區分';
@@ -933,6 +936,16 @@ SMT.assembly = function (ctx) {
     };
     let assemblyLoadRequestId = 0;
     let assemblyRemoteLoadPromise = null;
+    const loadAssemblyRemoteRows = async (force = false) => {
+        if (window.koyaFetchCachedJson) {
+            try {
+                const data = await window.koyaFetchCachedJson('/api/assembly-data', { force });
+                if (Array.isArray(data)) return { data, error: null };
+            } catch (error) { console.warn('Mylar 共用快取讀取失敗，改由 Supabase 直讀', error); }
+        }
+        return _supabase.from(REMOTE_TABLE)
+            .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100);
+    };
     const refreshAssemblyAfterBackgroundLoad = () => {
         if (currentLine.value !== 'ASSY') return;
         refreshAssemblyReport();
@@ -967,8 +980,7 @@ SMT.assembly = function (ctx) {
         const localMappings = readMappingStorage();
         const remotePromise = (async () => {
             const [{ data: remoteRows, error }, { data: remoteMappingRows, error: mappingError }, { data: remoteScheduleRows, error: scheduleError }] = await Promise.all([
-                _supabase.from(REMOTE_TABLE)
-                    .select('*').eq('line', 'ASSY').order('uploaded_at', { ascending: false }).limit(100),
+                loadAssemblyRemoteRows(!background),
                 _supabase.from(MAPPING_TABLE)
                     .select('*').eq('line', 'ASSY').order('created_at', { ascending: false }).limit(500),
                 _supabase.from(MODEL_SCHEDULE_TABLE)

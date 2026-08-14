@@ -21,35 +21,116 @@ const jsonResponse = (body, status = 200, extraHeaders = {}) => new Response(JSO
     headers: { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8', ...extraHeaders }
 });
 
-const cacheKeyForLine = (requestUrl, line) => new Request(`${requestUrl.origin}/api/daf-summary?line=${encodeURIComponent(line)}`);
+const supabaseHeaders = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Accept: 'application/json'
+};
 
-const readSummaryFromSupabase = async line => {
+const cacheKey = (requestUrl, pathname, params = {}) => {
+    const url = new URL(`${requestUrl.origin}${pathname}`);
+    Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+    return new Request(url.toString());
+};
+
+const cacheKeyForLine = (requestUrl, pathname, line) => cacheKey(requestUrl, pathname, { line });
+
+const readSupabasePages = async (table, configure, pageSize = 1000) => {
     const rows = [];
-    for (let offset = 0; ; offset += 1000) {
-        const url = new URL(`${SUPABASE_URL}/rest/v1/daf_log_batches`);
+    for (let offset = 0; ; offset += pageSize) {
+        const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
+        configure(url);
+        url.searchParams.set('offset', String(offset));
+        url.searchParams.set('limit', String(pageSize));
+        const response = await fetch(url, { headers: supabaseHeaders });
+        if (!response.ok) return { error: new Response(await response.text(), { status: response.status, headers: corsHeaders }) };
+        const page = await response.json();
+        if (!Array.isArray(page)) return { error: jsonResponse({ error: 'Supabase response is not an array' }, 502) };
+        rows.push(...page);
+        if (page.length < pageSize) break;
+    }
+    return { rows };
+};
+
+const readDafSummaryFromSupabase = async line => {
+    const result = await readSupabasePages('daf_log_batches', url => {
+        // 只傳摘要欄位，避免儀表板把 records 一起拉下來；新欄位不會影響既有欄位解析。
         url.searchParams.set('select', SUMMARY_COLUMNS);
         url.searchParams.set('line', `eq.${line}`);
         url.searchParams.set('order', 'uploaded_at.desc');
-        url.searchParams.set('offset', String(offset));
-        url.searchParams.set('limit', '1000');
-        const response = await fetch(url, {
-            headers: {
-                apikey: SUPABASE_ANON_KEY,
-                Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-                Accept: 'application/json'
-            }
-        });
-        if (!response.ok) return new Response(await response.text(), { status: response.status });
-        const page = await response.json();
-        rows.push(...(Array.isArray(page) ? page : []));
-        if (!Array.isArray(page) || page.length < 1000) break;
-    }
-    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
+    });
+    if (result.error) return result.error;
+    return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
 };
 
-const invalidateSummaryCache = async requestUrl => {
+const readDafDetailsFromSupabase = async line => {
+    const result = await readSupabasePages('daf_log_batches', url => {
+        url.searchParams.set('select', '*');
+        url.searchParams.set('line', `eq.${line}`);
+        url.searchParams.set('order', 'uploaded_at.desc');
+    }, 3);
+    if (result.error) return result.error;
+    return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
+};
+
+const readSmtDataFromSupabase = async () => {
+    const production = await readSupabasePages('daily_production', url => {
+        url.searchParams.set('select', '*,work_orders!inner(*,models(*)),defect_logs(*,defect_types(*),defect_locations(*))');
+        url.searchParams.set('line', 'eq.SMT');
+        url.searchParams.set('order', 'production_date.asc');
+    });
+    if (production.error) return production.error;
+    const fpy = await readSupabasePages('daily_fpy', url => {
+        url.searchParams.set('select', '*,work_orders!inner(*,models(*))');
+        url.searchParams.set('line', 'eq.SMT');
+        url.searchParams.set('order', 'production_date.asc');
+    });
+    if (fpy.error) return fpy.error;
+    return jsonResponse({ production: production.rows, fpy: fpy.rows }, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
+};
+
+const readAssemblyDataFromSupabase = async () => {
+    const result = await readSupabasePages('assembly_log_batches', url => {
+        url.searchParams.set('select', '*');
+        url.searchParams.set('line', 'eq.ASSY');
+        url.searchParams.set('order', 'uploaded_at.desc');
+    }, 100);
+    if (result.error) return result.error;
+    return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
+};
+
+const withCache = async (requestUrl, pathname, params, forceRefresh, loader) => {
     const cache = caches.default;
-    await Promise.all(PROCESS_LINES.map(line => cache.delete(cacheKeyForLine(requestUrl, line))));
+    const key = cacheKey(requestUrl, pathname, params);
+    if (!forceRefresh) {
+        const cached = await cache.match(key);
+        if (cached) {
+            const headers = new Headers(cached.headers);
+            Object.entries(corsHeaders).forEach(([name, value]) => headers.set(name, value));
+            headers.set('X-Koya-Cache', 'HIT');
+            return new Response(cached.body, { status: cached.status, headers });
+        }
+    } else {
+        await cache.delete(key);
+    }
+    const fresh = await loader();
+    if (!fresh.ok) return fresh;
+    await cache.put(key, fresh.clone());
+    const headers = new Headers(fresh.headers);
+    headers.set('X-Koya-Cache', forceRefresh ? 'REFRESH' : 'MISS');
+    return new Response(fresh.body, { status: fresh.status, headers });
+};
+
+const invalidateCache = async requestUrl => {
+    const cache = caches.default;
+    const keys = [
+        ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-summary', line)),
+        ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-details', line)),
+        cacheKey(requestUrl, '/api/smt-data'),
+        cacheKey(requestUrl, '/api/assembly-data')
+    ];
+    await Promise.all(keys.map(key => cache.delete(key)));
+    return keys.length;
 };
 
 export default {
@@ -58,42 +139,33 @@ export default {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
         if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-            return jsonResponse({ ok: true, service: 'koya-data-cache' });
+            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '2026081403' });
         }
 
-        if (requestUrl.pathname === '/api/daf-summary') {
-            if (request.method !== 'GET') return jsonResponse({ error: 'Method not allowed' }, 405);
+        if (request.method === 'GET' && requestUrl.pathname === '/api/daf-summary') {
             const line = requestUrl.searchParams.get('line');
             if (!PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
-
-            const cache = caches.default;
-            const key = cacheKeyForLine(requestUrl, line);
-            const forceRefresh = requestUrl.searchParams.get('refresh') === '1';
-            if (!forceRefresh) {
-                const cached = await cache.match(key);
-                if (cached) {
-                    const headers = new Headers(cached.headers);
-                    Object.entries(corsHeaders).forEach(([name, value]) => headers.set(name, value));
-                    headers.set('X-Koya-Cache', 'HIT');
-                    return new Response(cached.body, { status: cached.status, headers });
-                }
-            } else {
-                await cache.delete(key);
-            }
-
-            const fresh = await readSummaryFromSupabase(line);
-            if (!fresh.ok) return fresh;
-            const cachedResponse = new Response(fresh.body, { status: fresh.status, headers: fresh.headers });
-            await cache.put(key, cachedResponse.clone());
-            const headers = new Headers(cachedResponse.headers);
-            headers.set('X-Koya-Cache', forceRefresh ? 'REFRESH' : 'MISS');
-            return new Response(cachedResponse.body, { status: cachedResponse.status, headers });
+            return withCache(requestUrl, '/api/daf-summary', { line }, requestUrl.searchParams.get('refresh') === '1', () => readDafSummaryFromSupabase(line));
         }
 
-        if (requestUrl.pathname === '/api/daf-summary/invalidate') {
+        if (request.method === 'GET' && requestUrl.pathname === '/api/daf-details') {
+            const line = requestUrl.searchParams.get('line');
+            if (!PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
+            return withCache(requestUrl, '/api/daf-details', { line }, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line));
+        }
+
+        if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {
+            return withCache(requestUrl, '/api/smt-data', {}, requestUrl.searchParams.get('refresh') === '1', readSmtDataFromSupabase);
+        }
+
+        if (request.method === 'GET' && requestUrl.pathname === '/api/assembly-data') {
+            return withCache(requestUrl, '/api/assembly-data', {}, requestUrl.searchParams.get('refresh') === '1', readAssemblyDataFromSupabase);
+        }
+
+        if (requestUrl.pathname === '/api/cache/invalidate' || requestUrl.pathname === '/api/daf-summary/invalidate') {
             if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
-            await invalidateSummaryCache(requestUrl);
-            return jsonResponse({ ok: true, invalidated: PROCESS_LINES });
+            const invalidated = await invalidateCache(requestUrl);
+            return jsonResponse({ ok: true, invalidated });
         }
 
         return jsonResponse({ error: 'Not found' }, 404);

@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, loadDafData } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, loadDafData, loadAssemblyData } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dafDashboardResult = ref(null);
@@ -58,8 +58,29 @@ SMT.dashboard = function (ctx) {
         };
         let smtUploadedDatesCache = null;
         let smtUploadedDatesRequest = null;
-        const loadSmtUploadedDates = async () => {
-            if (smtUploadedDatesCache) return smtUploadedDatesCache;
+        let smtSharedDataCache = null;
+        const loadSmtSharedData = async (force = false) => {
+            if (!force && smtSharedDataCache) return smtSharedDataCache;
+            if (!window.koyaFetchCachedJson) return null;
+            try {
+                const data = await window.koyaFetchCachedJson('/api/smt-data', { force });
+                if (Array.isArray(data?.production)) {
+                    smtSharedDataCache = data;
+                    return data;
+                }
+            } catch (error) { console.warn('SMT 儀表板共用快取讀取失敗，改由 Supabase 直讀', error); }
+            return null;
+        };
+        const loadSmtUploadedDates = async (force = false) => {
+            if (!force && smtUploadedDatesCache) return smtUploadedDatesCache;
+            const sharedData = await loadSmtSharedData(force);
+            if (sharedData) {
+                smtUploadedDatesCache = [...new Set(sharedData.production
+                    .filter(row => Number(row.input_quantity) > 0)
+                    .map(row => row.production_date)
+                    .filter(Boolean))].sort();
+                return smtUploadedDatesCache;
+            }
             if (!smtUploadedDatesRequest) {
                 smtUploadedDatesRequest = _supabase.from('daily_production')
                     .select('production_date, input_quantity')
@@ -82,11 +103,11 @@ SMT.dashboard = function (ctx) {
             }
             return smtUploadedDatesRequest;
         };
-        const invalidateDashboardDateCache = () => { smtUploadedDatesCache = null; };
-        const loadDashboardAvailableDates = async line => {
+        const invalidateDashboardDateCache = () => { smtUploadedDatesCache = null; smtSharedDataCache = null; };
+        const loadDashboardAvailableDates = async (line, force = false) => {
             if (line === 'ASSY') return getAssemblyUploadedDates ? getAssemblyUploadedDates(2000) : [];
             if (line === 'TEST') return getDafUploadedDates ? getDafUploadedDates(2000) : [];
-            if (line === 'SMT') return loadSmtUploadedDates();
+            if (line === 'SMT') return loadSmtUploadedDates(force);
             return [];
         };
         const nearestAvailableDate = (date, dates) => {
@@ -98,7 +119,9 @@ SMT.dashboard = function (ctx) {
                 return distance < closestDistance ? candidate : closest;
             }, dates[0]);
         };
-        const loadSmtDateRows = async (start, end = start) => {
+        const loadSmtDateRows = async (start, end = start, force = false) => {
+            const sharedData = await loadSmtSharedData(force);
+            if (sharedData) return sharedData.production.filter(row => String(row.production_date) >= start && String(row.production_date) <= end);
             let query = _supabase.from('daily_production')
                 .select('id, production_date, input_quantity, work_orders!inner(id, wo_number, models(name)), defect_logs(quantity, defect_types(name), defect_locations(code))')
                 .eq('line', 'SMT').gte('production_date', start).lte('production_date', end);
@@ -267,10 +290,10 @@ SMT.dashboard = function (ctx) {
         };
 
         let dashboardRefreshId = 0;
-        const refreshDashboard = async () => {
+        const refreshDashboard = async ({ force = false } = {}) => {
             const requestId = ++dashboardRefreshId;
             const line = currentLine.value;
-            const availableDates = await loadDashboardAvailableDates(line);
+            const availableDates = await loadDashboardAvailableDates(line, force);
             if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
             dashboardAvailableDates.value = availableDates;
             if (availableDates.length && !availableDates.includes(dashDate.value)) {
@@ -317,7 +340,7 @@ SMT.dashboard = function (ctx) {
             const trendStart = fmtDate(trendStartDate);
             const queryStart = [trendStart, weekRange.start, targetDate].sort()[0];
             const queryEnd = [targetDate, weekRange.end].sort().pop();
-            const rangeRows = await loadSmtDateRows(queryStart, queryEnd);
+            const rangeRows = await loadSmtDateRows(queryStart, queryEnd, force);
             if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
             const todayRows = rangeRows.filter(row => row.production_date === targetDate);
             const weekRows = rangeRows.filter(row => row.production_date >= weekRange.start && row.production_date <= weekRange.end);
@@ -627,7 +650,8 @@ SMT.dashboard = function (ctx) {
         };
         const refreshDashboardAndCharts = async () => {
             if (currentLine.value === 'TEST' && loadDafData) await loadDafData();
-            const refreshed = await refreshDashboard();
+            if (currentLine.value === 'ASSY' && loadAssemblyData) await loadAssemblyData();
+            const refreshed = await refreshDashboard({ force: true });
             if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
         };
         window.addEventListener('resize', () => { if (currentTab.value === 'dashboard') resizeDashboardCharts(); });

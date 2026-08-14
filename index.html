@@ -65,7 +65,7 @@
                 <i class="fas fa-clipboard-list w-5 text-center mr-3 text-sm"></i> <span class="text-sm">工單管理</span>
             </a>
             <a @click="currentTab = 'stats'" :class="{'active': currentTab === 'stats'}" class="sidebar-link rounded-lg">
-                <i class="fas fa-chart-bar w-5 text-center mr-3 text-sm"></i> <span class="text-sm">統計與導出</span>
+                <i class="fas fa-chart-bar w-5 text-center mr-3 text-sm"></i> <span class="text-sm">數據統計</span>
             </a>
             <a v-if="!hideLineTools" @click="currentTab = 'equipment'" :class="{'active': currentTab === 'equipment'}" class="sidebar-link rounded-lg">
                 <i class="fas fa-tools w-5 text-center mr-3 text-sm"></i> <span class="text-sm">設備管理</span>
@@ -949,7 +949,7 @@
             <div class="page-header mb-6">
                 <div class="flex items-center gap-3">
                     <div class="w-1 h-6 rounded bg-blue-600"></div>
-                    <h2 class="text-xl font-black text-gray-900">統計與導出</h2>
+                    <h2 class="text-xl font-black text-gray-900">數據統計</h2>
                 </div>
             </div>
             <div v-if="currentLine === 'ASSY'" class="space-y-4 animate-fade-in">
@@ -1774,7 +1774,7 @@
             <div v-if="showMobileMore" class="absolute bottom-14 right-0 bg-white border border-gray-200 rounded-xl shadow-xl py-2 w-40 animate-fade-in">
                 <a v-if="!hideOoc" @click="currentTab='ooc'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='ooc' ? 'text-red-600 bg-red-50' : 'text-gray-600'"><i class="fas fa-exclamation-triangle w-5 mr-2"></i>OOC</a>
                 <a v-if="!hideLineTools" @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
-                <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>統計</a>
+                <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>數據統計</a>
                 <a v-if="!hideSettings" @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
                 <div class="border-t border-gray-100 mt-2 pt-2">
                     <div class="px-4 pb-1 text-[10px] font-bold text-gray-400">切換產線</div>
@@ -1791,10 +1791,10 @@
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608141200"></script>
-<script src="js/daf.js?v=202608141300"></script>
+<script src="js/daf.js?v=202608141400"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
-<script src="js/dashboard.js?v=202608141200"></script>
+<script src="js/dashboard.js?v=202608141400"></script>
 <script src="js/stats.js?v=202608141200"></script>
 <script src="js/equipment.js?v=202608141200"></script>
 <script src="js/settings.js?v=202608111430"></script>

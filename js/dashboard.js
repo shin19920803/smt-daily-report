@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, loadDafData, loadAssemblyData } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, ensureDafDashboardDetails, loadDafData, loadAssemblyData } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dafDashboardResult = ref(null);
@@ -317,6 +317,8 @@ SMT.dashboard = function (ctx) {
                 if (!getDafDashboardForDate) {
                     dafDashboardResult.value = null;
                 } else {
+                    if (ensureDafDashboardDetails) await ensureDafDashboardDetails(dashDate.value, { force });
+                    if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
                     const current = getDafDashboardForDate(dashDate.value);
                     if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
                     dafDashboardResult.value = current;

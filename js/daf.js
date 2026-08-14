@@ -764,12 +764,51 @@ SMT.daf = function (ctx) {
         dafRemoteError.value = '';
         return true;
     };
+    const dafDetailRangeLoaded = (line, start = '', end = '') => [...dafDetailLoadedLines].some(key => {
+        const [loadedLine, loadedStart = '', loadedEnd = ''] = key.split('|');
+        if (loadedLine !== line) return false;
+        const startCovered = !loadedStart || (start && loadedStart <= start);
+        const endCovered = !loadedEnd || (end && loadedEnd >= end);
+        return startCovered && endCovered;
+    });
+    const mergeDafDetailBatches = (existingBatches, remoteBatches, line, { replaceStart = '', replaceEnd = '' } = {}) => {
+        const recordsOutsideRange = records => (records || []).filter(record => {
+            if (!replaceStart && !replaceEnd) return false;
+            const date = record.date || '';
+            if (!date) return true;
+            if (replaceStart && date < replaceStart) return true;
+            if (replaceEnd && date > replaceEnd) return true;
+            return false;
+        });
+        const batchMap = new Map();
+        existingBatches.forEach(batch => {
+            if (batch.line !== line) {
+                batchMap.set(batch.id, batch);
+                return;
+            }
+            const records = replaceStart || replaceEnd ? recordsOutsideRange(batch.records) : (batch.records || []);
+            if (records.length) batchMap.set(batch.id, { ...batch, records });
+        });
+        remoteBatches.forEach(batch => {
+            const previous = batchMap.get(batch.id);
+            const mergedRecords = [];
+            const identities = new Set();
+            [...(previous?.records || []), ...(batch.records || [])].forEach(record => {
+                const identity = [record.dedupKey || '', record.dedupTime ?? '', record.date || '', record.status || '', record.defect || '', record.workOrder || ''].join('|');
+                if (identities.has(identity)) return;
+                identities.add(identity);
+                mergedRecords.push(record);
+            });
+            batchMap.set(batch.id, { ...(previous || {}), ...batch, records: mergedRecords });
+        });
+        return deduplicateDafBatches([...batchMap.values()]).batches;
+    };
     const ensureDafProcessDetails = async (line, { force = false, start = '', end = '' } = {}) => {
         if (!TEST_PROCESS_IDS.includes(line)) return true;
         if (!(await ensureDafRemoteConnection())) return false;
         const detailKey = `${line}|${start}|${end}`;
         if (force) dafDetailLoadedLines.delete(detailKey);
-        if (dafDetailLoadedLines.has(detailKey)) return true;
+        if (!force && dafDetailRangeLoaded(line, start, end)) return true;
         if (dafDetailLoadPromises.has(detailKey)) return dafDetailLoadPromises.get(detailKey);
         const request = (async () => {
             const result = await loadDafRemoteRows(line, true, { force, start, end });
@@ -778,8 +817,7 @@ SMT.daf = function (ctx) {
                 return false;
             }
             const remoteBatches = filterGhostDafRows(result.data || []).map(fromRemote);
-            const otherLines = dafBatches.value.filter(batch => batch.line !== line);
-            dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches]).batches;
+            dafBatches.value = mergeDafDetailBatches(dafBatches.value, remoteBatches, line, force ? { replaceStart: start, replaceEnd: end } : {});
             dafDetailLoadedLines.add(detailKey);
             if (dafStatsResults.value[line]) {
                 dafStatsResults.value = { ...dafStatsResults.value, [line]: buildDafStats(line) };
@@ -1146,11 +1184,10 @@ SMT.daf = function (ctx) {
         return [...new Set([start, end])];
     };
     const getDafUploadedDates = (limit = 14) => {
-        if (hasDafDetailedRecords()) {
-            ensureDafDateIndex();
-            return [...dafInputCountByDate.keys()].filter(date => dafInputCountByDate.get(date) > 0).sort().slice(-limit);
-        }
-        return [...new Set(summaryBatchesForCurrentLine().flatMap(summaryBatchDates))].sort().slice(-limit);
+        ensureDafDateIndex();
+        const detailedDates = [...dafInputCountByDate.keys()].filter(date => dafInputCountByDate.get(date) > 0);
+        const summaryDates = summaryBatchesForCurrentLine().flatMap(summaryBatchDates);
+        return [...new Set([...summaryDates, ...detailedDates])].sort().slice(-limit);
     };
     const buildDafSummaryFromRemote = date => {
         const batches = summaryBatchesForCurrentLine().filter(batch => {
@@ -1193,12 +1230,14 @@ SMT.daf = function (ctx) {
             dafDashboardCache.clear();
         }
         if (dafDashboardCache.has(date)) return dafDashboardCache.get(date);
-        const result = hasDafDetailedRecords()
+        const hasLoadedDate = dafDetailRangeLoaded(currentDafLine(), date, date);
+        const result = hasLoadedDate
             ? { ...buildDafSummary(getDafRowsForDate(date)), date }
             : buildDafSummaryFromRemote(date);
         dafDashboardCache.set(date, result);
         return result;
     };
+    const ensureDafDashboardDetails = (date, { force = false } = {}) => ensureDafProcessDetails(currentDafLine(), { start: date, end: date, force });
     const dafQuickRange = (mode, offset) => {
         const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
         if (mode === 'day') {
@@ -1635,8 +1674,7 @@ SMT.daf = function (ctx) {
             restoreDafStatsState();
             dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [] };
             dafLastUpload.value = null;
-            dafStatsResult.value = null;
-            dafStatsResults.value = {};
+            dafStatsResult.value = dafStatsResults.value[dafProcess.value] || null;
         }
     });
     watch(dafProcess, () => {
@@ -1656,7 +1694,7 @@ SMT.daf = function (ctx) {
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
-        getDafUploadedDates, getDafDashboardForDate,
+        getDafUploadedDates, getDafDashboardForDate, ensureDafDashboardDetails,
         renderDafCharts
     };
 };

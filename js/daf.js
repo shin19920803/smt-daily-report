@@ -736,6 +736,7 @@ SMT.daf = function (ctx) {
     let dafRemoteLoadLine = '';
     const dafDetailLoadedLines = new Set();
     const dafDetailLoadPromises = new Map();
+    let dafRemoteChangeChannel = null;
     const probeDafRemote = async lines => {
         const results = await Promise.all(lines.map(line => _supabase.from(REMOTE_TABLE).select('id').eq('line', line).limit(1)));
         return results.find(result => result.error)?.error || null;
@@ -801,12 +802,12 @@ SMT.daf = function (ctx) {
             return null;
         }).catch(error => console.warn(`${currentDafLabel()} 儀表板背景更新失敗`, error));
     };
-    const loadDafData = async ({ background = false } = {}) => {
+    const loadDafData = async ({ background = false, force = false } = {}) => {
         const line = isUnifiedTestLine() ? 'TEST' : currentDafLine();
         if (dafRemoteLoadPromise && dafRemoteLoadLine === line) {
-            if (background) return true;
+            if (background && !force) return true;
             await dafRemoteLoadPromise;
-            return true;
+            if (!force) return true;
         }
         const requestId = ++dafLoadRequestId;
         if (!background) {
@@ -842,7 +843,7 @@ SMT.daf = function (ctx) {
             }
             // 儀表板只讀摘要欄位；完整 records 延後到統計／明細明確操作時才讀取。
             const remoteResults = [];
-            for (const processLine of processLines) remoteResults.push(await loadDafRemoteRows(processLine, false, { force: !background }));
+            for (const processLine of processLines) remoteResults.push(await loadDafRemoteRows(processLine, false, { force: force || !background }));
             const error = remoteResults.find(result => result.error)?.error || null;
             const remoteRows = remoteResults.flatMap(result => result.data || []);
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
@@ -876,6 +877,71 @@ SMT.daf = function (ctx) {
         await settled;
         refreshDafAfterRemoteLoad(line, { refreshDetails: true });
         return true;
+    };
+
+    const clearDafRemoteDerivedState = ({ clearDetails = false } = {}) => {
+        if (clearDetails) {
+            dafDetailLoadedLines.clear();
+            dafDetailLoadPromises.clear();
+            dafBatches.value = [];
+        }
+        dafStatsRangeCache.clear();
+        dafRemoteVersions = null;
+        dafRemoteVersionsLoadedAt = 0;
+        dafStatsResult.value = null;
+        dafStatsResults.value = {};
+        dafDateIndexSource = null;
+        dafDashboardCache.clear();
+    };
+    const refreshDafViewsAfterRemoteChange = () => {
+        if (!ctx.refreshDashboard) return;
+        Promise.resolve(ctx.refreshDashboard()).then(refreshed => {
+            if (refreshed !== false && currentTab.value === 'dashboard' && ctx.initDashboardCharts) return ctx.initDashboardCharts();
+            return null;
+        }).catch(error => console.warn(`${currentDafLabel()} 遠端變更畫面同步失敗`, error));
+    };
+    const applyDafRemoteDeletion = id => {
+        if (!id) return;
+        const hadStats = Object.keys(dafStatsResults.value || {}).length > 0;
+        dafSummaryBatches.value = dafSummaryBatches.value.filter(batch => batch.id !== id);
+        dafBatches.value = dafBatches.value.filter(batch => batch.id !== id);
+        clearDafRemoteDerivedState();
+        if (hadStats) {
+            const nextResults = {};
+            TEST_PROCESS_IDS.forEach(line => { nextResults[line] = buildDafStats(line); });
+            dafStatsResults.value = nextResults;
+            dafStatsResult.value = nextResults[currentDafLine()] || null;
+        }
+        dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
+        refreshDafViewsAfterRemoteChange();
+    };
+    let dafRemoteSyncTimer = null;
+    const scheduleDafRemoteRefresh = () => {
+        clearTimeout(dafRemoteSyncTimer);
+        dafRemoteSyncTimer = setTimeout(async () => {
+            dafRemoteSyncTimer = null;
+            if (!isDafLikeLine()) return;
+            clearDafRemoteDerivedState({ clearDetails: true });
+            try { await loadDafData({ background: true, force: true }); }
+            catch (error) { console.warn(`${currentDafLabel()} 遠端變更資料同步失敗`, error); }
+        }, 400);
+    };
+    const subscribeDafRemoteChanges = () => {
+        if (!_supabase?.channel || dafRemoteChangeChannel) return;
+        dafRemoteChangeChannel = _supabase.channel('koya-daf-log-sync')
+            .on('postgres_changes', { event: '*', schema: 'public', table: REMOTE_TABLE }, payload => {
+                const line = payload.new?.line || payload.old?.line;
+                if (payload.eventType === 'DELETE') {
+                    // DELETE 的 old payload 可能只包含主鍵；id 在五個製程間全域唯一，因此直接同步移除。
+                    applyDafRemoteDeletion(payload.old?.id);
+                    return;
+                }
+                if (!TEST_PROCESS_IDS.includes(line)) return;
+                scheduleDafRemoteRefresh();
+            })
+            .subscribe(status => {
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('測試製程遠端同步連線失敗');
+            });
     };
 
     let allRecordsCacheSource = null;
@@ -1560,6 +1626,7 @@ SMT.daf = function (ctx) {
         dafStatsResult.value = dafStatsResults.value[dafProcess.value] || null;
         if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
     });
+    subscribeDafRemoteChanges();
     // 不做固定時間輪詢；由使用者手動重新整理、上傳完成或執行統計時取得最新資料。
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 

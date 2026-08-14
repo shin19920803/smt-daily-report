@@ -13,7 +13,7 @@ const app = createApp({
                 const tasks = [
                     ctx.loadBaseData(),
                     ctx.loadAssemblyData({ background: true }),
-                    ctx.loadDafData({ background: true })
+                    ctx.loadDafData({ background: true, force: true })
                 ];
                 await Promise.all(tasks);
                 const refreshed = await ctx.refreshDashboard();

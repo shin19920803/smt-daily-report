@@ -61,6 +61,7 @@ SMT.daf = function (ctx) {
     const setDafProcess = line => {
         if (!TEST_PROCESS_IDS.includes(line)) return;
         dafProcess.value = line;
+        dafStatsResult.value = dafStatsResults.value[line] || null;
         try { localStorage.setItem(TEST_PROCESS_STORAGE_KEY, line); } catch (e) {}
         closeDafDefectDetail();
         closeDafModelStatsDetail();
@@ -98,6 +99,8 @@ SMT.daf = function (ctx) {
     const DAF_STATS_STATE_KEY = 'koya_test_stats_state_v1';
     const dafStatsResult = ref(null);
     const dafStatsResults = ref({});
+    // 同一日期／篩選條件已執行過的五站結果共用；左右切換已載入區間時不再重新抓取。
+    const dafStatsRangeCache = new Map();
     const dafRemoteReady = ref(false);
     const dafRemoteChecking = ref(false);
     const dafRemoteError = ref('');
@@ -786,6 +789,7 @@ SMT.daf = function (ctx) {
         if (!background) {
             dafDetailLoadedLines.clear();
             dafDetailLoadPromises.clear();
+            dafStatsRangeCache.clear();
             dafBatches.value = [];
             dafStatsResult.value = null;
             dafStatsResults.value = {};
@@ -1027,6 +1031,9 @@ SMT.daf = function (ctx) {
         return result;
     };
     const buildDafStats = (processLine = currentDafLine(), filter = dafStatsFilter.value) => buildDafSummary(filterRecords(processLine, filter), processLine);
+    const dafStatsRangeKey = (filter = dafStatsFilter.value) => [
+        filter.start || '', filter.end || '', filter.model || 'all', filter.workOrder || 'all'
+    ].join('|');
     let dafDashboardCacheSource = null;
     let dafDashboardSummaryCacheSource = null;
     const dafDashboardCache = new Map();
@@ -1134,7 +1141,8 @@ SMT.daf = function (ctx) {
         dafStatsFilter.value.end = fmtDate(end);
         await Vue.nextTick();
         applyingDafQuick = false;
-        calculateDafStats();
+        // 快捷日期只切換已載入的統計結果；新區間第一次才載入，且不強制刷新遠端快取。
+        calculateDafStats(true, { refreshRemote: false });
     };
     const setDafQuickMode = mode => {
         dafQuickMode.value = mode;
@@ -1148,6 +1156,14 @@ SMT.daf = function (ctx) {
     };
     const calculateDafStats = async (showToast = true, { refreshRemote = showToast } = {}) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
+        const rangeKey = dafStatsRangeKey();
+        if (!refreshRemote && dafStatsRangeCache.has(rangeKey)) {
+            const cachedResults = dafStatsRangeCache.get(rangeKey);
+            dafStatsResults.value = { ...cachedResults };
+            dafStatsResult.value = cachedResults[currentDafLine()] || null;
+            renderDafCharts();
+            return;
+        }
         const shouldWaitForRemote = !!dafRemoteLoadPromise && !dafRemoteReady.value;
         const wasLoading = loading.value;
         if (shouldWaitForRemote && !wasLoading) loading.value = true;
@@ -1165,6 +1181,7 @@ SMT.daf = function (ctx) {
         const nextResults = { ...dafStatsResults.value };
         processLines.forEach(line => { nextResults[line] = buildDafStats(line); });
         dafStatsResults.value = nextResults;
+        dafStatsRangeCache.set(rangeKey, nextResults);
         dafStatsResult.value = nextResults[currentDafLine()] || null;
         renderDafCharts();
         if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);
@@ -1337,6 +1354,7 @@ SMT.daf = function (ctx) {
         await invalidateDafSummaryCache();
         dafBatches.value = dafBatches.value.filter(item => item.id !== id);
         dafSummaryBatches.value = dafSummaryBatches.value.filter(item => item.id !== id);
+        dafStatsRangeCache.clear();
         dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
         if (dafStatsResult.value) {
             const processLine = currentDafLine();

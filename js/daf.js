@@ -101,6 +101,8 @@ SMT.daf = function (ctx) {
     const dafStatsResults = ref({});
     // 同一日期／篩選條件已執行過的五站結果共用；左右切換已載入區間時不再重新抓取。
     const dafStatsRangeCache = new Map();
+    const dafStatsLoading = ref(false);
+    let dafStatsLoadingCount = 0;
     const dafRemoteReady = ref(false);
     const dafRemoteChecking = ref(false);
     const dafRemoteError = ref('');
@@ -1164,27 +1166,41 @@ SMT.daf = function (ctx) {
             renderDafCharts();
             return;
         }
-        const shouldWaitForRemote = !!dafRemoteLoadPromise && !dafRemoteReady.value;
-        const wasLoading = loading.value;
-        if (shouldWaitForRemote && !wasLoading) loading.value = true;
-        if (shouldWaitForRemote) {
-            try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 統計改用本機快取`, error); }
-            if (!wasLoading) loading.value = false;
+        dafStatsLoadingCount += 1;
+        dafStatsLoading.value = true;
+        try {
+            const shouldWaitForRemote = !!dafRemoteLoadPromise && !dafRemoteReady.value;
+            const wasLoading = loading.value;
+            if (shouldWaitForRemote && !wasLoading) loading.value = true;
+            if (shouldWaitForRemote) {
+                try { await dafRemoteLoadPromise; } catch (error) { console.warn(`${currentDafLabel()} 統計改用本機快取`, error); }
+                if (!wasLoading) loading.value = false;
+            }
+            const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
+            const detailRange = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '' };
+            const detailResults = await Promise.all(processLines.map(line => ensureDafProcessDetails(line, { ...detailRange, force: refreshRemote })));
+            const failedLine = processLines.find((line, index) => detailResults[index] === false);
+            if (failedLine) {
+                if (showToast) toast(`${processLabel(failedLine)} 資料載入失敗，請稍後再試`, 'error');
+                return;
+            }
+            dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
+            dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] };
+            dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [] };
+            const nextResults = { ...dafStatsResults.value };
+            processLines.forEach(line => { nextResults[line] = buildDafStats(line); });
+            dafStatsResults.value = nextResults;
+            dafStatsRangeCache.set(rangeKey, nextResults);
+            dafStatsResult.value = nextResults[currentDafLine()] || null;
+            renderDafCharts();
+            if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);
+        } catch (error) {
+            console.error('測試製程統計載入失敗', error);
+            if (showToast) toast('統計資料載入失敗，請重新執行', 'error');
+        } finally {
+            dafStatsLoadingCount = Math.max(0, dafStatsLoadingCount - 1);
+            dafStatsLoading.value = dafStatsLoadingCount > 0;
         }
-        const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
-        const detailRange = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '' };
-        const detailResults = await Promise.all(processLines.map(line => ensureDafProcessDetails(line, { ...detailRange, force: refreshRemote })));
-        if (detailResults.some(result => result === false)) return;
-        dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
-        dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] };
-        dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [] };
-        const nextResults = { ...dafStatsResults.value };
-        processLines.forEach(line => { nextResults[line] = buildDafStats(line); });
-        dafStatsResults.value = nextResults;
-        dafStatsRangeCache.set(rangeKey, nextResults);
-        dafStatsResult.value = nextResults[currentDafLine()] || null;
-        renderDafCharts();
-        if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);
     };
     const openDafDefectDetail = name => {
         const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
@@ -1501,7 +1517,7 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafSummaryBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
+        dafBatches, dafSummaryBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,

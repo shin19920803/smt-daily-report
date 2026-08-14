@@ -1040,8 +1040,12 @@
                     <div class="mb-4 pb-4 border-b border-gray-100">
                         <div><h3 class="font-black text-purple-800"><i class="fas fa-filter mr-2"></i>各製程</h3><p class="text-xs text-gray-400 mt-1">總覽與統計共用目前選擇的製程</p></div>
                         <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3" role="tablist" aria-label="選擇各製程">
-                            <button v-for="process in dafProcessOptions" :key="process.id" @click="setDafProcess(process.id)" :class="dafProcess === process.id ? 'bg-purple-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:border-purple-300 hover:text-purple-700'" class="rounded-lg px-3 py-2.5 text-sm font-bold transition" role="tab" :aria-selected="dafProcess === process.id">{{ process.label }}</button>
+                            <button v-for="process in dafProcessOptions" :key="process.id" @click="setDafProcess(process.id)" :disabled="dafStatsLoading" :class="dafProcess === process.id ? 'bg-purple-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:border-purple-300 hover:text-purple-700'" class="rounded-lg px-3 py-2.5 text-sm font-bold transition disabled:opacity-50 disabled:cursor-wait" role="tab" :aria-selected="dafProcess === process.id">{{ process.label }}</button>
                         </div>
+                    </div>
+                    <div v-if="dafStatsLoading" class="flex items-center gap-3 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm font-bold text-purple-700">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span>五個製程統計資料載入中，完成後才可切換製程…</span>
                     </div>
                     <div class="quick-bar mb-4">
                         <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
@@ -1062,7 +1066,7 @@
                         <div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-gray-400 mb-1">結束日期</label><input type="date" v-model="dafStatsFilter.end" class="w-full border border-gray-200 p-2 rounded-lg text-sm"></div>
                         <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">機種</label><select v-model="dafStatsFilter.model" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white"><option value="all">全部機種</option><option v-for="model in dafModelOptions" :key="model" :value="model">{{ model }}</option></select></div>
                         <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="dafStatsFilter.workOrder" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white"><option value="all">全部工單</option><option v-for="workOrder in dafWorkOrderOptions" :key="workOrder" :value="workOrder">{{ workOrder }}</option></select></div>
-                        <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateDafStats" class="btn-primary text-sm"><i class="fas fa-chart-column mr-1"></i>執行統計</button><button @click="exportDafStats" class="btn-success text-sm"><i class="fas fa-file-excel mr-1"></i>導出完整報表</button></div>
+                        <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateDafStats" :disabled="dafStatsLoading" class="btn-primary text-sm disabled:opacity-50 disabled:cursor-wait"><i class="fas fa-chart-column mr-1"></i>{{ dafStatsLoading ? '載入中…' : '執行統計' }}</button><button @click="exportDafStats" :disabled="dafStatsLoading" class="btn-success text-sm disabled:opacity-50 disabled:cursor-wait"><i class="fas fa-file-excel mr-1"></i>導出完整報表</button></div>
                     </div>
                     <p class="text-xs text-gray-400 mt-3"><i class="fas fa-info-circle mr-1"></i>統計依 Python 規則：GOOD／FAIL 列入投入數，FAIL 依 H 欄統計不良原因；其他狀態另列。</p>
                 </div>
@@ -1787,7 +1791,7 @@
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
 <script src="js/assembly.js?v=202608140520"></script>
-<script src="js/daf.js?v=202608140610"></script>
+<script src="js/daf.js?v=202608140700"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
 <script src="js/dashboard.js?v=202608140520"></script>

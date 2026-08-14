@@ -1166,8 +1166,9 @@ SMT.daf = function (ctx) {
         dafStatsFilter.value.end = fmtDate(end);
         await Vue.nextTick();
         applyingDafQuick = false;
-        // 快捷日期只切換已載入的統計結果；新區間第一次才載入，且不強制刷新遠端快取。
-        calculateDafStats(true, { refreshRemote: false });
+        // 快捷日期只切換區間，統計資料必須由人員按下「執行統計」後才載入。
+        dafStatsResults.value = {};
+        dafStatsResult.value = null;
     };
     const setDafQuickMode = mode => {
         dafQuickMode.value = mode;
@@ -1518,7 +1519,6 @@ SMT.daf = function (ctx) {
     watch(dafDefectDetail, renderDafDefectTrendChart);
     watch(currentTab, tab => {
         if (!isDafLikeLine()) return;
-        if (tab === 'stats' && !dafStatsResult.value) calculateDafStats(false);
         if (tab === 'report') ensureDafProcessDetails(currentDafLine());
         if (tab === 'stats' || tab === 'report') renderDafCharts();
     });
@@ -1530,7 +1530,6 @@ SMT.daf = function (ctx) {
             dafLastUpload.value = null;
             dafStatsResult.value = null;
             dafStatsResults.value = {};
-            if (currentTab.value === 'stats') calculateDafStats(false);
         }
     });
     watch(dafProcess, () => {
@@ -1538,7 +1537,6 @@ SMT.daf = function (ctx) {
         dafDateIndexSource = null;
         dafDashboardCache.clear();
         dafStatsResult.value = dafStatsResults.value[dafProcess.value] || null;
-        if (currentTab.value === 'stats' && !dafStatsResult.value) calculateDafStats(false);
         if (ctx.refreshDashboard) Promise.resolve(ctx.refreshDashboard()).then(() => ctx.initDashboardCharts?.());
     });
     // 不做固定時間輪詢；由使用者手動重新整理、上傳完成或執行統計時取得最新資料。

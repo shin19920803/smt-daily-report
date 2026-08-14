@@ -117,7 +117,8 @@ SMT.stats = function (ctx) {
             statsFilter.value.end = fmtLocal(end);
             await Vue.nextTick();
             applyingQuick = false;
-            await calculateStats();
+            // 快捷日期只切換區間，統計資料必須由人員按下「執行統計」後才載入。
+            statsResult.value = null;
         };
         // 日→今天；週→上一週（本週尚未結束）；月→上個月（同理）
         const DEFAULT_OFFSET = { day: 0, week: -1, month: -1 };
@@ -677,11 +678,10 @@ SMT.stats = function (ctx) {
         watch(currentTab, (tab) => {
             if (tab !== 'stats' || currentLine.value !== 'SMT') return;
             if (statsResult.value) renderStatsCharts();
-            else calculateStats(false);
         });
         watch(currentLine, line => {
             if (line !== 'SMT') statsResult.value = null;
-            else if (currentTab.value === 'stats') calculateStats(false);
+            else statsResult.value = null;
         });
 
         return {

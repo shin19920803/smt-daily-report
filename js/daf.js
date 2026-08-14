@@ -99,7 +99,7 @@ SMT.daf = function (ctx) {
     const DAF_STATS_STATE_KEY = 'koya_test_stats_state_v1';
     const dafStatsResult = ref(null);
     const dafStatsResults = ref({});
-    // 同一日期／篩選條件已執行過的五站結果共用；左右切換已載入區間時不再重新抓取。
+    // 已載入的大日期區間可涵蓋較小區間；切換日期或製程時直接重算，不重抓明細。
     const dafStatsRangeCache = new Map();
     const dafStatsLoading = ref(false);
     let dafStatsLoadingCount = 0;
@@ -1059,6 +1059,15 @@ SMT.daf = function (ctx) {
     const dafStatsRangeKey = (filter = dafStatsFilter.value) => [
         filter.start || '', filter.end || '', filter.model || 'all', filter.workOrder || 'all'
     ].join('|');
+    const dafStatsRangeInfo = (filter = dafStatsFilter.value) => ({
+        start: filter.start || '', end: filter.end || '', model: filter.model || 'all', workOrder: filter.workOrder || 'all'
+    });
+    const dafStatsRangeContains = (source, target) => {
+        if (!source || source.model !== target.model || source.workOrder !== target.workOrder) return false;
+        const startCovered = !source.start || (target.start && source.start <= target.start);
+        const endCovered = !source.end || (target.end && source.end >= target.end);
+        return startCovered && endCovered;
+    };
     let dafDashboardCacheSource = null;
     let dafDashboardSummaryCacheSource = null;
     const dafDashboardCache = new Map();
@@ -1183,13 +1192,25 @@ SMT.daf = function (ctx) {
     const calculateDafStats = async (showToast = true, { refreshRemote = false } = {}) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
         const rangeKey = dafStatsRangeKey();
+        const requestedRange = dafStatsRangeInfo();
         const remoteVersions = await loadDafVersions(refreshRemote);
         const cachedEntry = dafStatsRangeCache.get(rangeKey);
-        const versionChanged = Boolean(cachedEntry?.versions && remoteVersions && !sameDafVersions(cachedEntry.versions, remoteVersions));
-        if (!refreshRemote && cachedEntry && (!remoteVersions || !versionChanged)) {
-            const cachedResults = cachedEntry.results;
-            dafStatsResults.value = { ...cachedResults };
-            dafStatsResult.value = cachedResults[currentDafLine()] || null;
+        const matchingEntry = cachedEntry || [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange));
+        const versionChanged = Boolean(matchingEntry?.versions && remoteVersions && !sameDafVersions(matchingEntry.versions, remoteVersions));
+        const reusableEntry = !refreshRemote
+            ? [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange) && (!remoteVersions || !entry.versions || sameDafVersions(entry.versions, remoteVersions)))
+            : null;
+        if (reusableEntry) {
+            const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
+            const reusedResults = {};
+            processLines.forEach(line => {
+                reusedResults[line] = reusableEntry === cachedEntry && reusableEntry.results?.[line]
+                    ? reusableEntry.results[line]
+                    : buildDafStats(line);
+            });
+            dafStatsResults.value = reusedResults;
+            dafStatsResult.value = reusedResults[currentDafLine()] || null;
+            if (reusableEntry !== cachedEntry) dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: reusedResults });
             renderDafCharts();
             return;
         }
@@ -1217,7 +1238,7 @@ SMT.daf = function (ctx) {
             const nextResults = { ...dafStatsResults.value };
             processLines.forEach(line => { nextResults[line] = buildDafStats(line); });
             dafStatsResults.value = nextResults;
-            dafStatsRangeCache.set(rangeKey, { versions: remoteVersions, results: nextResults });
+            dafStatsRangeCache.set(rangeKey, { filter: requestedRange, versions: remoteVersions, results: nextResults });
             dafStatsResult.value = nextResults[currentDafLine()] || null;
             renderDafCharts();
             if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);

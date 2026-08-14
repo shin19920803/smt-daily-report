@@ -5,7 +5,7 @@ SMT.orders = function (ctx) {
         const isEditingWo = ref(false);
         const orderSearch = ref('');
         const selectedWoId = ref(null);
-        const today = new Date();
+        const today = new Date(`${window.koyaTodayDate()}T00:00:00`);
         const calendarYear = ref(today.getFullYear());
         const calendarMonth = ref(today.getMonth());
         const dayDetailModal = ref({ show: false, date: '', list: [] });
@@ -37,7 +37,7 @@ SMT.orders = function (ctx) {
         });
         const calendarPadding = computed(() => new Date(calendarYear.value, calendarMonth.value, 1).getDay());
         const changeMonth = (delta) => { let newM = calendarMonth.value + delta; if (newM > 11) { calendarYear.value++; newM = 0; } else if (newM < 0) { calendarYear.value--; newM = 11; } calendarMonth.value = newM; };
-        const isToday = (dStr) => dStr === new Date().toISOString().split('T')[0];
+        const isToday = (dStr) => dStr === window.koyaTodayDate();
         const selectWoForCalendar = (wo) => { selectedWoId.value = selectedWoId.value === wo.id ? null : wo.id; };
         const openDayDetail = (day) => { dayDetailModal.value = { show: true, date: day.dateStr, list: day.productions }; };
         const openWoModal = (wo = null) => { if (wo) { isEditingWo.value = true; woForm.value = { id: wo.id, number: wo.wo_number, modelId: wo.model_id, selectedModelIds: [], targetQty: wo.target_quantity }; } else { isEditingWo.value = false; woForm.value = { id: null, number: '', modelId: null, selectedModelIds: [], targetQty: '' }; } showWoModal.value = true; };

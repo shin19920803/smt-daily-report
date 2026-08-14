@@ -15,10 +15,8 @@ SMT.assembly = function (ctx) {
     const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
     const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
     const STATUS_NOTES_STORAGE_KEY = 'koya_assy_log_status_notes_v1';
-    const today = () => new Date().toISOString().split('T')[0];
-    const previousDay = new Date();
-    previousDay.setDate(previousDay.getDate() - 1);
-    const previousDayValue = `${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, '0')}-${String(previousDay.getDate()).padStart(2, '0')}`;
+    const today = () => window.koyaTodayDate();
+    const previousDayValue = window.koyaShiftDate(today(), -1);
 
     const assemblyUploadDate = ref(today());
     const assemblyBatches = ref([]);
@@ -779,7 +777,7 @@ SMT.assembly = function (ctx) {
     };
 
     const assemblyQuickRange = (mode, offset) => {
-        const now = new Date(); now.setHours(0, 0, 0, 0);
+        const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
         if (mode === 'day') {
             const date = new Date(now); date.setDate(date.getDate() + offset);
             return { start: date, end: date };

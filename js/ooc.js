@@ -1,7 +1,7 @@
 window.SMT = window.SMT || {};
 SMT.ooc = function (ctx) {
         const { data, toast, loading, calendarYear, calendarMonth, currentLine } = ctx;
-        const oocForm = ref({ id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' });
+        const oocForm = ref({ id: null, date: window.koyaTodayDate(), time: window.koyaTaiwanTime().slice(0, 5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' });
         const oocHistory = ref([]);
         const showOocModal = ref(false);
         const selectedOocId = ref(null);
@@ -19,7 +19,7 @@ SMT.ooc = function (ctx) {
 
         const openOocModal = (rec = null) => {
             if (rec) { oocForm.value = { id: rec.id, date: rec.production_date, time: rec.occurrence_time || '', selectedWoNumber: rec.work_orders.wo_number, wo_id: rec.wo_id, machine_id: rec.machine_id, cause_id: rec.cause_id, notes: rec.notes || '' }; }
-            else { oocForm.value = { id: null, date: new Date().toISOString().split('T')[0], time: new Date().toTimeString().slice(0,5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' }; }
+            else { oocForm.value = { id: null, date: window.koyaTodayDate(), time: window.koyaTaiwanTime().slice(0, 5), selectedWoNumber: null, wo_id: null, machine_id: null, cause_id: null, notes: '' }; }
             showOocModal.value = true;
         };
         const saveOoc = async () => {

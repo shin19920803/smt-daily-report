@@ -11,8 +11,8 @@ SMT.equipment = function (ctx) {
         const feederForm = ref({ id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: '', status: 'active' });
         const selectedFeederId = ref(null);
         const calHistory = ref([]);
-        const feederLogForm = ref({ calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: 'pass', notes: '', log_type: 'calibration' });
-        const nozzleLogForm = ref({ nozzle_model_id: null, change_type: 'in', quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' });
+        const feederLogForm = ref({ calibration_date: window.koyaTodayDate(), next_calibration_date: '', result: 'pass', notes: '', log_type: 'calibration' });
+        const nozzleLogForm = ref({ nozzle_model_id: null, change_type: 'in', quantity: 1, log_date: window.koyaTodayDate(), notes: '' });
         const selectedNozzleModelId = ref(null);
         const eqSettingForm = ref({ feederBrand: '', feederModel: '', nozzleBrand: '', nozzleModel: '' });
 
@@ -64,7 +64,7 @@ SMT.equipment = function (ctx) {
         };
         const selectNozzleModel = (modelId) => { selectedNozzleModelId.value = selectedNozzleModelId.value === modelId ? null : modelId; };
         const openFeederLogModal = (type = 'calibration') => {
-            feederLogForm.value = { calibration_date: new Date().toISOString().split('T')[0], next_calibration_date: '', result: type === 'calibration' ? 'pass' : '', notes: '', log_type: type };
+            feederLogForm.value = { calibration_date: window.koyaTodayDate(), next_calibration_date: '', result: type === 'calibration' ? 'pass' : '', notes: '', log_type: type };
             showFeederLogModal.value = true;
         };
 
@@ -90,9 +90,8 @@ SMT.equipment = function (ctx) {
                 feederList.value = mapped.map(f => ({ ...f, _calStatus: 'none', _lastCal: null }));
                 return;
             }
-            const todayDate = new Date().toISOString().split('T')[0];
-            const soon = new Date(); soon.setDate(soon.getDate() + 30);
-            const soonStr = soon.toISOString().split('T')[0];
+            const todayDate = window.koyaTodayDate();
+            const soonStr = window.koyaShiftDate(todayDate, 30);
             const feederIds = (list || []).map(f => f.id);
             let calMap = {};
             if (feederIds.length > 0) {
@@ -154,7 +153,7 @@ SMT.equipment = function (ctx) {
                 if (error) throw error;
                 // 寫入紀錄
                 const logType = newStatus === 'in_use' ? 'use' : 'return';
-                await _supabase.from('feeder_calibrations').insert({ feeder_id: selectedFeederId.value, calibration_date: new Date().toISOString().split('T')[0], log_type: logType, result: newStatus === 'in_use' ? '領用上機' : '歸還入庫', notes: null });
+                await _supabase.from('feeder_calibrations').insert({ feeder_id: selectedFeederId.value, calibration_date: window.koyaTodayDate(), log_type: logType, result: newStatus === 'in_use' ? '領用上機' : '歸還入庫', notes: null });
                 await loadFeeders();
                 // 刷新紀錄
                 const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', selectedFeederId.value).order('calibration_date', { ascending: false });
@@ -165,7 +164,7 @@ SMT.equipment = function (ctx) {
 
         const openFeederModal = (f = null) => {
             if (f) feederForm.value = { id: f.id, feeder_model_id: f.feeder_model_id, slot_number: f.slot_number, mes_code_left: f.mes_code_left || '', mes_code_right: f.mes_code_right || '', purchase_date: f.purchase_date || '', status: f.status || 'active' };
-            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: new Date().toISOString().split('T')[0], status: 'active' };
+            else feederForm.value = { id: null, feeder_model_id: null, slot_number: '', mes_code_left: '', mes_code_right: '', purchase_date: window.koyaTodayDate(), status: 'active' };
             showFeederModal.value = true;
         };
 
@@ -224,7 +223,7 @@ SMT.equipment = function (ctx) {
 
         const deleteCalibration = async (id) => { if (!confirm('確定刪除？')) return; await _supabase.from('feeder_calibrations').delete().eq('id', id); if (selectedFeederId.value) { const { data: list } = await _supabase.from('feeder_calibrations').select('*').eq('feeder_id', selectedFeederId.value).order('calibration_date', { ascending: false }); calHistory.value = list || []; } await loadFeeders(); toast('已刪除', 'info'); };
 
-        const openNozzleLogModal = (type = 'in') => { nozzleLogForm.value = { nozzle_model_id: null, change_type: type, quantity: 1, log_date: new Date().toISOString().split('T')[0], notes: '' }; showNozzleLogModal.value = true; };
+        const openNozzleLogModal = (type = 'in') => { nozzleLogForm.value = { nozzle_model_id: null, change_type: type, quantity: 1, log_date: window.koyaTodayDate(), notes: '' }; showNozzleLogModal.value = true; };
 
         const saveNozzleLog = async () => {
             if (!nozzleLogForm.value.nozzle_model_id || !nozzleLogForm.value.quantity) return toast('請填寫完整', 'warning');

@@ -84,7 +84,7 @@ SMT.core = function (ctx) {
             return [...new Set(active)];
         });
         const uniqueWoNumbers = computed(() => [...new Set(data.value.workOrders.map(w => w.wo_number))]);
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = window.koyaTodayDate();
         const loadBaseData = async () => {
             const L = currentLine.value;
             if (L === 'TEST') {
@@ -165,6 +165,7 @@ SMT.core = function (ctx) {
         return {
             currentTab, loading, showWoModal, showMobileMore, data, toasts, toast,
             getWoColor, fpyTargets, saveFpyTargets, loadFpyTargets, isFpyBelowTarget, todayStr,
+            taiwanTodayDate: window.koyaTodayDate, taiwanDateTime: window.koyaTaiwanDateTime,
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
             lines, visibleLines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, hideSettings, canImport, switchLine,

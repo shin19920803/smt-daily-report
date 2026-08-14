@@ -2,9 +2,7 @@ window.SMT = window.SMT || {};
 SMT.stats = function (ctx) {
         const { toast, loading, currentTab, fpyTargets, currentLine, currentLineMeta } = ctx;
 
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayValue = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+        const yesterdayValue = window.koyaShiftDate(window.koyaTodayDate(), -1);
         const statsFilter = ref({ start: yesterdayValue, end: yesterdayValue, modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
         let smtStatsDataCache = null;
@@ -66,11 +64,11 @@ SMT.stats = function (ctx) {
         const quickOffset = ref(-1);      // 0=本期，-1=上一期
         let applyingQuick = false;
 
-        // 用本地時間格式化，避免 toISOString() 的 UTC 位移導致跨日
+        // 以台灣日期作為統計快捷區間基準，避免使用者電腦時區造成跨日
         const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
         const quickRange = (mode, offset) => {
-            const now = new Date(); now.setHours(0, 0, 0, 0);
+            const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
             if (mode === 'day') {
                 const d = new Date(now); d.setDate(d.getDate() + offset);
                 return { start: d, end: d };
@@ -514,7 +512,7 @@ SMT.stats = function (ctx) {
                 ];
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(crossData), "交叉分析");
 
-                XLSX.writeFile(wb, `KOYA_${currentLine.value}_Full_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+                XLSX.writeFile(wb, `KOYA_${currentLine.value}_Full_Report_${window.koyaTodayDate()}.xlsx`);
                 toast("完整報表已導出");
             } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
         };

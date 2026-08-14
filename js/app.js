@@ -27,12 +27,12 @@ const app = createApp({
                         ctx.loadFeeders(), ctx.loadNozzleLogs()
                     ]).catch(error => console.warn('SMT 背景資料同步失敗', error));
                 }
-                const today = new Date();
-                ctx.rawExportFilter.value.end = today.toISOString().split('T')[0];
-                ctx.fpyFilter.value.end = today.toISOString().split('T')[0];
-                today.setDate(today.getDate() - 7);
-                ctx.rawExportFilter.value.start = today.toISOString().split('T')[0];
-                ctx.fpyFilter.value.start = today.toISOString().split('T')[0];
+                const today = window.koyaTodayDate();
+                ctx.rawExportFilter.value.end = today;
+                ctx.fpyFilter.value.end = today;
+                const sevenDaysAgo = window.koyaShiftDate(today, -7);
+                ctx.rawExportFilter.value.start = sevenDaysAgo;
+                ctx.fpyFilter.value.start = sevenDaysAgo;
             } finally {
                 ctx.loading.value = false;
             }

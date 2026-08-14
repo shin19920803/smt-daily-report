@@ -130,9 +130,7 @@ SMT.daf = function (ctx) {
     };
     const dafStatsState = readDafStatsState();
     const getYesterday = () => {
-        const date = new Date();
-        date.setDate(date.getDate() - 1);
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        return window.koyaShiftDate(window.koyaTodayDate(), -1);
     };
     const saveDafStatsState = () => {
         Object.assign(dafStatsState, { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 });
@@ -1202,7 +1200,7 @@ SMT.daf = function (ctx) {
         return result;
     };
     const dafQuickRange = (mode, offset) => {
-        const now = new Date(); now.setHours(0, 0, 0, 0);
+        const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
         if (mode === 'day') {
             const date = new Date(now); date.setDate(date.getDate() + offset);
             return { start: date, end: date };

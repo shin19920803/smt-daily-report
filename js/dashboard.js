@@ -7,7 +7,7 @@ SMT.dashboard = function (ctx) {
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
         const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-        const dashDate = ref(fmtDate(new Date()));
+        const dashDate = ref(window.koyaTodayDate());
         const dashboardDetail = ref({ show: false, title: '', subtitle: '', metrics: [], sections: [], allowNote: false, noteKey: '', note: '' });
         const smtDashboardData = ref({ production: [], byType: [], byLocation: [], byModel: [], byWorkOrder: [], weekDays: [], trendDays: [], weekRange: null });
         const assemblyWeekDays = ref([]);

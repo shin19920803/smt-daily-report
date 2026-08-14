@@ -4,6 +4,8 @@ window.SMT = window.SMT || {};
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentLineMeta, currentTab, data, loadBaseData } = ctx;
     const REMOTE_TABLE = 'daf_log_batches';
+    const SHARED_STATS_STATE_ID = '__koya_shared_daf_stats_state_v1__';
+    const SHARED_STATS_STATE_LINE = '__STATS_STATE__';
     const REMOTE_SUMMARY_COLUMNS = 'id,line,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text,row_count,raw_column_count';
     const REMOTE_DETAIL_COLUMNS = `${REMOTE_SUMMARY_COLUMNS},records`;
     // 非 SMT 站別共用機種對應；保留舊鍵讀取，避免既有使用者的對應遺失。
@@ -103,6 +105,9 @@ SMT.daf = function (ctx) {
     const dafStatsRangeCache = new Map();
     const dafStatsLoading = ref(false);
     let dafStatsLoadingCount = 0;
+    let dafSharedStatsUpdatedAt = '';
+    let dafSharedStatsLoadPromise = null;
+    let applyingDafSharedStats = false;
     let dafRemoteVersions = null;
     let dafRemoteVersionsLoadedAt = 0;
     const dafRemoteReady = ref(false);
@@ -528,6 +533,98 @@ SMT.daf = function (ctx) {
     const sameDafVersions = (left, right) => {
         if (!left || !right) return false;
         return TEST_PROCESS_IDS.every(line => left[line]?.version && left[line].version === right[line]?.version);
+    };
+    const parseSharedDafStatsState = row => {
+        const state = Array.isArray(row?.records) ? row.records[0] : row?.records;
+        if (!state || state.kind !== 'koya-shared-daf-stats-v1') return null;
+        const start = String(state.start || '');
+        const end = String(state.end || '');
+        if (!start || !end || start > end) return null;
+        return {
+            start,
+            end,
+            model: String(state.model || 'all'),
+            workOrder: String(state.workOrder || 'all'),
+            quickMode: ['day', 'week', 'month'].includes(state.quickMode) ? state.quickMode : null,
+            quickOffset: Number.isFinite(Number(state.quickOffset)) ? Number(state.quickOffset) : 0,
+            updatedAt: String(state.updatedAt || row.uploaded_at || '')
+        };
+    };
+    const saveSharedDafStatsState = async versions => {
+        if (!isUnifiedTestLine()) return true;
+        const updatedAt = new Date().toISOString();
+        const state = {
+            kind: 'koya-shared-daf-stats-v1',
+            start: dafStatsFilter.value.start || '',
+            end: dafStatsFilter.value.end || '',
+            model: dafStatsFilter.value.model || 'all',
+            workOrder: dafStatsFilter.value.workOrder || 'all',
+            quickMode: dafQuickMode.value || null,
+            quickOffset: Number(dafQuickOffset.value) || 0,
+            versions: versions || null,
+            updatedAt
+        };
+        const row = {
+            id: SHARED_STATS_STATE_ID,
+            line: SHARED_STATS_STATE_LINE,
+            file_name: '系統共用數據統計狀態',
+            uploaded_at: updatedAt,
+            model_name: null,
+            product_code: null,
+            work_order: null,
+            report_date: `${state.start}～${state.end}`,
+            date_start: state.start,
+            date_end: state.end,
+            input_count: 0,
+            good_count: 0,
+            fail_count: 0,
+            yield_rate: 0,
+            defect_rate: 0,
+            unknown_status_count: 0,
+            unknown_status_text: null,
+            row_count: 0,
+            raw_column_count: 0,
+            records: [state]
+        };
+        dafSharedStatsUpdatedAt = updatedAt;
+        const { data: saved, error } = await _supabase.from(REMOTE_TABLE).upsert(row, { onConflict: 'id' }).select('id').maybeSingle();
+        if (error || saved?.id !== SHARED_STATS_STATE_ID) {
+            console.warn('共用數據統計狀態保存失敗', error);
+            return false;
+        }
+        return true;
+    };
+    const loadSharedDafStatsState = async ({ force = false } = {}) => {
+        if (!isUnifiedTestLine() || currentTab.value !== 'stats') return false;
+        if (dafSharedStatsLoadPromise && !force) return dafSharedStatsLoadPromise;
+        const request = (async () => {
+            const { data: row, error } = await _supabase.from(REMOTE_TABLE)
+                .select('uploaded_at,records')
+                .eq('id', SHARED_STATS_STATE_ID)
+                .maybeSingle();
+            if (error) {
+                console.warn('共用數據統計狀態讀取失敗', error);
+                return false;
+            }
+            const state = parseSharedDafStatsState(row);
+            if (!state) return false;
+            if (!force && state.updatedAt === dafSharedStatsUpdatedAt && dafStatsResult.value) return true;
+            dafSharedStatsUpdatedAt = state.updatedAt;
+            applyingDafSharedStats = true;
+            dafStatsFilter.value = { start: state.start, end: state.end, model: state.model, workOrder: state.workOrder };
+            dafQuickMode.value = state.quickMode;
+            dafQuickOffset.value = state.quickOffset;
+            await Vue.nextTick();
+            applyingDafSharedStats = false;
+            saveDafStatsState();
+            await calculateDafStats(false);
+            return Boolean(dafStatsResult.value);
+        })().finally(() => {
+            if (dafSharedStatsLoadPromise === request) dafSharedStatsLoadPromise = null;
+            applyingDafSharedStats = false;
+        });
+        dafSharedStatsLoadPromise = request;
+        return request;
     };
     const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false, { force = false, start = '', end = '' } = {}) => {
         if (!includeRecords) {
@@ -967,6 +1064,10 @@ SMT.daf = function (ctx) {
         dafRemoteChangeChannel = _supabase.channel('koya-daf-log-sync')
             .on('postgres_changes', { event: '*', schema: 'public', table: REMOTE_TABLE }, payload => {
                 const line = payload.new?.line || payload.old?.line;
+                if (payload.new?.id === SHARED_STATS_STATE_ID || payload.old?.id === SHARED_STATS_STATE_ID || line === SHARED_STATS_STATE_LINE) {
+                    if (currentTab.value === 'stats' && isUnifiedTestLine()) void loadSharedDafStatsState({ force: true });
+                    return;
+                }
                 if (payload.eventType === 'DELETE') {
                     // DELETE 的 old payload 可能只包含主鍵；id 在五個製程間全域唯一，因此直接同步移除。
                     applyDafRemoteDeletion(payload.old?.id);
@@ -1315,6 +1416,7 @@ SMT.daf = function (ctx) {
         applyDafQuick();
     };
     const calculateDafStats = async (showToast = true, { refreshRemote = false } = {}) => {
+        const publishShared = showToast !== false;
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
         const rangeKey = dafStatsRangeKey();
         const requestedRange = dafStatsRangeInfo();
@@ -1337,6 +1439,7 @@ SMT.daf = function (ctx) {
             dafStatsResult.value = reusedResults[currentDafLine()] || null;
             if (reusableEntry !== cachedEntry) dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: reusedResults });
             renderDafCharts();
+            if (publishShared && !(await saveSharedDafStatsState(remoteVersions))) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
             return;
         }
         dafStatsLoadingCount += 1;
@@ -1366,6 +1469,10 @@ SMT.daf = function (ctx) {
             dafStatsRangeCache.set(rangeKey, { filter: requestedRange, versions: remoteVersions, results: nextResults });
             dafStatsResult.value = nextResults[currentDafLine()] || null;
             renderDafCharts();
+            if (publishShared) {
+                const sharedSaved = await saveSharedDafStatsState(remoteVersions);
+                if (!sharedSaved) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
+            }
             if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);
         } catch (error) {
             console.error('測試製程統計載入失敗', error);
@@ -1652,7 +1759,7 @@ SMT.daf = function (ctx) {
     dafModelMappings.value = readModelMappings();
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => {
-        if (!applyingDafQuick) {
+        if (!applyingDafQuick && !applyingDafSharedStats) {
             dafQuickMode.value = null;
             dafQuickOffset.value = 0;
             dafStatsResults.value = {};
@@ -1666,7 +1773,11 @@ SMT.daf = function (ctx) {
     watch(currentTab, tab => {
         if (!isDafLikeLine()) return;
         if (tab === 'report') ensureDafProcessDetails(currentDafLine());
-        if (tab === 'stats' || tab === 'report') renderDafCharts();
+        if (tab === 'stats') {
+            renderDafCharts();
+            if (isUnifiedTestLine()) void loadSharedDafStatsState();
+        }
+        if (tab === 'report') renderDafCharts();
     });
     watch(currentLine, line => {
         if (line === 'TEST') {

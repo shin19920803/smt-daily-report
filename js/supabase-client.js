@@ -65,7 +65,8 @@ const nativeFetch = window.fetch.bind(window);
 const trackedFetch = async (input, init = {}) => {
     const method = String(init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
     const response = await nativeFetch(input, init);
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok) void window.koyaInvalidateCache();
+    const isStatsStateWrite = String(init.body || '').includes('__koya_shared_daf_stats_state_v1__');
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok && !isStatsStateWrite) void window.koyaInvalidateCache();
     return response;
 };
 const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: trackedFetch } });

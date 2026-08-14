@@ -8,6 +8,7 @@ const SUMMARY_COLUMNS = [
     'yield_rate', 'defect_rate', 'unknown_status_count', 'unknown_status_text',
     'row_count', 'raw_column_count'
 ].join(',');
+const VERSION_COLUMNS = 'id,uploaded_at,date_start,date_end,row_count,input_count,good_count,fail_count,yield_rate,defect_rate';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': APP_ORIGIN,
@@ -85,7 +86,33 @@ const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
             return records.length ? { ...row, records } : null;
         }).filter(Boolean)
         : result.rows;
-    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
+    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=86400' });
+};
+
+const sha256 = async value => {
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+    return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+};
+
+const readDafVersionsFromSupabase = async lines => {
+    const versions = {};
+    const results = await Promise.all(lines.map(async line => {
+        const result = await readSupabasePages('daf_log_batches', url => {
+            url.searchParams.set('select', VERSION_COLUMNS);
+            url.searchParams.set('line', `eq.${line}`);
+            url.searchParams.set('order', 'id.asc');
+        }, 100);
+        if (result.error) return { line, error: result.error };
+        const signature = result.rows.map(row => [
+            row.id, row.uploaded_at, row.date_start, row.date_end, row.row_count,
+            row.input_count, row.good_count, row.fail_count, row.yield_rate, row.defect_rate
+        ].join('|')).join('\n');
+        return { line, version: await sha256(signature), count: result.rows.length };
+    }));
+    const failed = results.find(result => result.error);
+    if (failed) return failed.error;
+    results.forEach(result => { versions[result.line] = { version: result.version, count: result.count }; });
+    return jsonResponse({ versions }, 200, { 'Cache-Control': 'public, max-age=15, s-maxage=60' });
 };
 
 const readSmtDataFromSupabase = async () => {
@@ -141,6 +168,7 @@ const invalidateCache = async requestUrl => {
     const keys = [
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-summary', line)),
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-details', line)),
+        cacheKey(requestUrl, '/api/daf-version', { lines: PROCESS_LINES.join(',') }),
         cacheKey(requestUrl, '/api/smt-data'),
         cacheKey(requestUrl, '/api/assembly-data')
     ];
@@ -172,6 +200,13 @@ export default {
             if (start) params.start = start;
             if (end) params.end = end;
             return withCache(requestUrl, '/api/daf-details', params, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line, start, end));
+        }
+
+        if (request.method === 'GET' && requestUrl.pathname === '/api/daf-version') {
+            const requestedLines = (requestUrl.searchParams.get('lines') || '').split(',').filter(Boolean);
+            const lines = [...new Set(requestedLines)];
+            if (!lines.length || lines.some(line => !PROCESS_LINES.includes(line))) return jsonResponse({ error: 'Invalid process' }, 400);
+            return withCache(requestUrl, '/api/daf-version', { lines: lines.join(',') }, requestUrl.searchParams.get('refresh') === '1', () => readDafVersionsFromSupabase(lines));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {

@@ -103,6 +103,8 @@ SMT.daf = function (ctx) {
     const dafStatsRangeCache = new Map();
     const dafStatsLoading = ref(false);
     let dafStatsLoadingCount = 0;
+    let dafRemoteVersions = null;
+    let dafRemoteVersionsLoadedAt = 0;
     const dafRemoteReady = ref(false);
     const dafRemoteChecking = ref(false);
     const dafRemoteError = ref('');
@@ -510,6 +512,25 @@ SMT.daf = function (ctx) {
             return null;
         }
     };
+    const loadDafVersions = async (force = false) => {
+        if (!force && dafRemoteVersions && Date.now() - dafRemoteVersionsLoadedAt < 60000) return dafRemoteVersions;
+        if (!window.koyaFetchCachedJson) return null;
+        try {
+            const lines = TEST_PROCESS_IDS.join(',');
+            const data = await window.koyaFetchCachedJson(`/api/daf-version?lines=${encodeURIComponent(lines)}`, { force });
+            if (!data?.versions) throw new Error('版本資訊格式錯誤');
+            dafRemoteVersions = data.versions;
+            dafRemoteVersionsLoadedAt = Date.now();
+            return dafRemoteVersions;
+        } catch (error) {
+            console.warn('測試製程版本資訊讀取失敗，改用既有快取', error);
+            return null;
+        }
+    };
+    const sameDafVersions = (left, right) => {
+        if (!left || !right) return false;
+        return TEST_PROCESS_IDS.every(line => left[line]?.version && left[line].version === right[line]?.version);
+    };
     const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false, { force = false, start = '', end = '' } = {}) => {
         if (!includeRecords) {
             const cachedResult = await loadDafSummaryRows(line, force);
@@ -792,6 +813,8 @@ SMT.daf = function (ctx) {
             dafDetailLoadedLines.clear();
             dafDetailLoadPromises.clear();
             dafStatsRangeCache.clear();
+            dafRemoteVersions = null;
+            dafRemoteVersionsLoadedAt = 0;
             dafBatches.value = [];
             dafStatsResult.value = null;
             dafStatsResults.value = {};
@@ -1156,11 +1179,14 @@ SMT.daf = function (ctx) {
         dafQuickOffset.value += delta;
         applyDafQuick();
     };
-    const calculateDafStats = async (showToast = true, { refreshRemote = showToast } = {}) => {
+    const calculateDafStats = async (showToast = true, { refreshRemote = false } = {}) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
         const rangeKey = dafStatsRangeKey();
-        if (!refreshRemote && dafStatsRangeCache.has(rangeKey)) {
-            const cachedResults = dafStatsRangeCache.get(rangeKey);
+        const remoteVersions = await loadDafVersions(refreshRemote);
+        const cachedEntry = dafStatsRangeCache.get(rangeKey);
+        const versionChanged = Boolean(cachedEntry?.versions && remoteVersions && !sameDafVersions(cachedEntry.versions, remoteVersions));
+        if (!refreshRemote && cachedEntry && (!remoteVersions || !versionChanged)) {
+            const cachedResults = cachedEntry.results;
             dafStatsResults.value = { ...cachedResults };
             dafStatsResult.value = cachedResults[currentDafLine()] || null;
             renderDafCharts();
@@ -1178,7 +1204,7 @@ SMT.daf = function (ctx) {
             }
             const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
             const detailRange = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '' };
-            const detailResults = await Promise.all(processLines.map(line => ensureDafProcessDetails(line, { ...detailRange, force: refreshRemote })));
+            const detailResults = await Promise.all(processLines.map(line => ensureDafProcessDetails(line, { ...detailRange, force: refreshRemote || versionChanged })));
             const failedLine = processLines.find((line, index) => detailResults[index] === false);
             if (failedLine) {
                 if (showToast) toast(`${processLabel(failedLine)} 資料載入失敗，請稍後再試`, 'error');
@@ -1190,7 +1216,7 @@ SMT.daf = function (ctx) {
             const nextResults = { ...dafStatsResults.value };
             processLines.forEach(line => { nextResults[line] = buildDafStats(line); });
             dafStatsResults.value = nextResults;
-            dafStatsRangeCache.set(rangeKey, nextResults);
+            dafStatsRangeCache.set(rangeKey, { versions: remoteVersions, results: nextResults });
             dafStatsResult.value = nextResults[currentDafLine()] || null;
             renderDafCharts();
             if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);
@@ -1371,6 +1397,8 @@ SMT.daf = function (ctx) {
         dafBatches.value = dafBatches.value.filter(item => item.id !== id);
         dafSummaryBatches.value = dafSummaryBatches.value.filter(item => item.id !== id);
         dafStatsRangeCache.clear();
+        dafRemoteVersions = null;
+        dafRemoteVersionsLoadedAt = 0;
         dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
         if (dafStatsResult.value) {
             const processLine = currentDafLine();

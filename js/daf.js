@@ -517,9 +517,11 @@ SMT.daf = function (ctx) {
         const rows = [];
         let offset = 0;
         for (;;) {
-            const { data: page, error } = await _supabase.from(REMOTE_TABLE)
-                .select(includeRecords ? REMOTE_DETAIL_COLUMNS : REMOTE_SUMMARY_COLUMNS).eq('line', line).order('uploaded_at', { ascending: false })
-                .range(offset, offset + pageSize - 1);
+            let query = _supabase.from(REMOTE_TABLE)
+                .select(includeRecords ? REMOTE_DETAIL_COLUMNS : REMOTE_SUMMARY_COLUMNS).eq('line', line).order('uploaded_at', { ascending: false });
+            if (includeRecords && start) query = query.gte('date_end', start);
+            if (includeRecords && end) query = query.lte('date_start', end);
+            const { data: page, error } = await query.range(offset, offset + pageSize - 1);
             if (error) {
                 if (pageSize > 1 && /timeout|statement/i.test(error.message || '')) {
                     pageSize = 1;
@@ -900,8 +902,27 @@ SMT.daf = function (ctx) {
     };
     const dafBatchesByDate = computed(() => {
         const groups = {};
-        dafBatches.value.filter(batch => (batch.line || 'DAF') === currentDafLine()).forEach(batch => {
+        const detailedBatches = dafBatches.value.filter(batch => (batch.line || 'DAF') === currentDafLine());
+        const batches = detailedBatches.length ? detailedBatches : summaryBatchesForCurrentLine();
+        batches.forEach(batch => {
             const records = batch.records || [];
+            if (!records.length) {
+                // 首屏先用共用摘要顯示檔案與投入／良品／不良；完整 records 載入後會自動替換成精確每日明細。
+                const date = summaryBatchDates(batch)[0] || batch.dateStart || '未識別日期';
+                const group = groups[date] || (groups[date] = { date, files: [], input: 0, good: 0, defects: 0 });
+                group.input += Number(batch.inputCount) || 0;
+                group.good += Number(batch.goodCount) || 0;
+                group.defects += Number(batch.failCount) || 0;
+                group.files.push({
+                    ...batch,
+                    key: `${batch.id}_${date}`,
+                    dateRecords: [],
+                    dateInput: Number(batch.inputCount) || 0,
+                    dateGood: Number(batch.goodCount) || 0,
+                    dateDefects: Number(batch.failCount) || 0
+                });
+                return;
+            }
             const dates = [...new Set(records.map(record => record.date).filter(Boolean))];
             if (!dates.length) dates.push(batch.dateStart || '未識別日期');
             dates.forEach(date => {
@@ -1310,9 +1331,9 @@ SMT.daf = function (ctx) {
         toast(`已取消此次 ${currentDafLabel()} 上傳`, 'info');
     };
     const deleteDafBatch = async (id) => {
-        const batch = dafBatches.value.find(item => item.id === id);
+        const batch = dafBatches.value.find(item => item.id === id) || dafSummaryBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 ${currentDafLabel()} 統計？`)) return;
-        if (!(await deleteRemote(id))) return;
+        if (!(await deleteRemote(id, batch))) return;
         await invalidateDafSummaryCache();
         dafBatches.value = dafBatches.value.filter(item => item.id !== id);
         dafSummaryBatches.value = dafSummaryBatches.value.filter(item => item.id !== id);
@@ -1462,7 +1483,7 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
+        dafBatches, dafSummaryBatches, dafBatchesByDate, dafStatsFilter, dafStatsResult, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,

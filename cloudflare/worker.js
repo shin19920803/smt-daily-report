@@ -67,6 +67,9 @@ const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
     const result = await readSupabasePages('daf_log_batches', url => {
         url.searchParams.set('select', '*');
         url.searchParams.set('line', `eq.${line}`);
+        // 先用批次日期在 Supabase 端縮小範圍，避免把其他日期的巨大 records 全部讀進 Worker 後才過濾。
+        if (start) url.searchParams.set('date_end', `gte.${start}`);
+        if (end) url.searchParams.set('date_start', `lte.${end}`);
         url.searchParams.set('order', 'uploaded_at.desc');
     }, 3);
     if (result.error) return result.error;

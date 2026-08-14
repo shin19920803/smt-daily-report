@@ -427,7 +427,7 @@
                 <div v-if="dafBatchesByDate.length" class="section-card p-4">
                     <div class="flex items-center justify-between mb-3">
                         <h3 class="card-title mb-0"><i class="fas fa-layer-group text-purple-600"></i>已上傳檔案</h3>
-                        <span class="text-xs text-gray-400">共 {{ dafBatches.length }} 份</span>
+                        <span class="text-xs text-gray-400">共 {{ dafBatches.length || dafSummaryBatches.length }} 份</span>
                     </div>
                     <div class="space-y-4">
                         <div v-for="day in dafBatchesByDate" :key="day.date" class="border border-purple-100 rounded-xl overflow-hidden">
@@ -1782,16 +1782,16 @@
 
 </div>
 
-<script src="js/supabase-client.js?v=202608140235"></script>
+<script src="js/supabase-client.js?v=202608140520"></script>
 <script src="js/core.js?v=202608121610"></script>
 <script src="js/orders.js?v=202608062500"></script>
 <script src="js/report.js?v=202608100930"></script>
-<script src="js/assembly.js?v=202608140235"></script>
-<script src="js/daf.js?v=202608140235"></script>
+<script src="js/assembly.js?v=202608140520"></script>
+<script src="js/daf.js?v=202608140520"></script>
 <script src="js/fpy.js?v=202608052100"></script>
 <script src="js/ooc.js?v=202608052100"></script>
-<script src="js/dashboard.js?v=202608140235"></script>
-<script src="js/stats.js?v=202608140235"></script>
+<script src="js/dashboard.js?v=202608140520"></script>
+<script src="js/stats.js?v=202608140520"></script>
 <script src="js/equipment.js?v=202608052100"></script>
 <script src="js/settings.js?v=202608111430"></script>
 <script src="js/app.js?v=202608121600"></script>

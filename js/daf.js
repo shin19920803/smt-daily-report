@@ -107,6 +107,7 @@ SMT.daf = function (ctx) {
     let dafStatsLoadingCount = 0;
     let dafSharedStatsUpdatedAt = '';
     let dafSharedStatsLoadPromise = null;
+    let dafSharedStatsSnapshot = null;
     let applyingDafSharedStats = false;
     let dafRemoteVersions = null;
     let dafRemoteVersionsLoadedAt = 0;
@@ -534,6 +535,150 @@ SMT.daf = function (ctx) {
         if (!left || !right) return false;
         return TEST_PROCESS_IDS.every(line => left[line]?.version && left[line].version === right[line]?.version);
     };
+    const stripSharedDafResult = result => {
+        if (!result) return null;
+        const { rows, ...summary } = result;
+        return JSON.parse(JSON.stringify({ ...summary, rows: [], sharedSnapshot: true }));
+    };
+    const mergeSharedQtyRows = (target, rows, keyName = 'name') => {
+        (rows || []).forEach(row => {
+            const key = row?.[keyName] || row?.name;
+            if (!key) return;
+            target[key] = (target[key] || 0) + (Number(row.qty) || 0);
+        });
+    };
+    const sharedQtyRows = (map, total) => Object.entries(map || {})
+        .map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, total) }))
+        .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name, 'zh-Hant'));
+    const mergeSharedDafResults = summaries => {
+        const typeMap = {};
+        const modelMap = {};
+        const workOrderMap = {};
+        const sourceFiles = new Set();
+        const unknownStatuses = new Set();
+        let totalInput = 0;
+        let totalGood = 0;
+        let totalDefects = 0;
+        let totalRows = 0;
+        let unknownStatusCount = 0;
+        const daily = [];
+        (summaries || []).forEach(summary => {
+            if (!summary) return;
+            totalInput += Number(summary.totalInput) || 0;
+            totalGood += Number(summary.totalGood) || 0;
+            totalDefects += Number(summary.totalDefects) || 0;
+            totalRows += Number(summary.totalRows) || 0;
+            unknownStatusCount += Number(summary.unknownStatusCount) || 0;
+            String(summary.unknownStatusText || '').split('、').filter(text => text && text !== '無').forEach(text => unknownStatuses.add(text));
+            (summary.sourceFiles || []).forEach(file => sourceFiles.add(file));
+            daily.push(...(summary.daily || []));
+            (summary.byType || []).forEach(row => {
+                const target = typeMap[row.name] || (typeMap[row.name] = { qty: 0, byModel: {}, byWorkOrder: {} });
+                target.qty += Number(row.qty) || 0;
+                mergeSharedQtyRows(target.byModel, row.byModel);
+                mergeSharedQtyRows(target.byWorkOrder, row.byWorkOrder);
+            });
+            (summary.byModel || []).forEach(row => {
+                const target = modelMap[row.name] || (modelMap[row.name] = { input: 0, good: 0, defects: 0, byType: {}, byWorkOrder: {} });
+                target.input += Number(row.input) || 0;
+                target.good += Number(row.good) || 0;
+                target.defects += Number(row.defects) || 0;
+                mergeSharedQtyRows(target.byType, row.byType);
+                mergeSharedQtyRows(target.byWorkOrder, row.byWorkOrder);
+            });
+            (summary.byWorkOrder || []).forEach(row => {
+                const key = row.workOrder || row.name;
+                const target = workOrderMap[key] || (workOrderMap[key] = { input: 0, good: 0, defects: 0, byType: {}, byModel: {} });
+                target.input += Number(row.input) || 0;
+                target.good += Number(row.good) || 0;
+                target.defects += Number(row.defects) || 0;
+                mergeSharedQtyRows(target.byType, row.byType);
+                mergeSharedQtyRows(target.byModel, row.byModel);
+            });
+        });
+        const byType = Object.entries(typeMap).map(([name, value]) => ({
+            name,
+            qty: value.qty,
+            inputRatio: mapRate(value.qty, totalInput),
+            ratio: mapRate(value.qty, totalDefects),
+            byModel: sharedQtyRows(value.byModel, value.qty),
+            byWorkOrder: sharedQtyRows(value.byWorkOrder, value.qty)
+        })).sort((a, b) => b.qty - a.qty);
+        const byModel = Object.entries(modelMap).map(([name, value]) => ({
+            name,
+            input: value.input,
+            good: value.good,
+            defects: value.defects,
+            yieldRate: mapRate(value.good, value.input),
+            defectRate: mapRate(value.defects, value.input),
+            ratio: mapRate(value.defects, totalDefects),
+            byType: sharedQtyRows(value.byType, value.defects),
+            byWorkOrder: sharedQtyRows(value.byWorkOrder, value.input)
+        })).sort((a, b) => b.defects - a.defects || b.input - a.input);
+        const byWorkOrder = Object.entries(workOrderMap).map(([workOrder, value]) => ({
+            workOrder,
+            name: workOrder,
+            model: Object.keys(value.byModel).join(' / ') || '未識別機種',
+            input: value.input,
+            good: value.good,
+            defects: value.defects,
+            yieldRate: mapRate(value.good, value.input),
+            defectRate: mapRate(value.defects, value.input),
+            ratio: mapRate(value.defects, totalDefects),
+            byType: sharedQtyRows(value.byType, value.defects),
+            byModel: sharedQtyRows(value.byModel, value.input)
+        })).sort((a, b) => b.defects - a.defects || b.input - a.input);
+        const sortedDaily = daily.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        return {
+            totalInput,
+            totalGood,
+            totalDefects,
+            yieldRate: mapRate(totalGood, totalInput),
+            defectRate: mapRate(totalDefects, totalInput),
+            unknownStatusCount,
+            unknownStatusText: [...unknownStatuses].join('、') || '無',
+            totalDays: sortedDaily.length,
+            totalRows,
+            sourceFiles: [...sourceFiles],
+            byType,
+            byModel,
+            byWorkOrder,
+            daily: sortedDaily,
+            rows: [],
+            sharedSnapshot: true
+        };
+    };
+    const createSharedDafStatsSnapshot = versions => {
+        const filter = dafStatsRangeInfo();
+        const results = {};
+        const days = {};
+        TEST_PROCESS_IDS.forEach(line => {
+            const result = dafStatsResults.value[line] || buildDafStats(line);
+            results[line] = stripSharedDafResult(result);
+            const groupedRows = {};
+            (result?.rows || []).forEach(row => {
+                if (!row.date) return;
+                if (!groupedRows[row.date]) groupedRows[row.date] = [];
+                groupedRows[row.date].push(row);
+            });
+            if (Object.keys(groupedRows).length) {
+                days[line] = Object.fromEntries(Object.entries(groupedRows).map(([date, rows]) => [date, stripSharedDafResult(buildDafSummary(rows, line))]));
+            } else {
+                days[line] = Object.fromEntries(Object.entries(dafSharedStatsSnapshot?.days?.[line] || {})
+                    .filter(([date]) => (!filter.start || date >= filter.start) && (!filter.end || date <= filter.end)));
+            }
+        });
+        return { kind: 'koya-daf-stats-snapshot-v1', filter, versions: versions || null, results, days };
+    };
+    const sharedDafSnapshotResult = (line, filter, snapshot = dafSharedStatsSnapshot) => {
+        if (!snapshot?.filter || !snapshot?.days?.[line]) return null;
+        if (snapshot.filter.model !== (filter.model || 'all') || snapshot.filter.workOrder !== (filter.workOrder || 'all')) return null;
+        if (!dafStatsRangeContains(snapshot.filter, dafStatsRangeInfo(filter))) return null;
+        const summaries = Object.entries(snapshot.days[line])
+            .filter(([date]) => (!filter.start || date >= filter.start) && (!filter.end || date <= filter.end))
+            .map(([, summary]) => summary);
+        return mergeSharedDafResults(summaries);
+    };
     const parseSharedDafStatsState = row => {
         const state = Array.isArray(row?.records) ? row.records[0] : row?.records;
         if (!state || state.kind !== 'koya-shared-daf-stats-v1') return null;
@@ -547,12 +692,17 @@ SMT.daf = function (ctx) {
             workOrder: String(state.workOrder || 'all'),
             quickMode: ['day', 'week', 'month'].includes(state.quickMode) ? state.quickMode : null,
             quickOffset: Number.isFinite(Number(state.quickOffset)) ? Number(state.quickOffset) : 0,
-            updatedAt: String(state.updatedAt || row.uploaded_at || '')
+            updatedAt: String(state.updatedAt || row.uploaded_at || ''),
+            snapshot: state.snapshot?.kind === 'koya-daf-stats-snapshot-v1' ? state.snapshot : null
         };
     };
     const saveSharedDafStatsState = async versions => {
         if (!isUnifiedTestLine()) return true;
         const updatedAt = new Date().toISOString();
+        const snapshot = createSharedDafStatsSnapshot(versions);
+        dafSharedStatsSnapshot = snapshot;
+        const cachedEntry = dafStatsRangeCache.get(dafStatsRangeKey());
+        if (cachedEntry) cachedEntry.snapshot = snapshot;
         const state = {
             kind: 'koya-shared-daf-stats-v1',
             start: dafStatsFilter.value.start || '',
@@ -562,6 +712,7 @@ SMT.daf = function (ctx) {
             quickMode: dafQuickMode.value || null,
             quickOffset: Number(dafQuickOffset.value) || 0,
             versions: versions || null,
+            snapshot,
             updatedAt
         };
         const row = {
@@ -617,6 +768,20 @@ SMT.daf = function (ctx) {
             await Vue.nextTick();
             applyingDafSharedStats = false;
             saveDafStatsState();
+            if (state.snapshot) {
+                dafSharedStatsSnapshot = state.snapshot;
+                const results = Object.fromEntries(TEST_PROCESS_IDS.map(line => [line, stripSharedDafResult(state.snapshot.results?.[line]) || mergeSharedDafResults([])]));
+                dafStatsResults.value = results;
+                dafStatsResult.value = results[currentDafLine()] || null;
+                dafStatsRangeCache.set(dafStatsRangeKey(), {
+                    filter: dafStatsRangeInfo(),
+                    versions: state.snapshot.versions || null,
+                    results,
+                    snapshot: state.snapshot
+                });
+                renderDafCharts();
+                return true;
+            }
             await calculateDafStats(false);
             return Boolean(dafStatsResult.value);
         })().finally(() => {
@@ -927,7 +1092,7 @@ SMT.daf = function (ctx) {
     };
     const refreshDafAfterRemoteLoad = (line, { refreshDetails = false } = {}) => {
         if (currentLine.value !== line) return;
-        if (refreshDetails && currentTab.value === 'stats') calculateDafStats(false);
+        if (refreshDetails && currentTab.value === 'stats') calculateDafStats(false, { publishShared: true });
         if (refreshDetails && currentTab.value === 'report') ensureDafProcessDetails(currentDafLine());
         if (!ctx.refreshDashboard) return;
         Promise.resolve(ctx.refreshDashboard()).then(refreshed => {
@@ -1023,6 +1188,7 @@ SMT.daf = function (ctx) {
         dafRemoteVersionsLoadedAt = 0;
         dafStatsResult.value = null;
         dafStatsResults.value = {};
+        dafSharedStatsSnapshot = null;
         dafDateIndexSource = null;
         dafDashboardCache.clear();
     };
@@ -1178,11 +1344,15 @@ SMT.daf = function (ctx) {
     });
     const dafModelOptions = computed(() => [...new Set([
         ...allRecords().filter(row => row.processLine === currentDafLine()).map(row => normalizeModelName(row.model)),
+        ...(dafStatsResult.value?.byModel || []).map(row => normalizeModelName(row.name)),
         ...(data?.value?.models || []).map(model => normalizeModelName(model.name)),
         ...Object.values(dafModelMappings.value).map(normalizeModelName),
         ...Object.values(MODEL_MAPPING).map(normalizeModelName)
     ].filter(model => model && model !== '未識別機種'))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
-    const dafWorkOrderOptions = computed(() => [...new Set(allRecords().filter(row => row.processLine === currentDafLine()).map(row => row.workOrder).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
+    const dafWorkOrderOptions = computed(() => [...new Set([
+        ...allRecords().filter(row => row.processLine === currentDafLine()).map(row => row.workOrder),
+        ...(dafStatsResult.value?.byWorkOrder || []).map(row => row.workOrder)
+    ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const filterRecords = (processLine = currentDafLine(), filter = dafStatsFilter.value) => allRecords().filter(row => row.processLine === processLine).filter(row => {
         if (filter.start && (!row.date || row.date < filter.start)) return false;
         if (filter.end && (!row.date || row.date > filter.end)) return false;
@@ -1383,13 +1553,16 @@ SMT.daf = function (ctx) {
         }
         const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
         const nextResults = {};
+        const snapshot = reusableEntry.snapshot || dafSharedStatsSnapshot;
         processLines.forEach(line => {
-            nextResults[line] = exactEntry?.results?.[line] || buildDafStats(line, filter);
+            nextResults[line] = exactEntry?.results?.[line]
+                || sharedDafSnapshotResult(line, filter, snapshot)
+                || buildDafStats(line, filter);
         });
         dafStatsResults.value = nextResults;
         dafStatsResult.value = nextResults[currentDafLine()] || null;
         if (!exactEntry) {
-            dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: nextResults });
+            dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: nextResults, snapshot });
         }
         renderDafCharts();
         return true;
@@ -1415,8 +1588,7 @@ SMT.daf = function (ctx) {
         dafQuickOffset.value += delta;
         applyDafQuick();
     };
-    const calculateDafStats = async (showToast = true, { refreshRemote = false } = {}) => {
-        const publishShared = showToast !== false;
+    const calculateDafStats = async (showToast = true, { refreshRemote = false, publishShared = showToast !== false } = {}) => {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
         const rangeKey = dafStatsRangeKey();
         const requestedRange = dafStatsRangeInfo();
@@ -1430,14 +1602,15 @@ SMT.daf = function (ctx) {
         if (reusableEntry) {
             const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
             const reusedResults = {};
+            const snapshot = reusableEntry.snapshot || dafSharedStatsSnapshot;
             processLines.forEach(line => {
                 reusedResults[line] = reusableEntry === cachedEntry && reusableEntry.results?.[line]
                     ? reusableEntry.results[line]
-                    : buildDafStats(line);
+                    : sharedDafSnapshotResult(line, dafStatsFilter.value, snapshot) || buildDafStats(line);
             });
             dafStatsResults.value = reusedResults;
             dafStatsResult.value = reusedResults[currentDafLine()] || null;
-            if (reusableEntry !== cachedEntry) dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: reusedResults });
+            if (reusableEntry !== cachedEntry) dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: reusedResults, snapshot });
             renderDafCharts();
             if (publishShared && !(await saveSharedDafStatsState(remoteVersions))) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
             return;
@@ -1654,11 +1827,7 @@ SMT.daf = function (ctx) {
         dafRemoteVersions = null;
         dafRemoteVersionsLoadedAt = 0;
         dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
-        if (dafStatsResult.value) {
-            const processLine = currentDafLine();
-            dafStatsResults.value = { ...dafStatsResults.value, [processLine]: buildDafStats(processLine) };
-            dafStatsResult.value = dafStatsResults.value[processLine];
-        }
+        if (isUnifiedTestLine()) await calculateDafStats(false, { refreshRemote: true, publishShared: true });
         toast(`${currentDafLabel()} 檔案統計已刪除`, 'info');
     };
 

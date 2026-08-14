@@ -1231,6 +1231,29 @@ SMT.daf = function (ctx) {
         if (offset === 1) return `下一${unit}`;
         return offset < 0 ? `${Math.abs(offset)} ${unit}前` : `${offset} ${unit}後`;
     });
+    const activateDafCachedStats = (filter = dafStatsFilter.value) => {
+        const rangeKey = dafStatsRangeKey(filter);
+        const requestedRange = dafStatsRangeInfo(filter);
+        const exactEntry = dafStatsRangeCache.get(rangeKey);
+        const reusableEntry = exactEntry || [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange));
+        if (!reusableEntry) {
+            dafStatsResults.value = {};
+            dafStatsResult.value = null;
+            return false;
+        }
+        const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
+        const nextResults = {};
+        processLines.forEach(line => {
+            nextResults[line] = exactEntry?.results?.[line] || buildDafStats(line, filter);
+        });
+        dafStatsResults.value = nextResults;
+        dafStatsResult.value = nextResults[currentDafLine()] || null;
+        if (!exactEntry) {
+            dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: nextResults });
+        }
+        renderDafCharts();
+        return true;
+    };
     const applyDafQuick = async () => {
         if (!dafQuickMode.value) return;
         const { start, end } = dafQuickRange(dafQuickMode.value, dafQuickOffset.value);
@@ -1239,9 +1262,8 @@ SMT.daf = function (ctx) {
         dafStatsFilter.value.end = fmtDate(end);
         await Vue.nextTick();
         applyingDafQuick = false;
-        // 快捷日期只切換區間，統計資料必須由人員按下「執行統計」後才載入。
-        dafStatsResults.value = {};
-        dafStatsResult.value = null;
+        // 已載入的大區間可直接在本機切換日／週／月，不重抓遠端完整 LOG。
+        activateDafCachedStats();
     };
     const setDafQuickMode = mode => {
         dafQuickMode.value = mode;

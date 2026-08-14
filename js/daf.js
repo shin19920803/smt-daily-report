@@ -491,10 +491,13 @@ SMT.daf = function (ctx) {
             return null;
         }
     };
-    const loadDafDetailRows = async (line, force = false) => {
+    const loadDafDetailRows = async (line, start = '', end = '', force = false) => {
         if (!window.koyaFetchCachedJson) return null;
         try {
-            const data = await window.koyaFetchCachedJson(`/api/daf-details?line=${encodeURIComponent(line)}`, { force });
+            const params = new URLSearchParams({ line });
+            if (start) params.set('start', start);
+            if (end) params.set('end', end);
+            const data = await window.koyaFetchCachedJson(`/api/daf-details?${params.toString()}`, { force });
             if (!Array.isArray(data)) throw new Error('明細格式錯誤');
             return { data, error: null };
         } catch (error) {
@@ -502,12 +505,12 @@ SMT.daf = function (ctx) {
             return null;
         }
     };
-    const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false, { force = false } = {}) => {
+    const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false, { force = false, start = '', end = '' } = {}) => {
         if (!includeRecords) {
             const cachedResult = await loadDafSummaryRows(line, force);
             if (cachedResult) return cachedResult;
         } else {
-            const cachedResult = await loadDafDetailRows(line, force);
+            const cachedResult = await loadDafDetailRows(line, start, end, force);
             if (cachedResult) return cachedResult;
         }
         let pageSize = includeRecords ? 3 : 100;
@@ -734,14 +737,15 @@ SMT.daf = function (ctx) {
         dafRemoteError.value = '';
         return true;
     };
-    const ensureDafProcessDetails = async (line, { force = false } = {}) => {
+    const ensureDafProcessDetails = async (line, { force = false, start = '', end = '' } = {}) => {
         if (!TEST_PROCESS_IDS.includes(line)) return true;
         if (!(await ensureDafRemoteConnection())) return false;
-        if (force) dafDetailLoadedLines.delete(line);
-        if (dafDetailLoadedLines.has(line)) return true;
-        if (dafDetailLoadPromises.has(line)) return dafDetailLoadPromises.get(line);
+        const detailKey = `${line}|${start}|${end}`;
+        if (force) dafDetailLoadedLines.delete(detailKey);
+        if (dafDetailLoadedLines.has(detailKey)) return true;
+        if (dafDetailLoadPromises.has(detailKey)) return dafDetailLoadPromises.get(detailKey);
         const request = (async () => {
-            const result = await loadDafRemoteRows(line, true);
+            const result = await loadDafRemoteRows(line, true, { force, start, end });
             if (result.error) {
                 dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
                 return false;
@@ -749,14 +753,14 @@ SMT.daf = function (ctx) {
             const remoteBatches = filterGhostDafRows(result.data || []).map(fromRemote);
             const otherLines = dafBatches.value.filter(batch => batch.line !== line);
             dafBatches.value = deduplicateDafBatches([...otherLines, ...remoteBatches]).batches;
-            dafDetailLoadedLines.add(line);
+            dafDetailLoadedLines.add(detailKey);
             if (dafStatsResults.value[line]) {
                 dafStatsResults.value = { ...dafStatsResults.value, [line]: buildDafStats(line) };
                 if (currentDafLine() === line) dafStatsResult.value = dafStatsResults.value[line];
             }
             return true;
-        })().finally(() => { if (dafDetailLoadPromises.get(line) === request) dafDetailLoadPromises.delete(line); });
-        dafDetailLoadPromises.set(line, request);
+        })().finally(() => { if (dafDetailLoadPromises.get(detailKey) === request) dafDetailLoadPromises.delete(detailKey); });
+        dafDetailLoadPromises.set(detailKey, request);
         return request;
     };
     const refreshDafAfterRemoteLoad = (line, { refreshDetails = false } = {}) => {
@@ -1131,7 +1135,8 @@ SMT.daf = function (ctx) {
             if (!wasLoading) loading.value = false;
         }
         const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
-        const detailResults = await Promise.all(processLines.map(line => ensureDafProcessDetails(line, { force: refreshRemote })));
+        const detailRange = { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '' };
+        const detailResults = await Promise.all(processLines.map(line => ensureDafProcessDetails(line, { ...detailRange, force: refreshRemote })));
         if (detailResults.some(result => result === false)) return;
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], dailyTrend: [] };
         dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [] };

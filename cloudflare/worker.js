@@ -63,14 +63,26 @@ const readDafSummaryFromSupabase = async line => {
     return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
 };
 
-const readDafDetailsFromSupabase = async line => {
+const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
     const result = await readSupabasePages('daf_log_batches', url => {
         url.searchParams.set('select', '*');
         url.searchParams.set('line', `eq.${line}`);
         url.searchParams.set('order', 'uploaded_at.desc');
     }, 3);
     if (result.error) return result.error;
-    return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
+    const rows = start || end
+        ? result.rows.map(row => {
+            const records = Array.isArray(row.records) ? row.records.filter(record => {
+                const date = String(record?.date || '').slice(0, 10);
+                if (!date) return false;
+                if (start && date < start) return false;
+                if (end && date > end) return false;
+                return true;
+            }) : [];
+            return records.length ? { ...row, records } : null;
+        }).filter(Boolean)
+        : result.rows;
+    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
 };
 
 const readSmtDataFromSupabase = async () => {
@@ -151,7 +163,12 @@ export default {
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-details') {
             const line = requestUrl.searchParams.get('line');
             if (!PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
-            return withCache(requestUrl, '/api/daf-details', { line }, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line));
+            const start = requestUrl.searchParams.get('start') || '';
+            const end = requestUrl.searchParams.get('end') || '';
+            const params = { line };
+            if (start) params.start = start;
+            if (end) params.end = end;
+            return withCache(requestUrl, '/api/daf-details', params, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line, start, end));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {

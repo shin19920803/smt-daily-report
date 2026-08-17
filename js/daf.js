@@ -575,8 +575,19 @@ SMT.daf = function (ctx) {
     const deleteRemote = async (id, batchOverride = null) => {
         if (!dafRemoteReady.value) return false;
         const batch = batchOverride || dafBatches.value.find(item => item.id === id);
-        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', batch?.line || currentDafLine());
+        const line = batch?.line || currentDafLine();
+        const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('id', id).eq('line', line);
         if (error) { toast(`${currentDafLabel()} 共用資料庫刪除失敗：` + error.message, 'error'); return false; }
+        const { data: remaining, error: verifyError } = await _supabase.from(REMOTE_TABLE)
+            .select('id').eq('id', id).eq('line', line).limit(1);
+        if (verifyError) {
+            toast(`${currentDafLabel()} 刪除後無法確認共用資料庫狀態：` + verifyError.message, 'error');
+            return false;
+        }
+        if (remaining?.length) {
+            toast(`${currentDafLabel()} 共用資料庫仍保留此檔案，未更新畫面`, 'error');
+            return false;
+        }
         return true;
     };
     const getDafSummaryCacheUrl = path => {
@@ -1316,6 +1327,7 @@ SMT.daf = function (ctx) {
             dafRemoteVersions = null;
             dafRemoteVersionsLoadedAt = 0;
             dafBatches.value = [];
+            dafSummaryBatches.value = [];
             dafStatsResult.value = null;
             dafStatsResults.value = {};
         }
@@ -1347,7 +1359,12 @@ SMT.daf = function (ctx) {
             if (error) {
                 dafRemoteChecking.value = false;
                 dafRemoteError.value = `資料庫已連線，但部分 LOG 載入失敗：${error.message || '資料讀取失敗'}`;
-                // 摘要刷新失敗時保留上一份完整清單，避免跨電腦暫時只看到部分資料。
+                // 手動重新整理只能顯示這次遠端讀取結果，不能把舊清單當成最新資料。
+                if (!background) {
+                    dafSummaryBatches.value = [];
+                    dafBatches.value = [];
+                    dafLastUpload.value = null;
+                }
             } else {
                 dafRemoteReady.value = true;
                 dafRemoteChecking.value = false;
@@ -2115,12 +2132,8 @@ SMT.daf = function (ctx) {
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 ${currentDafLabel()} 統計？`)) return;
         if (!(await deleteRemote(id, batch))) return;
         await invalidateDafSummaryCache();
-        dafBatches.value = dafBatches.value.filter(item => item.id !== id);
-        dafSummaryBatches.value = dafSummaryBatches.value.filter(item => item.id !== id);
-        dafStatsRangeCache.clear();
-        dafRemoteVersions = null;
-        dafRemoteVersionsLoadedAt = 0;
-        dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
+        // 刪除後立即以 Supabase 最新結果重建清單，避免只刪本機陣列，其他電腦或重新整理又把舊資料帶回來。
+        await loadDafData({ force: true });
         if (isUnifiedTestLine()) await calculateDafStats(false, { refreshRemote: true, publishShared: true });
         toast(`${currentDafLabel()} 檔案統計已刪除`, 'info');
     };

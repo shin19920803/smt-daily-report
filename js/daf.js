@@ -1208,6 +1208,13 @@ SMT.daf = function (ctx) {
     let dafRemoteLoadLine = '';
     const dafDetailLoadedLines = new Set();
     const dafDetailLoadPromises = new Map();
+    let dafDetailLoadGeneration = 0;
+    const invalidateDafDetailLoads = ({ clearBatches = false } = {}) => {
+        dafDetailLoadGeneration += 1;
+        dafDetailLoadedLines.clear();
+        dafDetailLoadPromises.clear();
+        if (clearBatches) dafBatches.value = [];
+    };
     let dafRemoteChangeChannel = null;
     const probeDafRemote = async lines => {
         const results = await Promise.all(lines.map(line => _supabase.from(REMOTE_TABLE).select('id').eq('line', line).limit(1)));
@@ -1281,11 +1288,13 @@ SMT.daf = function (ctx) {
         if (!TEST_PROCESS_IDS.includes(line)) return true;
         if (!(await ensureDafRemoteConnection())) return false;
         const detailKey = `${line}|${start}|${end}`;
+        const loadGeneration = dafDetailLoadGeneration;
         if (force) dafDetailLoadedLines.delete(detailKey);
         if (!force && dafDetailRangeLoaded(line, start, end)) return true;
         if (dafDetailLoadPromises.has(detailKey)) return dafDetailLoadPromises.get(detailKey);
         const request = (async () => {
             const result = await loadDafRemoteRows(line, true, { force, start, end });
+            if (loadGeneration !== dafDetailLoadGeneration) return false;
             if (result.error) {
                 dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
                 return false;
@@ -1321,12 +1330,10 @@ SMT.daf = function (ctx) {
         }
         const requestId = ++dafLoadRequestId;
         if (!background) {
-            dafDetailLoadedLines.clear();
-            dafDetailLoadPromises.clear();
+            invalidateDafDetailLoads({ clearBatches: true });
             dafStatsRangeCache.clear();
             dafRemoteVersions = null;
             dafRemoteVersionsLoadedAt = 0;
-            dafBatches.value = [];
             dafSummaryBatches.value = [];
             dafStatsResult.value = null;
             dafStatsResults.value = {};
@@ -1394,11 +1401,7 @@ SMT.daf = function (ctx) {
     };
 
     const clearDafRemoteDerivedState = ({ clearDetails = false } = {}) => {
-        if (clearDetails) {
-            dafDetailLoadedLines.clear();
-            dafDetailLoadPromises.clear();
-            dafBatches.value = [];
-        }
+        invalidateDafDetailLoads({ clearBatches: clearDetails });
         dafStatsRangeCache.clear();
         dafRemoteVersions = null;
         dafRemoteVersionsLoadedAt = 0;

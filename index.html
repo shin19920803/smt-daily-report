@@ -403,7 +403,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>檔案上傳</h3>
-                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓 DAF外觀檢查、功能一測試、功能二測試、外觀檢查點亮測試與輝度機測試；其他內容會直接排除。</p>
+                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700" :title="dafRemoteError"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else-if="dafRemoteChecking" class="badge-hint text-blue-700"><i class="fas fa-spinner fa-spin"></i>正在確認共用資料庫</span>
@@ -452,6 +452,7 @@
                                         <div><span class="text-gray-400 block">當日不良</span><b class="text-red-600">{{ batch.dateDefects.toLocaleString() }}</b></div>
                                         <div><span class="text-gray-400 block">檔案區間</span><b>{{ batch.reportDate }}</b></div>
                                     </div>
+                                    <div v-if="dafProcess === 'DAF' && batch.machines && batch.machines.length" class="mt-2 text-xs text-indigo-700"><i class="fas fa-server mr-1"></i>機台：<b>{{ batch.machines.join('、') }}</b></div>
                                     <div v-if="batch.unknownStatusCount" class="mt-2 text-xs text-orange-600"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ batch.unknownStatusCount }} 筆：{{ batch.unknownStatusText }}<span v-if="batch.unknownStatusText.includes('SCRAP')" class="ml-1">（SCRAP 代表報廢，未列入 GOOD／FAIL 投入統計）</span></div>
                                 </div>
                             </div>
@@ -1109,6 +1110,10 @@
                             <div class="rounded-lg bg-red-50 p-2 text-center"><b class="block font-mono text-red-700">{{ dafOutputDetail.result.totalDefects.toLocaleString() }}</b><span class="text-xs text-gray-500">不良</span></div>
                             <div class="rounded-lg bg-blue-50 p-2 text-center"><b class="block font-mono text-blue-700">{{ dafOutputDetail.result.yieldRate }}%</b><span class="text-xs text-gray-500">良率</span></div>
                         </div>
+                        <div v-if="dafOutputDetail.result.byMachine && dafOutputDetail.result.byMachine.length" class="mb-4 border border-indigo-100 rounded-xl p-3">
+                            <h5 class="text-xs font-black text-indigo-800 mb-2"><i class="fas fa-server mr-2"></i>機台分佈</h5>
+                            <div class="grid grid-cols-2 gap-2"><div v-for="row in dafOutputDetail.result.byMachine" :key="row.name" class="rounded-lg bg-indigo-50 p-2 text-center"><b class="block font-mono text-indigo-800">{{ row.input.toLocaleString() }}</b><span class="text-xs text-gray-600">{{ row.name }}・良率 {{ row.yieldRate }}%</span></div></div>
+                        </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div><h5 class="text-xs font-black text-purple-800 mb-2">機種分佈</h5><div v-for="row in dafOutputDetail.result.byModel" :key="row.name" class="flex gap-2 text-xs py-1"><span class="flex-1 truncate">{{ row.name }}</span><span class="font-mono">{{ row.input }}</span><span class="text-green-700">{{ row.yieldRate }}%</span></div><div v-if="!dafOutputDetail.result.byModel.length" class="text-xs text-gray-400">無資料</div></div>
                             <div><h5 class="text-xs font-black text-blue-800 mb-2">工單分佈</h5><div v-for="row in dafOutputDetail.result.byWorkOrder" :key="row.workOrder" class="flex gap-2 text-xs py-1"><span class="flex-1 truncate font-mono">{{ row.workOrder }}</span><span class="font-mono">{{ row.input }}</span><span class="text-green-700">{{ row.yieldRate }}%</span></div><div v-if="!dafOutputDetail.result.byWorkOrder.length" class="text-xs text-gray-400">無資料</div></div>
@@ -1130,6 +1135,10 @@
                         <h4 class="font-black text-red-800 mb-2"><i class="fas fa-chart-line mr-2"></i>{{ dafDefectDetail.name }} 每日發生次數趨勢</h4>
                         <div id="dafDefectTrendChart" style="width:100%;height:260px;"></div>
                     </div>
+                    <div v-if="dafDefectDetail.byMachine.length" class="border border-indigo-100 rounded-xl p-4 mb-5">
+                        <h4 class="font-black text-indigo-800 mb-2"><i class="fas fa-server mr-2"></i>機台分佈</h4>
+                        <div class="grid grid-cols-2 gap-2"><div v-for="item in dafDefectDetail.byMachine" :key="item.name" class="rounded-lg bg-indigo-50 p-2 text-center"><b class="block font-mono text-indigo-800">{{ item.qty }}</b><span class="text-xs text-gray-600">{{ item.name }}・{{ item.ratio }}%</span></div></div>
+                    </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div class="border border-purple-100 rounded-xl p-4"><h4 class="font-black text-purple-800 mb-2"><i class="fas fa-microchip mr-2"></i>機種分佈</h4><div v-for="item in dafDefectDetail.byModel" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate">{{ item.name }}</span><span class="font-mono text-purple-700">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div><div v-if="!dafDefectDetail.byModel.length" class="text-xs text-gray-400">無機種資料</div></div>
                             <div class="border border-blue-100 rounded-xl p-4"><h4 class="font-black text-blue-800 mb-2"><i class="fas fa-file-alt mr-2"></i>工單分佈</h4><div v-for="item in dafDefectDetail.byWorkOrder" :key="item.name" class="flex items-center gap-2 text-xs py-1"><span class="flex-1 truncate font-mono">{{ item.name }}</span><span class="font-mono text-blue-700">{{ item.qty }} 件</span><span class="font-mono text-gray-500">{{ item.ratio }}%</span></div><div v-if="!dafDefectDetail.byWorkOrder.length" class="text-xs text-gray-400">無工單資料</div></div>
@@ -1149,6 +1158,10 @@
                         <div class="rounded-xl bg-green-50 p-3 text-center"><b class="block font-mono text-lg text-green-700">{{ dafModelDetail.good.toLocaleString() }}</b><span class="text-xs text-gray-500">良品</span></div>
                         <div class="rounded-xl bg-red-50 p-3 text-center"><b class="block font-mono text-lg text-red-700">{{ dafModelDetail.defects.toLocaleString() }}</b><span class="text-xs text-gray-500">不良</span></div>
                         <div class="rounded-xl bg-emerald-50 p-3 text-center"><b class="block font-mono text-lg text-emerald-700">{{ dafModelDetail.yieldRate }}%</b><span class="text-xs text-gray-500">良率</span></div>
+                    </div>
+                    <div v-if="dafModelDetail.byMachine.length" class="border border-indigo-100 rounded-xl p-4 mb-5">
+                        <h4 class="font-black text-indigo-800 mb-2"><i class="fas fa-server mr-2"></i>機台分佈</h4>
+                        <div class="grid grid-cols-2 gap-2"><div v-for="item in dafModelDetail.byMachine" :key="item.name" class="rounded-lg bg-indigo-50 p-2 text-center"><b class="block font-mono text-indigo-800">{{ item.input }}</b><span class="text-xs text-gray-600">{{ item.name }}・良率 {{ item.yieldRate }}%</span></div></div>
                     </div>
                     <div>
                         <div class="border border-red-100 rounded-xl overflow-hidden">
@@ -1172,6 +1185,10 @@
                         <div class="rounded-xl bg-green-50 p-3 text-center"><b class="block font-mono text-lg text-green-700">{{ dafWorkOrderDetail.good.toLocaleString() }}</b><span class="text-xs text-gray-500">良品</span></div>
                         <div class="rounded-xl bg-red-50 p-3 text-center"><b class="block font-mono text-lg text-red-700">{{ dafWorkOrderDetail.defects.toLocaleString() }}</b><span class="text-xs text-gray-500">不良</span></div>
                         <div class="rounded-xl bg-emerald-50 p-3 text-center"><b class="block font-mono text-lg text-emerald-700">{{ dafWorkOrderDetail.yieldRate }}%</b><span class="text-xs text-gray-500">良率</span></div>
+                    </div>
+                    <div v-if="dafWorkOrderDetail.byMachine.length" class="border border-indigo-100 rounded-xl p-4 mb-5">
+                        <h4 class="font-black text-indigo-800 mb-2"><i class="fas fa-server mr-2"></i>機台分佈</h4>
+                        <div class="grid grid-cols-2 gap-2"><div v-for="item in dafWorkOrderDetail.byMachine" :key="item.name" class="rounded-lg bg-indigo-50 p-2 text-center"><b class="block font-mono text-indigo-800">{{ item.input }}</b><span class="text-xs text-gray-600">{{ item.name }}・良率 {{ item.yieldRate }}%</span></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="border border-red-100 rounded-xl overflow-hidden">
@@ -1791,10 +1808,10 @@
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608141200"></script>
-<script src="js/daf.js?v=202608141600"></script>
+<script src="js/daf.js?v=202608171030"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
-<script src="js/dashboard.js?v=202608141400"></script>
+<script src="js/dashboard.js?v=202608171030"></script>
 <script src="js/stats.js?v=202608141200"></script>
 <script src="js/equipment.js?v=202608141200"></script>
 <script src="js/settings.js?v=202608111430"></script>

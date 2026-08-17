@@ -403,7 +403,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>檔案上傳</h3>
-                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。</p>
+                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。熱壓投入僅作跨日比對，不列入統計；未匹配資料保留 30 天。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700" :title="dafRemoteError"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else-if="dafRemoteChecking" class="badge-hint text-blue-700"><i class="fas fa-spinner fa-spin"></i>正在確認共用資料庫</span>
@@ -419,6 +419,7 @@
                     <div class="mt-3 text-xs text-gray-400">可一次上傳多個工單檔案；每個檔案會獨立保存，統計時可依日期、機種與工單篩選。</div>
                     <div v-if="dafUploadSummary.files" class="mt-3 p-3 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-800">
                         <i class="fas fa-circle-check mr-1"></i>本次完成 {{ dafUploadSummary.files }} 個檔案，共 {{ dafUploadSummary.rows.toLocaleString() }} 列
+                        <span v-if="dafUploadSummary.referenceRows" class="text-indigo-700 ml-2">待比對機台 {{ dafUploadSummary.referenceRows.toLocaleString() }} 筆</span>
                         <span v-if="dafUploadSummary.duplicates" class="text-orange-700 ml-2">已排除重複 {{ dafUploadSummary.duplicates.toLocaleString() }} 列</span>
                         <span v-if="dafUploadSummary.failed.length" class="text-red-600 ml-2">失敗 {{ dafUploadSummary.failed.length }} 個：{{ dafUploadSummary.failed.join('；') }}</span>
                     </div>
@@ -1803,12 +1804,12 @@
 
 </div>
 
-<script src="js/supabase-client.js?v=202608171430"></script>
+<script src="js/supabase-client.js?v=202608171600"></script>
 <script src="js/core.js?v=202608171400"></script>
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608141200"></script>
-<script src="js/daf.js?v=202608171400"></script>
+<script src="js/daf.js?v=202608171600"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
 <script src="js/dashboard.js?v=202608171400"></script>

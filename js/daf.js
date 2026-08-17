@@ -21,6 +21,9 @@ SMT.daf = function (ctx) {
     const CURRENT_COLUMNS = Object.freeze({ process: 0, workOrder: 1, productCode: 3, dedupKey: 4, date: 5, machineOperator: 6, defect: 7, status: 8, minColumns: 9 });
     const DAF_MACHINE_LABELS = Object.freeze(['1號機', '2號機']);
     const DAF_MACHINE_UNKNOWN = '未分類機台';
+    const DAF_MACHINE_REFERENCE_LINE = '__DAF_MACHINE_REFERENCE__';
+    const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
+    const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
@@ -59,6 +62,77 @@ SMT.daf = function (ctx) {
     };
     const isDafMachineReference = value => normalizeText(value).replace(/\s+/g, '').includes('DAF熱壓投入');
     const dafMachineForRecord = record => record?.machine || DAF_MACHINE_UNKNOWN;
+    const isDafMachineLabel = value => DAF_MACHINE_LABELS.includes(value);
+    const dafMachineReferenceId = key => `${DAF_MACHINE_REFERENCE_PREFIX}${encodeURIComponent(key)}`;
+    const toDafMachineReferenceRemote = reference => ({
+        id: dafMachineReferenceId(reference.dedupKey), line: DAF_MACHINE_REFERENCE_LINE,
+        file_name: 'DAF熱壓投入待比對資料', uploaded_at: reference.capturedAt,
+        model_name: null, product_code: null, work_order: null, report_date: null,
+        date_start: null, date_end: null, input_count: 0, good_count: 0, fail_count: 0,
+        yield_rate: 0, defect_rate: 0, unknown_status_count: 0, unknown_status_text: null,
+        row_count: 1, raw_column_count: 0, records: [reference]
+    });
+    const normalizeDafMachineReference = row => {
+        const reference = Array.isArray(row?.records) ? row.records[0] : row?.records;
+        const dedupKey = normalizeText(reference?.dedupKey);
+        const machine = cleanText(reference?.machine);
+        const capturedAt = reference?.capturedAt || row?.uploaded_at || '';
+        const capturedTime = Date.parse(capturedAt);
+        if (!dedupKey || !isDafMachineLabel(machine) || !Number.isFinite(capturedTime)) return null;
+        return {
+            id: row.id || dafMachineReferenceId(dedupKey), dedupKey, machine,
+            capturedAt: new Date(capturedTime).toISOString(), sourceFile: cleanText(reference?.sourceFile || row?.file_name)
+        };
+    };
+    const deleteDafMachineReferenceRows = async ids => {
+        const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+        for (let index = 0; index < uniqueIds.length; index += 100) {
+            const chunk = uniqueIds.slice(index, index + 100);
+            const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('line', DAF_MACHINE_REFERENCE_LINE).in('id', chunk);
+            if (error) return false;
+        }
+        return true;
+    };
+    const loadDafMachineReferences = async () => {
+        const rows = [];
+        for (let offset = 0; ; offset += 1000) {
+            const { data: page, error } = await _supabase.from(REMOTE_TABLE)
+                .select('id,uploaded_at,file_name,records').eq('line', DAF_MACHINE_REFERENCE_LINE)
+                .order('uploaded_at', { ascending: true }).range(offset, offset + 999);
+            if (error) return { map: new Map(), error };
+            rows.push(...(page || []));
+            if (!page || page.length < 1000) break;
+        }
+        const machineReferences = new Map();
+        const expiredIds = [];
+        const expiresBefore = Date.now() - DAF_MACHINE_REFERENCE_TTL_MS;
+        rows.forEach(row => {
+            const reference = normalizeDafMachineReference(row);
+            if (!reference) return;
+            if (Date.parse(reference.capturedAt) <= expiresBefore) expiredIds.push(reference.id);
+            else machineReferences.set(reference.dedupKey, reference);
+        });
+        if (expiredIds.length) await deleteDafMachineReferenceRows(expiredIds);
+        dafMachineReferenceCache.clear();
+        machineReferences.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
+        return { map: dafMachineReferenceCache, error: null };
+    };
+    const persistDafMachineReferences = async ({ references = [], matchedKeys = [], storedMap = new Map() } = {}) => {
+        const matched = new Set(matchedKeys || []);
+        const matchedIds = [...matched].map(key => storedMap.get(key)?.id).filter(Boolean);
+        const referencesToStore = (references || []).filter(reference => isDafMachineLabel(reference.machine) && !matched.has(reference.dedupKey));
+        if (matchedIds.length && !(await deleteDafMachineReferenceRows(matchedIds))) return false;
+        if (referencesToStore.length) {
+            const { error } = await _supabase.from(REMOTE_TABLE)
+                .upsert(referencesToStore.map(toDafMachineReferenceRemote), { onConflict: 'id' });
+            if (error) return false;
+        }
+        matched.forEach(key => storedMap.delete(key));
+        referencesToStore.forEach(reference => storedMap.set(reference.dedupKey, { ...reference, id: dafMachineReferenceId(reference.dedupKey) }));
+        dafMachineReferenceCache.clear();
+        storedMap.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
+        return true;
+    };
     const TEST_PROCESS_ALIASES = Object.freeze({
         DAF: 'DAF', 'DAF外觀檢查': 'DAF',
         FT1: 'FT1', '功能一測試': 'FT1',
@@ -125,7 +199,7 @@ SMT.daf = function (ctx) {
     const dafRemoteChecking = ref(false);
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
-    const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, failed: [] });
+    const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [] });
     const dafModelMappings = ref({});
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
@@ -133,6 +207,7 @@ SMT.daf = function (ctx) {
     const dafModelDetail = ref({ show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] });
     const dafWorkOrderDetail = ref({ show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [], byMachine: [] });
     const dafOutputDetail = ref({ show: false, title: '', subtitle: '', result: null });
+    const dafMachineReferenceCache = new Map();
     const dafQuickMode = ref(null);
     const dafQuickOffset = ref(0);
     let applyingDafQuick = false;
@@ -365,18 +440,23 @@ SMT.daf = function (ctx) {
         const end = dates[dates.length - 1];
         return { display: start === end ? start : `${start}～${end}`, start, end, dates: [...new Set(dates)] };
     };
-    const analyzeFile = async (file) => {
+    const analyzeFile = async (file, storedMachineReferences = new Map()) => {
         const columns = currentDafColumns();
         const { rows: sourceRows, columnCount } = await readFileRows(file);
         const dataRows = sourceRows.slice(1);
-        const dafMachineByKey = new Map();
+        const dafMachineByKey = new Map([...storedMachineReferences].map(([key, reference]) => [key, reference.machine]));
+        const fileMachineReferences = new Map();
+        const matchedMachineReferenceKeys = new Set();
+        const capturedAt = new Date().toISOString();
         dataRows.forEach(row => {
             if (!isDafMachineReference(row[columns.process])) return;
             const key = normalizeText(row[columns.dedupKey]);
             const machine = detectDafMachine(row[columns.machineOperator]);
             if (!key || !machine) return;
             const previous = dafMachineByKey.get(key);
-            dafMachineByKey.set(key, previous && previous !== machine ? DAF_MACHINE_UNKNOWN : machine);
+            const resolvedMachine = previous && previous !== machine ? DAF_MACHINE_UNKNOWN : machine;
+            dafMachineByKey.set(key, resolvedMachine);
+            fileMachineReferences.set(key, { dedupKey: key, machine: resolvedMachine, capturedAt, sourceFile: file.name });
         });
         const groupedRows = new Map();
         dataRows.forEach(row => {
@@ -386,7 +466,8 @@ SMT.daf = function (ctx) {
             rows.push(row);
             groupedRows.set(processLine, rows);
         });
-        if (!groupedRows.size) throw new Error('檔案沒有可辨識的製程資料，請確認 A 欄內容');
+        const machineReferences = [...fileMachineReferences.values()].filter(reference => isDafMachineLabel(reference.machine));
+        if (!groupedRows.size && !machineReferences.length) throw new Error('檔案沒有可辨識的製程資料，請確認 A 欄內容');
         const buildBatch = (processLine, sourceRowsForProcess) => {
             const rows = deduplicateRows(sourceRowsForProcess);
             const duplicateCount = sourceRowsForProcess.length - rows.length;
@@ -405,17 +486,24 @@ SMT.daf = function (ctx) {
                 const parsedDateTime = parseDateTime(row[columns.date]);
                 const parsedDate = parsedDateTime ? fmtDate(parsedDateTime) : '';
                 const isDefect = status === 'FAIL';
+                const dedupKey = normalizeText(row[columns.dedupKey]);
+                const dafMachine = dafMachineByKey.get(dedupKey);
+                if (processLine === 'DAF' && isDafMachineLabel(dafMachine)) matchedMachineReferenceKeys.add(dedupKey);
                 return {
                     workOrder: cleanText(row[columns.workOrder]) || '未識別工單',
                     productCode: cleanText(row[columns.productCode]),
-                    dedupKey: normalizeText(row[columns.dedupKey]),
+                    dedupKey,
                     dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
                     date: parsedDate,
                     defect: isDefect ? (cleanText(row[columns.defect]) || defaultDafDefect(processLine)) : '',
                     status,
                     model: resolveDafModel(row[columns.productCode]),
                     sourceFormat: CURRENT_SOURCE_FORMAT,
-                    machine: processLine === 'DAF' ? (dafMachineByKey.get(normalizeText(row[columns.dedupKey])) || DAF_MACHINE_UNKNOWN) : '',
+                    machine: processLine === 'DAF'
+                        ? (isDafMachineLabel(dafMachine)
+                            ? dafMachine
+                            : DAF_MACHINE_UNKNOWN)
+                        : '',
                     inputIncluded: ['GOOD', 'FAIL'].includes(status),
                     isDefect,
                     raw: Array.from({ length: columnCount }, (_, index) => displayCell(row[index]))
@@ -451,7 +539,10 @@ SMT.daf = function (ctx) {
                 records
             };
         };
-        return [...groupedRows.entries()].map(([processLine, rows]) => buildBatch(processLine, rows));
+        const batches = [...groupedRows.entries()].map(([processLine, rows]) => buildBatch(processLine, rows));
+        batches.machineReferences = machineReferences;
+        batches.matchedMachineReferenceKeys = matchedMachineReferenceKeys;
+        return batches;
     };
 
     const toRemote = (batch) => ({
@@ -1319,12 +1410,12 @@ SMT.daf = function (ctx) {
                     if (currentTab.value === 'stats' && isUnifiedTestLine()) void loadSharedDafStatsState({ force: true });
                     return;
                 }
+                if (!TEST_PROCESS_IDS.includes(line)) return;
                 if (payload.eventType === 'DELETE') {
                     // DELETE 的 old payload 可能只包含主鍵；id 在五個製程間全域唯一，因此直接同步移除。
                     applyDafRemoteDeletion(payload.old?.id);
                     return;
                 }
-                if (!TEST_PROCESS_IDS.includes(line)) return;
                 scheduleDafRemoteRefresh();
             })
             .subscribe(status => {
@@ -1862,13 +1953,17 @@ SMT.daf = function (ctx) {
         }
     };
     const finishDafUploadQueue = async queue => {
-        dafUploadSummary.value = { files: queue.success, rows: queue.rows, duplicates: queue.duplicates, failed: queue.failed };
-        if (queue.success) toast(`${currentDafLabel()} 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
+        dafUploadSummary.value = { files: queue.success, rows: queue.rows, duplicates: queue.duplicates, referenceRows: queue.referenceRows || 0, failed: queue.failed };
+        const referenceText = queue.referenceRows ? `，保留待比對機台 ${queue.referenceRows.toLocaleString()} 筆` : '';
+        if (queue.success) toast(`${currentDafLabel()} 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${referenceText}${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
         else toast(`${currentDafLabel()} 檔案全部處理失敗`, 'error');
         // 上傳成功後立即以 Supabase 摘要重新整理；統計頁由 refreshDetails 再載入完整明細。
         if (queue.success) await loadDafData({ force: true });
     };
     const processDafUploadQueue = async queue => {
+        const referenceState = await loadDafMachineReferences();
+        const storedMachineReferences = referenceState.error ? new Map() : referenceState.map;
+        if (referenceState.error) toast('待比對機台資料讀取失敗，本次僅使用目前檔案內的比對資料', 'warning');
         for (let index = queue.index; index < queue.files.length; index++) {
             const file = queue.files[index];
             try {
@@ -1876,8 +1971,18 @@ SMT.daf = function (ctx) {
                     queue.failed.push(`${file.name}：共用資料庫未連線，檔案未寫入`);
                     continue;
                 }
-                const batches = await analyzeFile(file);
+                const batches = await analyzeFile(file, storedMachineReferences);
+                const machineReferences = batches.machineReferences || [];
+                const matchedMachineReferenceKeys = batches.matchedMachineReferenceKeys || [];
                 if (!batches.length) {
+                    if (machineReferences.length) {
+                        const savedReferences = await persistDafMachineReferences({ references: machineReferences, matchedKeys: matchedMachineReferenceKeys, storedMap: storedMachineReferences });
+                        if (savedReferences) {
+                            queue.success++;
+                            queue.referenceRows = (queue.referenceRows || 0) + machineReferences.length;
+                        } else queue.failed.push(`${file.name}：待比對機台資料寫入 Supabase 失敗`);
+                        continue;
+                    }
                     queue.failed.push(`${file.name}：A 欄沒有符合的五個製程，未寫入 Supabase`);
                     continue;
                 }
@@ -1893,6 +1998,7 @@ SMT.daf = function (ctx) {
                     return false;
                 }
                 let fileSaved = true;
+                let dafBatchSaved = false;
                 for (const batch of batches) {
                     if (!(await ensureDafProcessDetails(batch.line || currentDafLine()))) {
                         queue.failed.push(`${file.name}（${processLabel(batch.line)}）：明細載入失敗，檔案未完成同步`);
@@ -1906,6 +2012,19 @@ SMT.daf = function (ctx) {
                     if (!merged.remoteSaved) {
                         queue.failed.push(`${file.name}（${processLabel(batch.line)}）：共用資料庫寫入失敗`);
                         fileSaved = false;
+                    } else if (batch.line === 'DAF') dafBatchSaved = true;
+                }
+                const hasDafBatch = batches.some(batch => batch.line === 'DAF');
+                if (machineReferences.length || matchedMachineReferenceKeys.length) {
+                    if (!hasDafBatch || dafBatchSaved) {
+                        const matchedKeys = new Set(matchedMachineReferenceKeys);
+                        const savedReferences = await persistDafMachineReferences({ references: machineReferences, matchedKeys: matchedMachineReferenceKeys, storedMap: storedMachineReferences });
+                        if (!savedReferences) {
+                            queue.failed.push(`${file.name}：待比對機台資料寫入 Supabase 失敗`);
+                            fileSaved = false;
+                        } else {
+                            queue.referenceRows = (queue.referenceRows || 0) + machineReferences.filter(reference => !matchedKeys.has(reference.dedupKey)).length;
+                        }
                     }
                 }
                 if (fileSaved) queue.success++;
@@ -1917,7 +2036,7 @@ SMT.daf = function (ctx) {
     const uploadDafFiles = async event => {
         const files = [...(event.target.files || [])];
         if (!files.length) return;
-        const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, failed: [] };
+        const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [] };
         loading.value = true;
         try { await processDafUploadQueue(queue); }
         finally {

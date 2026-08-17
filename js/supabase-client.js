@@ -67,7 +67,9 @@ const trackedFetch = async (input, init = {}) => {
     const method = String(init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
     const response = await nativeFetch(input, init);
     const isStatsStateWrite = String(init.body || '').includes('__koya_shared_daf_stats_state_v1__');
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok && !isStatsStateWrite) void window.koyaInvalidateCache();
+    const requestUrl = input instanceof Request ? input.url : String(input);
+    const isDafMachineReferenceWrite = requestUrl.includes('__DAF_MACHINE_REFERENCE__') || String(init.body || '').includes('__DAF_MACHINE_REFERENCE__');
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok && !isStatsStateWrite && !isDafMachineReferenceWrite) void window.koyaInvalidateCache();
     return response;
 };
 const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: trackedFetch } });

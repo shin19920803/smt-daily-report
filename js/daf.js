@@ -991,7 +991,16 @@ SMT.daf = function (ctx) {
                     dafStatsResult.value = null;
                     return Boolean(await calculateDafStats(false, { refreshRemote: true, publishShared: true }));
                 }
-                const results = Object.fromEntries(TEST_PROCESS_IDS.map(line => [line, stripSharedDafResult(state.snapshot.results?.[line]) || mergeSharedDafResults([])]));
+                const sharedResults = Object.fromEntries(TEST_PROCESS_IDS.map(line => [line, stripSharedDafResult(state.snapshot.results?.[line]) || mergeSharedDafResults([])]));
+                const localEntry = dafStatsRangeCache.get(dafStatsRangeKey());
+                const canPreserveLocalRows = Boolean(localEntry && (!state.snapshot.versions || !localEntry.versions || sameDafVersions(localEntry.versions, state.snapshot.versions)));
+                const results = Object.fromEntries(TEST_PROCESS_IDS.map(line => {
+                    const sharedResult = sharedResults[line];
+                    const localResult = canPreserveLocalRows ? localEntry.results?.[line] : null;
+                    return [line, localResult && !localResult.sharedSnapshot && Array.isArray(localResult.rows)
+                        ? { ...sharedResult, rows: localResult.rows, sharedSnapshot: false }
+                        : sharedResult];
+                }));
                 dafStatsResults.value = results;
                 dafStatsResult.value = results[currentDafLine()] || null;
                 dafStatsRangeCache.set(dafStatsRangeKey(), {
@@ -1724,6 +1733,18 @@ SMT.daf = function (ctx) {
         return result;
     };
     const buildDafStats = (processLine = currentDafLine(), filter = dafStatsFilter.value) => buildDafSummary(filterRecords(processLine, filter), processLine);
+    const dafRowMatchesStatsFilter = (row, filter) => {
+        if (filter.start && (!row.date || row.date < filter.start)) return false;
+        if (filter.end && (!row.date || row.date > filter.end)) return false;
+        if (filter.model !== 'all' && row.model !== filter.model) return false;
+        if (filter.workOrder !== 'all' && row.workOrder !== filter.workOrder) return false;
+        return true;
+    };
+    const buildDafStatsFromCachedEntry = (processLine, filter, entry) => {
+        const cachedResult = entry?.results?.[processLine];
+        if (!cachedResult || cachedResult.sharedSnapshot || !Array.isArray(cachedResult.rows)) return null;
+        return buildDafSummary(cachedResult.rows.filter(row => dafRowMatchesStatsFilter(row, filter)), processLine);
+    };
     const dafStatsRangeKey = (filter = dafStatsFilter.value) => [
         filter.start || '', filter.end || '', filter.model || 'all', filter.workOrder || 'all'
     ].join('|');
@@ -1731,7 +1752,12 @@ SMT.daf = function (ctx) {
         start: filter.start || '', end: filter.end || '', model: filter.model || 'all', workOrder: filter.workOrder || 'all'
     });
     const dafStatsRangeContains = (source, target) => {
-        if (!source || source.model !== target.model || source.workOrder !== target.workOrder) return false;
+        if (!source) return false;
+        const sourceModel = source.model || 'all';
+        const sourceWorkOrder = source.workOrder || 'all';
+        const targetModel = target.model || 'all';
+        const targetWorkOrder = target.workOrder || 'all';
+        if ((sourceModel !== 'all' && sourceModel !== targetModel) || (sourceWorkOrder !== 'all' && sourceWorkOrder !== targetWorkOrder)) return false;
         const startCovered = !source.start || (target.start && source.start <= target.start);
         const endCovered = !source.end || (target.end && source.end >= target.end);
         return startCovered && endCovered;
@@ -1869,7 +1895,8 @@ SMT.daf = function (ctx) {
         const nextResults = {};
         const snapshot = reusableEntry.snapshot || dafSharedStatsSnapshot;
         processLines.forEach(line => {
-            nextResults[line] = exactEntry?.results?.[line]
+            nextResults[line] = buildDafStatsFromCachedEntry(line, filter, reusableEntry)
+                || exactEntry?.results?.[line]
                 || sharedDafSnapshotResult(line, filter, snapshot)
                 || buildDafStats(line, filter);
         });
@@ -1918,9 +1945,10 @@ SMT.daf = function (ctx) {
             const reusedResults = {};
             const snapshot = reusableEntry.snapshot || dafSharedStatsSnapshot;
             processLines.forEach(line => {
-                reusedResults[line] = reusableEntry === cachedEntry && reusableEntry.results?.[line]
+                reusedResults[line] = buildDafStatsFromCachedEntry(line, dafStatsFilter.value, reusableEntry)
+                    || (reusableEntry === cachedEntry && reusableEntry.results?.[line]
                     ? reusableEntry.results[line]
-                    : sharedDafSnapshotResult(line, dafStatsFilter.value, snapshot) || buildDafStats(line);
+                    : sharedDafSnapshotResult(line, dafStatsFilter.value, snapshot) || buildDafStats(line));
             });
             dafStatsResults.value = reusedResults;
             dafStatsResult.value = reusedResults[currentDafLine()] || null;
@@ -2297,6 +2325,10 @@ SMT.daf = function (ctx) {
             dafStatsResult.value = null;
         }
         saveDafStatsState();
+    });
+    watch(() => [dafStatsFilter.value.model, dafStatsFilter.value.workOrder], () => {
+        if (applyingDafSharedStats) return;
+        activateDafCachedStats();
     });
     watch(() => [dafQuickMode.value, dafQuickOffset.value], () => saveDafStatsState());
     watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });

@@ -299,11 +299,22 @@ SMT.dashboard = function (ctx) {
         };
 
         let dashboardRefreshId = 0;
+        let dafDashboardMissingDateRefreshKey = '';
         const refreshDashboard = async ({ force = false } = {}) => {
             const requestId = ++dashboardRefreshId;
             const line = currentLine.value;
-            const availableDates = await loadDashboardAvailableDates(line, force);
+            let availableDates = await loadDashboardAvailableDates(line, force);
             if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
+            if (line === 'TEST' && !force && availableDates.length && !availableDates.includes(dashDate.value)) {
+                const refreshKey = `${line}|${dashDate.value}`;
+                if (dafDashboardMissingDateRefreshKey !== refreshKey && loadDafData) {
+                    dafDashboardMissingDateRefreshKey = refreshKey;
+                    // 日期不在摘要快取時只強制更新一次，避免首頁固定重抓；若資料存在，立即補上最新日期。
+                    await loadDafData({ force: true });
+                    if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
+                    availableDates = await loadDashboardAvailableDates(line, false);
+                }
+            }
             dashboardAvailableDates.value = availableDates;
             if (availableDates.length && !availableDates.includes(dashDate.value)) {
                 dashDate.value = nearestAvailableDate(dashDate.value, availableDates);

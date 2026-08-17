@@ -976,6 +976,17 @@ SMT.daf = function (ctx) {
             saveDafStatsState();
             if (state.snapshot) {
                 dafSharedStatsSnapshot = state.snapshot;
+                const snapshotNeedsRefresh = TEST_PROCESS_IDS.some(line => {
+                    const result = state.snapshot.results?.[line];
+                    return result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, state);
+                });
+                if (snapshotNeedsRefresh) {
+                    // 共用快照可能在某站明細尚未完成時被保存為 0 筆；不能把它當成最新統計結果。
+                    dafStatsRangeCache.clear();
+                    dafStatsResults.value = {};
+                    dafStatsResult.value = null;
+                    return Boolean(await calculateDafStats(false, { refreshRemote: true, publishShared: true }));
+                }
                 const results = Object.fromEntries(TEST_PROCESS_IDS.map(line => [line, stripSharedDafResult(state.snapshot.results?.[line]) || mergeSharedDafResults([])]));
                 dafStatsResults.value = results;
                 dafStatsResult.value = results[currentDafLine()] || null;
@@ -1712,6 +1723,22 @@ SMT.daf = function (ctx) {
         const endCovered = !source.end || (target.end && source.end >= target.end);
         return startCovered && endCovered;
     };
+    const dafSummaryBatchCoversRange = (batch, filter) => {
+        if (Number(batch.inputCount) <= 0) return false;
+        const batchStart = batch.dateStart || '';
+        const batchEnd = batch.dateEnd || batchStart;
+        if (filter.start && batchEnd && batchEnd < filter.start) return false;
+        if (filter.end && batchStart && batchStart > filter.end) return false;
+        return true;
+    };
+    const dafSummaryHasDataForRange = (line, filter) => dafSummaryBatches.value.some(batch =>
+        (batch.line || 'DAF') === line && dafSummaryBatchCoversRange(batch, filter)
+    );
+    const sharedDafEntryNeedsRefresh = (entry, line, filter) => {
+        if (entry?.snapshot?.kind !== 'koya-daf-stats-snapshot-v1') return false;
+        const result = entry.results?.[line];
+        return Boolean(result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, filter));
+    };
     let dafDashboardCacheSource = null;
     let dafDashboardSummaryCacheSource = null;
     const dafDashboardCache = new Map();
@@ -1817,13 +1844,15 @@ SMT.daf = function (ctx) {
         const rangeKey = dafStatsRangeKey(filter);
         const requestedRange = dafStatsRangeInfo(filter);
         const exactEntry = dafStatsRangeCache.get(rangeKey);
-        const reusableEntry = exactEntry || [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange));
+        const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
+        const reusableEntry = [exactEntry, ...dafStatsRangeCache.values()]
+            .filter(Boolean)
+            .find(entry => dafStatsRangeContains(entry.filter, requestedRange) && !processLines.some(line => sharedDafEntryNeedsRefresh(entry, line, requestedRange)));
         if (!reusableEntry) {
             dafStatsResults.value = {};
             dafStatsResult.value = null;
             return false;
         }
-        const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
         const nextResults = {};
         const snapshot = reusableEntry.snapshot || dafSharedStatsSnapshot;
         processLines.forEach(line => {
@@ -1864,15 +1893,15 @@ SMT.daf = function (ctx) {
         if (dafStatsFilter.value.start && dafStatsFilter.value.end && dafStatsFilter.value.start > dafStatsFilter.value.end) return toast('開始日期不能晚於結束日期', 'warning');
         const rangeKey = dafStatsRangeKey();
         const requestedRange = dafStatsRangeInfo();
+        const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
         const remoteVersions = await loadDafVersions(refreshRemote);
         const cachedEntry = dafStatsRangeCache.get(rangeKey);
         const matchingEntry = cachedEntry || [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange));
         const versionChanged = Boolean(matchingEntry?.versions && remoteVersions && !sameDafVersions(matchingEntry.versions, remoteVersions));
         const reusableEntry = !refreshRemote
-            ? [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange) && (!remoteVersions || !entry.versions || sameDafVersions(entry.versions, remoteVersions)))
+            ? [...dafStatsRangeCache.values()].find(entry => dafStatsRangeContains(entry.filter, requestedRange) && (!remoteVersions || !entry.versions || sameDafVersions(entry.versions, remoteVersions)) && !processLines.some(line => sharedDafEntryNeedsRefresh(entry, line, requestedRange)))
             : null;
         if (reusableEntry) {
-            const processLines = isUnifiedTestLine() ? TEST_PROCESS_IDS : [currentDafLine()];
             const reusedResults = {};
             const snapshot = reusableEntry.snapshot || dafSharedStatsSnapshot;
             processLines.forEach(line => {

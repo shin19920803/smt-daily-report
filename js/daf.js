@@ -2349,6 +2349,7 @@ SMT.daf = function (ctx) {
             dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [] };
             dafLastUpload.value = null;
             dafStatsResult.value = dafStatsResults.value[dafProcess.value] || null;
+            if (currentTab.value === 'stats') void loadSharedDafStatsState();
         }
     });
     watch(dafProcess, () => {

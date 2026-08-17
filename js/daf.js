@@ -1759,6 +1759,7 @@ SMT.daf = function (ctx) {
         dafDashboardCache.set(date, result);
         return result;
     };
+    const isDafDashboardDetailsLoaded = date => dafDetailRangeLoaded(currentDafLine(), date, date);
     const ensureDafDashboardDetails = (date, { force = false } = {}) => ensureDafProcessDetails(currentDafLine(), { start: date, end: date, force });
     const dafQuickRange = (mode, offset) => {
         const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
@@ -1937,6 +1938,20 @@ SMT.daf = function (ctx) {
         const result = dafStatsResult.value;
         if (!result) return;
         dafOutputDetail.value = { show: true, title: `${currentDafLabel()} 產出與良率明細`, subtitle: '顯示目前篩選條件的總投入、良品、不良與良率', result };
+    };
+    const openDafTrendDetail = day => {
+        if (!day) return;
+        const result = {
+            totalInput: Number(day.input) || 0,
+            totalGood: Number(day.good) || 0,
+            totalDefects: Number(day.defects) || 0,
+            yieldRate: day.yieldRate || '0.00',
+            defectRate: day.defectRate || '0.00',
+            byMachine: day.byMachine || [],
+            byModel: [],
+            byWorkOrder: []
+        };
+        dafOutputDetail.value = { show: true, title: `${currentDafLabel()} ${day.date} 產出與良率明細`, subtitle: '依生產日查看投入、良品、不良與機台分佈', result };
     };
     const closeDafOutputDetail = () => {
         dafOutputDetail.value = { show: false, title: '', subtitle: '', result: null };
@@ -2206,6 +2221,8 @@ SMT.daf = function (ctx) {
             if (trendEl && result?.daily?.length) {
                 if (!trendChart || trendChart.getDom() !== trendEl) { trendChart = disposeChart(trendChart); trendChart = echarts.init(trendEl); }
                 trendChart.setOption({ legend: { data: ['投入數', '良率'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } }, grid: { top: 64, right: 58, bottom: 44, left: 48 }, tooltip: { trigger: 'axis', formatter: params => { let text = params[0]?.axisValue || ''; params.forEach(item => { text += `<br/>${item.marker}${item.seriesName}: <b>${item.seriesName === '良率' ? item.value + '%' : item.value.toLocaleString()}</b>`; }); return text; } }, xAxis: { type: 'category', data: result.daily.map(row => row.date.slice(5)), axisLabel: { fontSize: 10 } }, yAxis: [{ type: 'value', name: '投入', min: 0, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } }, { type: 'value', name: '良率', min: 0, max: 100, axisLabel: { formatter: '{value}%', fontSize: 10 }, splitLine: { show: false } }], series: [{ name: '投入數', type: 'bar', data: result.daily.map(row => row.input), barMaxWidth: 24, itemStyle: { color: '#c4b5fd', borderRadius: [4, 4, 0, 0] } }, { name: '良率', type: 'line', yAxisIndex: 1, data: result.daily.map(row => Number(row.yieldRate)), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#2563eb', width: 2.5 }, itemStyle: { color: '#2563eb' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(37,99,235,0.16)' }, { offset: 1, color: 'rgba(37,99,235,0)' }] } }, label: { show: true, position: 'top', formatter: '{c}%', fontSize: 9 } }] });
+                if (trendChart.off) trendChart.off('click');
+                if (trendChart.on) trendChart.on('click', params => { const day = result.daily?.[params?.dataIndex]; if (day) openDafTrendDetail(day); });
             } else trendChart = disposeChart(trendChart);
         });
     };
@@ -2257,8 +2274,8 @@ SMT.daf = function (ctx) {
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
-        openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
-        getDafUploadedDates, getDafDashboardForDate, ensureDafDashboardDetails,
+        openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, openDafTrendDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
+        getDafUploadedDates, getDafDashboardForDate, isDafDashboardDetailsLoaded, ensureDafDashboardDetails,
         renderDafCharts
     };
 };

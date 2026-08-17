@@ -1083,7 +1083,7 @@
                     </div>
                     <div v-if="dafStatsResult.unknownStatusCount" class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ dafStatsResult.unknownStatusCount }} 筆：{{ dafStatsResult.unknownStatusText }}；不列入投入、良品與不良統計。</div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢</h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢 <span v-if="dafProcess === 'DAF'" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊日期查看機台明細</span></h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>不良現象 Pareto 圖分析 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看每日趨勢、機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
                     </div>
                     <div class="section-card p-4">
@@ -1809,10 +1809,10 @@
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608141200"></script>
-<script src="js/daf.js?v=202608171730"></script>
+<script src="js/daf.js?v=202608181000"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
-<script src="js/dashboard.js?v=202608171400"></script>
+<script src="js/dashboard.js?v=202608181000"></script>
 <script src="js/stats.js?v=202608141200"></script>
 <script src="js/equipment.js?v=202608141200"></script>
 <script src="js/settings.js?v=202608111430"></script>

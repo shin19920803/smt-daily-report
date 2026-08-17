@@ -1,6 +1,6 @@
 window.SMT = window.SMT || {};
 SMT.dashboard = function (ctx) {
-        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, ensureDafDashboardDetails, loadDafData, loadAssemblyData } = ctx;
+        const { activeWoNumbers, currentTab, currentLine, currentLineMeta, dafProcess, dafProcessOptions, dafProcessMeta, data, loading, assemblyDefectNotes, saveAssemblyDefectNote, assemblyHourlyNotes, assemblyStatusNotes, getAssemblyReportForDate, getAssemblyUploadedDates, getDafDashboardForDate, getDafUploadedDates, isDafDashboardDetailsLoaded, ensureDafDashboardDetails, loadDafData, loadAssemblyData } = ctx;
         const dashboard = ref({ activeWoCount: 0, todayInput: 0, todayDefects: 0, todayYield: 100, monthOocCount: 0, weekAvgYield: 0 });
         const assemblyDashboardResult = ref(null);
         const dafDashboardResult = ref(null);
@@ -326,9 +326,9 @@ SMT.dashboard = function (ctx) {
                 if (!getDafDashboardForDate) {
                     dafDashboardResult.value = null;
                 } else {
-                    if (ensureDafDashboardDetails) await ensureDafDashboardDetails(dashDate.value, { force });
-                    if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
-                    const current = getDafDashboardForDate(dashDate.value);
+                    const targetDate = dashDate.value;
+                    const detailsLoaded = isDafDashboardDetailsLoaded?.(targetDate);
+                    const current = getDafDashboardForDate(targetDate);
                     if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
                     dafDashboardResult.value = current;
                     const weekRange = getWeekRange(dashDate.value);
@@ -338,6 +338,15 @@ SMT.dashboard = function (ctx) {
                         .filter(day => day.report.totalInput > 0);
                     const weeklyYield = dafWeekDays.value.map(day => Number(day.report.yieldRate));
                     dashboard.value = { activeWoCount: 0, todayInput: current.totalInput, todayDefects: current.totalDefects, todayYield: current.defectRate, monthOocCount: 0, weekAvgYield: weeklyYield.length ? (weeklyYield.reduce((sum, value) => sum + value, 0) / weeklyYield.length).toFixed(2) : '0.00' };
+                    if (ensureDafDashboardDetails && (force || !detailsLoaded)) {
+                        void ensureDafDashboardDetails(targetDate, { force }).then(loaded => {
+                            if (!loaded || requestId !== dashboardRefreshId || line !== currentLine.value || dashDate.value !== targetDate || currentTab.value !== 'dashboard') return;
+                            Promise.resolve(refreshDashboard()).then(refreshed => {
+                                if (refreshed !== false && currentTab.value === 'dashboard' && ctx.initDashboardCharts) return ctx.initDashboardCharts();
+                                return null;
+                            }).catch(error => console.warn('DAF 儀表板明細背景更新失敗', error));
+                        });
+                    }
                 }
                 dashboardRecentProds.value = [];
                 dashboardRecentOoc.value = [];
@@ -445,7 +454,8 @@ SMT.dashboard = function (ctx) {
             metrics: [toMetric('不良總數', dafDashboardResult.value?.totalDefects, 'red')],
             sections: [makeDistributionSection('不良原因', 'fa-bug', (dafDashboardResult.value?.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))]
         });
-        const openDafDateDetail = date => {
+        const openDafDateDetail = async date => {
+            if (ensureDafDashboardDetails) await ensureDafDashboardDetails(date);
             const result = getDafDashboardForDate(date);
             openDashboardDetail({ title: `${date} ${currentDafLabel()} 生產明細`, subtitle: '每日投入、良品、不良與良率', metrics: [toMetric('投入數', result.totalInput, 'slate'), toMetric('良品數', result.totalGood, 'green'), toMetric('不良數', result.totalDefects, 'red'), { label: '良率', value: result.yieldRate + '%', tone: 'green' }], sections: [makeDafMachineSection(result.byMachine), makeDistributionSection('工單投入', 'fa-file-alt', (result.byWorkOrder || []).map(row => ({ label: row.name, qty: row.input || row.qty, ratio: row.ratio + '%' }))), makeDistributionSection('不良原因', 'fa-bug', (result.byType || []).map(row => ({ label: row.name, qty: row.qty, ratio: row.ratio + '%', detail: buildDafReasonDetail(row) })))] .filter(Boolean) });
         };

@@ -191,6 +191,7 @@ SMT.daf = function (ctx) {
     let dafStatsLoadingCount = 0;
     let dafSharedStatsUpdatedAt = '';
     let dafSharedStatsLoadPromise = null;
+    let dafSharedStatsForceQueued = false;
     let dafSharedStatsSnapshot = null;
     let applyingDafSharedStats = false;
     let dafRemoteVersions = null;
@@ -935,7 +936,10 @@ SMT.daf = function (ctx) {
     };
     const loadSharedDafStatsState = async ({ force = false } = {}) => {
         if (!isUnifiedTestLine() || currentTab.value !== 'stats') return false;
-        if (dafSharedStatsLoadPromise && !force) return dafSharedStatsLoadPromise;
+        if (dafSharedStatsLoadPromise) {
+            if (force) dafSharedStatsForceQueued = true;
+            return dafSharedStatsLoadPromise;
+        }
         const request = (async () => {
             let row = null;
             let error = null;
@@ -1004,6 +1008,12 @@ SMT.daf = function (ctx) {
         })().finally(() => {
             if (dafSharedStatsLoadPromise === request) dafSharedStatsLoadPromise = null;
             applyingDafSharedStats = false;
+            if (dafSharedStatsForceQueued && !dafStatsLoading.value) {
+                dafSharedStatsForceQueued = false;
+                queueMicrotask(() => {
+                    if (currentTab.value === 'stats' && isUnifiedTestLine()) void loadSharedDafStatsState({ force: true });
+                });
+            }
         });
         dafSharedStatsLoadPromise = request;
         return request;
@@ -1461,7 +1471,10 @@ SMT.daf = function (ctx) {
             .on('postgres_changes', { event: '*', schema: 'public', table: REMOTE_TABLE }, payload => {
                 const line = payload.new?.line || payload.old?.line;
                 if (payload.new?.id === SHARED_STATS_STATE_ID || payload.old?.id === SHARED_STATS_STATE_ID || line === SHARED_STATS_STATE_LINE) {
-                    if (currentTab.value === 'stats' && isUnifiedTestLine()) void loadSharedDafStatsState({ force: true });
+                    if (currentTab.value === 'stats' && isUnifiedTestLine()) {
+                        if (dafStatsLoading.value) dafSharedStatsForceQueued = true;
+                        else void loadSharedDafStatsState({ force: true });
+                    }
                     return;
                 }
                 if (!TEST_PROCESS_IDS.includes(line)) return;
@@ -1954,6 +1967,12 @@ SMT.daf = function (ctx) {
         } finally {
             dafStatsLoadingCount = Math.max(0, dafStatsLoadingCount - 1);
             dafStatsLoading.value = dafStatsLoadingCount > 0;
+            if (!dafStatsLoading.value && dafSharedStatsForceQueued && !dafSharedStatsLoadPromise) {
+                dafSharedStatsForceQueued = false;
+                queueMicrotask(() => {
+                    if (currentTab.value === 'stats' && isUnifiedTestLine()) void loadSharedDafStatsState({ force: true });
+                });
+            }
         }
     };
     const openDafDefectDetail = name => {
@@ -2249,16 +2268,13 @@ SMT.daf = function (ctx) {
             const trendEl = document.getElementById('dafTrendChart');
             if (reasonEl && result?.byType?.length) {
                 if (!reasonChart || reasonChart.getDom() !== reasonEl) { reasonChart = disposeChart(reasonChart); reasonChart = echarts.init(reasonEl); }
-                const rows = result.byType.slice(0, 12);
-                const names = rows.map(row => row.name);
-                const quantities = rows.map(row => row.qty);
+                const rows = result.byType.slice(0, 10).reverse();
                 reasonChart.setOption({
-                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                    legend: { data: ['不良數量'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
-                    grid: { top: 64, right: 58, bottom: 64, left: 48 },
-                    xAxis: { type: 'category', data: names, triggerEvent: true, axisLabel: { rotate: names.some(name => name.length > 5) ? 20 : 0, fontSize: 10, color: '#374151' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-                    yAxis: { type: 'value', name: '數量', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-                    series: [{ name: '不良數量', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } }]
+                    grid: { top: 12, right: 24, bottom: 24, left: 120 },
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => `${params[0].name}<br/><b>${params[0].value} 件</b>` },
+                    xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
+                    yAxis: { type: 'category', data: rows.map(row => row.name), axisLabel: { fontSize: 10, color: '#6b7280' } },
+                    series: [{ name: '不良數量', type: 'bar', data: rows.map(row => row.qty), barMaxWidth: 18, itemStyle: { color: '#dc2626', borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right', fontSize: 10 } }]
                 });
                 if (reasonChart.off) reasonChart.off('click');
                 if (reasonChart.on) reasonChart.on('click', params => { const name = params?.componentType === 'xAxis' ? params.value : params?.name; if (name) openDafDefectDetail(name); });

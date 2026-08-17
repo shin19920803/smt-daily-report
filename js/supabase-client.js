@@ -51,6 +51,18 @@ window.koyaInvalidateCache = () => {
     return cacheInvalidationPromise;
 };
 
+let statsStateCacheInvalidationPromise = null;
+window.koyaInvalidateStatsStateCache = () => {
+    const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
+    if (!base) return Promise.resolve(false);
+    if (statsStateCacheInvalidationPromise) return statsStateCacheInvalidationPromise;
+    statsStateCacheInvalidationPromise = fetch(`${base}/api/daf-stats-state/invalidate`, { method: 'POST' })
+        .then(response => response.ok)
+        .catch(() => false)
+        .finally(() => { statsStateCacheInvalidationPromise = null; });
+    return statsStateCacheInvalidationPromise;
+};
+
 window.koyaFetchCachedJson = async (path, { force = false } = {}) => {
     const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
     if (!base) return null;

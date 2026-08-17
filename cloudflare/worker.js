@@ -2,6 +2,7 @@ const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
 const APP_ORIGIN = 'https://shin19920803.github.io';
 const PROCESS_LINES = ['DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY'];
+const SHARED_STATS_STATE_ID = '__koya_shared_daf_stats_state_v1__';
 const SUMMARY_COLUMNS = [
     'id', 'line', 'file_name', 'uploaded_at', 'model_name', 'product_code', 'work_order',
     'report_date', 'date_start', 'date_end', 'input_count', 'good_count', 'fail_count',
@@ -115,6 +116,16 @@ const readDafVersionsFromSupabase = async lines => {
     return jsonResponse({ versions }, 200, { 'Cache-Control': 'public, max-age=15, s-maxage=60' });
 };
 
+const readDafStatsStateFromSupabase = async () => {
+    const result = await readSupabasePages('daf_log_batches', url => {
+        // 共用數據統計只讀一筆快照；完整 LOG 不經過這個端點。
+        url.searchParams.set('select', 'uploaded_at,records');
+        url.searchParams.set('id', `eq.${SHARED_STATS_STATE_ID}`);
+    }, 1);
+    if (result.error) return result.error;
+    return jsonResponse(result.rows[0] || null, 200, { 'Cache-Control': 'public, max-age=0, s-maxage=60' });
+};
+
 const readSmtDataFromSupabase = async () => {
     const production = await readSupabasePages('daily_production', url => {
         url.searchParams.set('select', '*,work_orders!inner(*,models(*)),defect_logs(*,defect_types(*),defect_locations(*))');
@@ -169,11 +180,17 @@ const invalidateCache = async requestUrl => {
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-summary', line)),
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-details', line)),
         cacheKey(requestUrl, '/api/daf-version', { lines: PROCESS_LINES.join(',') }),
+        cacheKey(requestUrl, '/api/daf-stats-state'),
         cacheKey(requestUrl, '/api/smt-data'),
         cacheKey(requestUrl, '/api/assembly-data')
     ];
     await Promise.all(keys.map(key => cache.delete(key)));
     return keys.length;
+};
+
+const invalidateDafStatsStateCache = async requestUrl => {
+    await caches.default.delete(cacheKey(requestUrl, '/api/daf-stats-state'));
+    return 1;
 };
 
 export default {
@@ -182,7 +199,7 @@ export default {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
         if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '2026081403' });
+            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '202608171730' });
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-summary') {
@@ -209,6 +226,10 @@ export default {
             return withCache(requestUrl, '/api/daf-version', { lines: lines.join(',') }, requestUrl.searchParams.get('refresh') === '1', () => readDafVersionsFromSupabase(lines));
         }
 
+        if (request.method === 'GET' && requestUrl.pathname === '/api/daf-stats-state') {
+            return withCache(requestUrl, '/api/daf-stats-state', {}, requestUrl.searchParams.get('refresh') === '1', readDafStatsStateFromSupabase);
+        }
+
         if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {
             return withCache(requestUrl, '/api/smt-data', {}, requestUrl.searchParams.get('refresh') === '1', readSmtDataFromSupabase);
         }
@@ -220,6 +241,12 @@ export default {
         if (requestUrl.pathname === '/api/cache/invalidate' || requestUrl.pathname === '/api/daf-summary/invalidate') {
             if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
             const invalidated = await invalidateCache(requestUrl);
+            return jsonResponse({ ok: true, invalidated });
+        }
+
+        if (requestUrl.pathname === '/api/daf-stats-state/invalidate') {
+            if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
+            const invalidated = await invalidateDafStatsStateCache(requestUrl);
             return jsonResponse({ ok: true, invalidated });
         }
 

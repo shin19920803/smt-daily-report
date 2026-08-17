@@ -915,16 +915,39 @@ SMT.daf = function (ctx) {
             console.warn('共用數據統計狀態保存失敗', error);
             return false;
         }
+        // 統計快照更新後只清除統計快取，不清除五站摘要與明細快取。
+        if (window.koyaInvalidateStatsStateCache && !(await window.koyaInvalidateStatsStateCache())) {
+            // 快取服務暫時不可用時不否定已成功寫入 Supabase 的統計結果；讀取端會直讀唯一資料源。
+            console.warn('共用數據統計狀態快取清除失敗，保留 Supabase 已寫入結果');
+        }
         return true;
     };
     const loadSharedDafStatsState = async ({ force = false } = {}) => {
         if (!isUnifiedTestLine() || currentTab.value !== 'stats') return false;
         if (dafSharedStatsLoadPromise && !force) return dafSharedStatsLoadPromise;
         const request = (async () => {
-            const { data: row, error } = await _supabase.from(REMOTE_TABLE)
-                .select('uploaded_at,records')
-                .eq('id', SHARED_STATS_STATE_ID)
-                .maybeSingle();
+            let row = null;
+            let error = null;
+            try {
+                if (window.koyaFetchCachedJson) {
+                    row = await window.koyaFetchCachedJson('/api/daf-stats-state', { force });
+                } else {
+                    ({ data: row, error } = await _supabase.from(REMOTE_TABLE)
+                        .select('uploaded_at,records')
+                        .eq('id', SHARED_STATS_STATE_ID)
+                        .maybeSingle());
+                }
+            } catch (requestError) {
+                error = requestError;
+            }
+            if (error) {
+                // Cloudflare 失敗時仍只讀這一筆 Supabase 共用快照，不回退到本機資料或完整 LOG。
+                console.warn('共用數據統計狀態讀取失敗，改由 Supabase 直讀', error);
+                ({ data: row, error } = await _supabase.from(REMOTE_TABLE)
+                    .select('uploaded_at,records')
+                    .eq('id', SHARED_STATS_STATE_ID)
+                    .maybeSingle());
+            }
             if (error) {
                 console.warn('共用數據統計狀態讀取失敗', error);
                 return false;

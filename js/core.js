@@ -143,7 +143,7 @@ SMT.core = function (ctx) {
                 const tasks = [
                     loadBaseData(),
                     ctx.loadAssemblyData && ctx.loadAssemblyData({ background: true }),
-                    ctx.loadDafData && ctx.loadDafData({ background: true, force: true })
+                    ctx.loadDafData && ctx.loadDafData({ background: true })
                 ];
                 await Promise.all(tasks);
                 const refreshed = ctx.refreshDashboard ? await ctx.refreshDashboard() : true;

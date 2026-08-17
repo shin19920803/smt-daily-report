@@ -511,7 +511,7 @@ SMT.daf = function (ctx) {
             const url = new URL(base);
             url.searchParams.set('line', line);
             if (force) url.searchParams.set('refresh', '1');
-            const response = await fetch(url);
+            const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             if (!Array.isArray(data)) throw new Error('摘要格式錯誤');
@@ -1205,8 +1205,6 @@ SMT.daf = function (ctx) {
             dafStatsResult.value = null;
             dafStatsResults.value = {};
         }
-        dafSummaryBatches.value = [];
-        dafLastUpload.value = null;
         if (!isDafLikeLine()) return;
         if (!background) await invalidateDafSummaryCache();
         dafRemoteReady.value = false;
@@ -1227,15 +1225,15 @@ SMT.daf = function (ctx) {
                 return;
             }
             // 儀表板只讀摘要欄位；完整 records 延後到統計／明細明確操作時才讀取。
-            const remoteResults = [];
-            for (const processLine of processLines) remoteResults.push(await loadDafRemoteRows(processLine, false, { force: force || !background }));
+            // 五個製程只載入摘要欄位，並行取得後一次替換畫面，避免清單先只出現最新檔案或逐站等待。
+            const remoteResults = await Promise.all(processLines.map(processLine => loadDafRemoteRows(processLine, false, { force })));
             const error = remoteResults.find(result => result.error)?.error || null;
             const remoteRows = remoteResults.flatMap(result => result.data || []);
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
             if (error) {
+                dafRemoteChecking.value = false;
                 dafRemoteError.value = `資料庫已連線，但部分 LOG 載入失敗：${error.message || '資料讀取失敗'}`;
-                dafSummaryBatches.value = filterGhostDafRows(remoteRows || []).map(fromRemote);
-                if (!background) dafBatches.value = [];
+                // 摘要刷新失敗時保留上一份完整清單，避免跨電腦暫時只看到部分資料。
             } else {
                 dafRemoteReady.value = true;
                 dafRemoteChecking.value = false;
@@ -1868,7 +1866,7 @@ SMT.daf = function (ctx) {
         if (queue.success) toast(`${currentDafLabel()} 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
         else toast(`${currentDafLabel()} 檔案全部處理失敗`, 'error');
         // 上傳成功後立即以 Supabase 摘要重新整理；統計頁由 refreshDetails 再載入完整明細。
-        if (queue.success) await loadDafData();
+        if (queue.success) await loadDafData({ force: true });
     };
     const processDafUploadQueue = async queue => {
         for (let index = queue.index; index < queue.files.length; index++) {

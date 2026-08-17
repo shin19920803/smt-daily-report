@@ -661,8 +661,8 @@ SMT.dashboard = function (ctx) {
             [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst, dashDafDailyChartInst, dashDafReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
         const refreshDashboardAndCharts = async () => {
-            if (currentLine.value === 'TEST' && loadDafData) await loadDafData();
-            if (currentLine.value === 'ASSY' && loadAssemblyData) await loadAssemblyData();
+            if (currentLine.value === 'TEST' && loadDafData) await loadDafData({ force: true });
+            if (currentLine.value === 'ASSY' && loadAssemblyData) await loadAssemblyData({ force: true });
             const refreshed = await refreshDashboard({ force: true });
             if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
         };

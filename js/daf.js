@@ -52,7 +52,7 @@ SMT.daf = function (ctx) {
     const processLabel = line => TEST_PROCESS_OPTIONS.find(item => item.id === line)?.label || line;
     const defaultDafDefect = processLine => processLine === 'FT2' ? '偵測失效' : '未填寫不良原因';
     const detectDafMachine = value => {
-        const operator = normalizeText(value);
+        const operator = normalizeText(value).replace(/[^A-Z0-9]/g, '');
         if (operator.includes('Y0176')) return '1號機';
         if (operator.includes('Y0137')) return '2號機';
         return '';

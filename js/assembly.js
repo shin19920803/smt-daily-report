@@ -45,6 +45,8 @@ SMT.assembly = function (ctx) {
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] });
     const assemblyDailyDetail = ref({ show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] });
+    const emptyAssemblyModelDetail = () => ({ show: false, name: '', success: 0, ng: 0, total: 0, successRate: '0.00', downtimeRate: '0.00', byType: [] });
+    const assemblyModelDetail = ref(emptyAssemblyModelDetail());
     const assemblyQuickMode = ref('day');
     const assemblyQuickOffset = ref(-1);
     let applyingAssemblyQuick = false;
@@ -157,7 +159,8 @@ SMT.assembly = function (ctx) {
         date: String(item?.date || item?.scheduleDate || item?.schedule_date || ''),
         startTime: String(item?.startTime || item?.start_time || ''),
         endTime: String(item?.endTime || item?.end_time || ''),
-        model: String(item?.model || item?.modelName || item?.model_name || '').trim()
+        model: String(item?.model || item?.modelName || item?.model_name || '').trim(),
+        createdAt: String(item?.createdAt || item?.created_at || '')
     });
     const readModelSchedules = () => {
         try {
@@ -192,17 +195,26 @@ SMT.assembly = function (ctx) {
         // 23:59 作為當日最後一分鐘的結束點，採用半開區間可與下一時段銜接。
         return isEnd && hour === 23 && minute === 59 ? 1440 : hour * 60 + minute;
     };
-    const modelForLogTime = (date, time) => {
-        const minute = timeToMinutes(time);
-        if (minute === null) return NO_MODEL;
-        const schedule = assemblyModelSchedules.value.find(item => {
+    const modelSchedulePriority = item => {
+        const idTimestamp = Number(String(item?.id || '').match(/ASSY_MODEL_(\d{10,})/)?.[1] || 0);
+        const createdTimestamp = Date.parse(item?.createdAt || '');
+        return Math.max(idTimestamp, Number.isFinite(createdTimestamp) ? createdTimestamp : 0);
+    };
+    const modelScheduleForMinute = (date, minute) => assemblyModelSchedules.value
+        .filter(item => {
             if (item.date !== date) return false;
             const start = timeToMinutes(item.startTime);
             const end = timeToMinutes(item.endTime, true);
             return start !== null && end !== null && start <= minute && minute < end;
-        });
+        })
+        .sort((a, b) => modelSchedulePriority(b) - modelSchedulePriority(a))[0] || null;
+    const modelForLogTime = (date, time) => {
+        const minute = timeToMinutes(time);
+        if (minute === null) return NO_MODEL;
+        const schedule = modelScheduleForMinute(date, minute);
         return schedule?.model || NO_MODEL;
     };
+    const modelForLogHour = (date, hour) => modelForLogTime(date, `${String(hour).padStart(2, '0')}:30`);
     const readDefectNotes = () => {
         try {
             const parsed = JSON.parse(localStorage.getItem(NOTES_STORAGE_KEY) || '{}');
@@ -304,7 +316,8 @@ SMT.assembly = function (ctx) {
         date: row.schedule_date,
         startTime: row.start_time,
         endTime: row.end_time,
-        model: row.model_name
+        model: row.model_name,
+        createdAt: row.created_at
     });
     const hasRemoteMigrationFlag = () => {
         try { return localStorage.getItem(REMOTE_MIGRATED_KEY) === '1'; } catch (e) { return false; }
@@ -549,12 +562,43 @@ SMT.assembly = function (ctx) {
                     }
                 });
             } else if (sourceTotal > 0) {
-                // 舊批次沒有保存分鐘級 LOG 時間，保留資料並明確歸入未分機種。
-                const summary = modelEntry(NO_MODEL);
-                summary.success += source.success || 0;
-                summary.ng += source.ng || 0;
-                increment(day.byModel, NO_MODEL, sourceTotal);
-                Object.entries(source.byType || {}).forEach(([name, qty]) => increment(summary.byType, name, qty));
+                // 舊批次沒有保存逐筆時間，改用已保存的每小時統計套用機種時段；新上傳批次仍以逐筆時間精準分組。
+                const successByHour = source.hourlySuccess || {};
+                const ngByHour = source.hourlyNg || {};
+                const typeByHour = source.hourlyByType || {};
+                const hours = new Set([
+                    ...Object.keys(successByHour),
+                    ...Object.keys(ngByHour),
+                    ...Object.values(typeByHour).flatMap(hoursByType => Object.keys(hoursByType || {}))
+                ]);
+                let mappedSuccess = 0;
+                let mappedNg = 0;
+                hours.forEach(hour => {
+                    const model = modelForLogHour(date, hour);
+                    const summary = modelEntry(model);
+                    const hourlySuccess = Number(successByHour[hour] || 0);
+                    const hourlyNg = Number(ngByHour[hour] || 0);
+                    summary.success += hourlySuccess;
+                    summary.ng += hourlyNg;
+                    mappedSuccess += hourlySuccess;
+                    mappedNg += hourlyNg;
+                    increment(day.byModel, model, hourlySuccess + hourlyNg);
+                    Object.entries(typeByHour).forEach(([name, hoursByType]) => {
+                        increment(summary.byType, name, Number(hoursByType?.[hour] || 0));
+                    });
+                });
+                if (!hours.size || mappedSuccess !== Number(source.success || 0) || mappedNg !== Number(source.ng || 0)) {
+                    const summary = modelEntry(NO_MODEL);
+                    const remainingSuccess = Math.max(0, Number(source.success || 0) - mappedSuccess);
+                    const remainingNg = Math.max(0, Number(source.ng || 0) - mappedNg);
+                    summary.success += remainingSuccess;
+                    summary.ng += remainingNg;
+                    increment(day.byModel, NO_MODEL, remainingSuccess + remainingNg);
+                    Object.entries(source.byType || {}).forEach(([name, qty]) => {
+                        const mappedType = Object.values(typeByHour).reduce((total, hoursByType) => total + Number(hoursByType?.[name] || 0), 0);
+                        increment(summary.byType, name, Math.max(0, Number(qty || 0) - mappedType));
+                    });
+                }
             }
         }));
         const totalRecords = success + ng;
@@ -850,6 +894,23 @@ SMT.assembly = function (ctx) {
         if (currentLine.value !== 'ASSY') return;
         assemblyReportResult.value = aggregate(assemblyBatches.value, assemblyUploadDate.value, assemblyUploadDate.value);
     };
+    const openAssemblyModelDetail = row => {
+        if (!row) return;
+        assemblyModelDetail.value = {
+            ...emptyAssemblyModelDetail(),
+            show: true,
+            name: row.name || NO_MODEL,
+            success: Number(row.success || 0),
+            ng: Number(row.ng || 0),
+            total: Number(row.total || 0),
+            successRate: row.successRate || '100.00',
+            downtimeRate: row.downtimeRate || '0.00',
+            byType: Array.isArray(row.byType) ? row.byType : []
+        };
+    };
+    const closeAssemblyModelDetail = () => {
+        assemblyModelDetail.value = emptyAssemblyModelDetail();
+    };
     const refreshAssemblyModelResults = () => {
         refreshAssemblyReport();
         if (assemblyStatsResult.value) assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
@@ -905,7 +966,8 @@ SMT.assembly = function (ctx) {
             date: assemblyUploadDate.value,
             startTime: form.startTime,
             endTime: form.endTime,
-            model
+            model,
+            createdAt: new Date().toISOString()
         };
         assemblyModelSchedules.value = [...assemblyModelSchedules.value, schedule].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
         persistModelSchedules();
@@ -1133,6 +1195,7 @@ SMT.assembly = function (ctx) {
         }
         assemblySourceDetail.value = { show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] };
         assemblyDailyDetail.value = { show: false, date: '', success: 0, ng: 0, downtimeRate: '0.00', byType: [] };
+        closeAssemblyModelDetail();
         assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
         renderAssemblyStatsCharts();
     };
@@ -1412,13 +1475,13 @@ SMT.assembly = function (ctx) {
         assemblyRemoteReady, assemblyRemoteError, assemblyMappingRemoteReady, assemblyCloudReady,
         assemblyModelScheduleRemoteReady, assemblyModelScheduleRemoteError, assemblyModelSchedules, assemblyModelSchedulesForDate,
         assemblyModelOptions, assemblyModelScheduleModal, assemblyModelScheduleForm, assemblyModelScheduleError,
-        assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail, assemblyDailyDetail,
+        assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail, assemblyDailyDetail, assemblyModelDetail,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectNotes, assemblyHourlyNotes, assemblyStatusNotes, assemblyStatusNoteHours, assemblyStatusNoteEditorOpen, assemblyStatusNoteHour, assemblyStatusNoteDraft, assemblyStatusNoteCurrent,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,
         getAssemblyReportForDate, getAssemblyUploadedDates,
-        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, openAssemblyReportSourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
+        calculateAssemblyStats, exportAssemblyStats, deleteAssemblyBatch, shiftAssemblyUploadDate, openAssemblySourceDetail, openAssemblyReportSourceDetail, closeAssemblySourceDetail, openAssemblyDailyDetail, closeAssemblyDailyDetail, openAssemblyModelDetail, closeAssemblyModelDetail, saveAssemblyDefectNote, saveAssemblyHourNote, toggleAssemblyStatusNoteEditor, saveAssemblyStatusNote,
         openAssemblyModelScheduleModal, closeAssemblyModelScheduleModal, formatAssemblyModelScheduleTime, addAssemblyModelSchedule, deleteAssemblyModelSchedule,
         setAssemblyQuickMode, shiftAssemblyQuick, resolveAssemblyUnknown, cancelAssemblyUnknown,
         renderAssemblyReportChart, renderAssemblyStatsCharts

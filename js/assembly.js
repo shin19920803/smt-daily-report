@@ -171,8 +171,9 @@ SMT.assembly = function (ctx) {
     const assemblyModelOptions = computed(() => {
         const dafModels = ctx.dafModelOptions?.value || [];
         const currentModels = (data.value.models || []).map(item => item.name);
+        const scheduledModels = assemblyModelSchedules.value.map(item => item.model);
         const unique = new Map();
-        [...dafModels, ...currentModels].forEach(item => {
+        [...dafModels, ...currentModels, ...scheduledModels].forEach(item => {
             const name = String(item || '').trim();
             const key = name.toUpperCase();
             if (name && name !== '未識別機種' && !unique.has(key)) unique.set(key, name);

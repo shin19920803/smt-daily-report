@@ -2335,6 +2335,38 @@ SMT.daf = function (ctx) {
         const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
         return { start, end };
     };
+    const dafQuickDate = value => {
+        if (!value) return null;
+        const date = new Date(`${value}T00:00:00`);
+        return Number.isNaN(date.getTime()) ? null : date;
+    };
+    const dafQuickWeekStart = date => {
+        const start = new Date(date);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - start.getDay());
+        return start;
+    };
+    const getDafQuickAnchorDate = () => {
+        const today = dafQuickDate(window.koyaTodayDate()) || new Date();
+        const filterStart = dafQuickDate(dafStatsFilter.value.start);
+        const filterEnd = dafQuickDate(dafStatsFilter.value.end);
+        const availableDates = (dafStatsResult.value?.daily || [])
+            .map(day => dafQuickDate(day.date))
+            .filter(date => date && (!filterStart || date >= filterStart) && (!filterEnd || date <= filterEnd))
+            .sort((a, b) => a - b);
+        const pastAvailableDate = availableDates.filter(date => date <= today).pop();
+        if (pastAvailableDate) return pastAvailableDate;
+        if (availableDates[0]) return availableDates[0];
+        if (filterStart && filterEnd && today >= filterStart && today <= filterEnd) return today;
+        return filterStart || today;
+    };
+    const getDafQuickOffset = mode => {
+        const today = dafQuickDate(window.koyaTodayDate()) || new Date();
+        const anchor = getDafQuickAnchorDate();
+        if (mode === 'day') return Math.round((anchor - today) / 86400000);
+        if (mode === 'week') return Math.round((dafQuickWeekStart(anchor) - dafQuickWeekStart(today)) / 604800000);
+        return (anchor.getFullYear() - today.getFullYear()) * 12 + anchor.getMonth() - today.getMonth();
+    };
     const dafQuickLabel = computed(() => {
         if (!dafQuickMode.value) return '';
         const { start, end } = dafQuickRange(dafQuickMode.value, dafQuickOffset.value);
@@ -2396,7 +2428,8 @@ SMT.daf = function (ctx) {
     };
     const setDafQuickMode = mode => {
         dafQuickMode.value = mode;
-        dafQuickOffset.value = { day: 0, week: -1, month: -1 }[mode];
+        // 從大區間切換到小區間時，沿用目前已載入且有資料的日期，避免被重設到無資料的今天。
+        dafQuickOffset.value = getDafQuickOffset(mode);
         applyDafQuick();
     };
     const shiftDafQuick = delta => {

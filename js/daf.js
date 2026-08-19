@@ -24,7 +24,7 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_REFERENCE_LINE = '__DAF_MACHINE_REFERENCE__';
     const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
     const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-    const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v2';
+    const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v3';
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
@@ -1796,7 +1796,15 @@ SMT.daf = function (ctx) {
         const byMachine = machineNames.map(machine => {
             const machineResult = buildDafSummary(sourceRows.filter(row => dafMachineForRecord(row) === machine), processLine, false);
             const { rows: _machineRows, ...summary } = machineResult;
-            return { name: machine, ...summary };
+            return {
+                name: machine,
+                input: machineResult.totalInput,
+                good: machineResult.totalGood,
+                defects: machineResult.totalDefects,
+                yieldRate: machineResult.yieldRate,
+                defectRate: machineResult.defectRate,
+                ...summary
+            };
         });
         const unknownStatuses = [...new Set((rows || []).map(row => row.status).filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
         const result = {

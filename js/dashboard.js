@@ -300,7 +300,7 @@ SMT.dashboard = function (ctx) {
 
         let dashboardRefreshId = 0;
         let dafDashboardMissingDateRefreshKey = '';
-        const refreshDashboard = async ({ force = false } = {}) => {
+        const refreshDashboard = async ({ force = false, deferDetails = false } = {}) => {
             const requestId = ++dashboardRefreshId;
             const line = currentLine.value;
             let availableDates = await loadDashboardAvailableDates(line, force);
@@ -350,13 +350,16 @@ SMT.dashboard = function (ctx) {
                     const weeklyYield = dafWeekDays.value.map(day => Number(day.report.yieldRate));
                     dashboard.value = { activeWoCount: 0, todayInput: current.totalInput, todayDefects: current.totalDefects, todayYield: current.defectRate, monthOocCount: 0, weekAvgYield: weeklyYield.length ? (weeklyYield.reduce((sum, value) => sum + value, 0) / weeklyYield.length).toFixed(2) : '0.00' };
                     if (ensureDafDashboardDetails && (force || !detailsLoaded)) {
-                        void ensureDafDashboardDetails(targetDate, { force }).then(loaded => {
+                        const loadDetails = () => ensureDafDashboardDetails(targetDate, { force }).then(loaded => {
                             if (!loaded || requestId !== dashboardRefreshId || line !== currentLine.value || dashDate.value !== targetDate || currentTab.value !== 'dashboard') return;
                             Promise.resolve(refreshDashboard()).then(refreshed => {
                                 if (refreshed !== false && currentTab.value === 'dashboard' && ctx.initDashboardCharts) return ctx.initDashboardCharts();
                                 return null;
                             }).catch(error => console.warn('DAF 儀表板明細背景更新失敗', error));
                         });
+                        // 日期切換先立即顯示摘要；完整 LOG 與不良排行在下一個事件循環載入，避免卡住日期控制項。
+                        if (deferDetails && !force) setTimeout(() => { void loadDetails(); }, 0);
+                        else void loadDetails();
                     }
                 }
                 dashboardRecentProds.value = [];
@@ -699,7 +702,7 @@ SMT.dashboard = function (ctx) {
         });
         watch(dashDate, async () => {
             if (currentTab.value !== 'dashboard') return;
-            const refreshed = await refreshDashboard();
+            const refreshed = await refreshDashboard({ deferDetails: true });
             if (refreshed !== false && currentTab.value === 'dashboard') await initDashboardCharts();
         });
         return {

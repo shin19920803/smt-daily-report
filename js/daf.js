@@ -1674,12 +1674,14 @@ SMT.daf = function (ctx) {
                     }
                     return;
                 }
-                if (!TEST_PROCESS_IDS.includes(line)) return;
                 if (payload.eventType === 'DELETE') {
                     // DELETE 的 old payload 可能只包含主鍵；id 在五個製程間全域唯一，因此直接同步移除。
                     applyDafRemoteDeletion(payload.old?.id);
+                    // 即使 DELETE 沒有帶 line，也要強制從 Supabase 重建清單，確保同檔名五站批次全部同步移除。
+                    scheduleDafRemoteRefresh();
                     return;
                 }
+                if (!TEST_PROCESS_IDS.includes(line)) return;
                 scheduleDafRemoteRefresh();
             })
             .subscribe(status => {

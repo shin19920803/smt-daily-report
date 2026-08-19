@@ -1096,6 +1096,7 @@
                 </div>
                 <div v-if="!dafStatsResult" class="section-card"><div class="empty-state py-16"><i class="fas fa-chart-column"></i><div class="title">尚未執行 {{ dafProcessMeta.label }} 統計</div><div class="hint">設定篩選條件後點擊「執行統計」</div></div></div>
                 <template v-if="dafStatsResult">
+                    <div v-if="dafStatsResult.summaryOnly" class="flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700"><i class="fas fa-cloud-arrow-down"></i><span>摘要已顯示；詳細不良原因與明細正在背景整理，完成後會自動更新。</span></div>
                     <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
                         <div class="kpi-card cursor-pointer" @click="openDafOutputDetail"><div class="kpi-icon blue"><i class="fas fa-cubes"></i></div><div class="kpi-value">{{ dafStatsResult.totalInput.toLocaleString() }}</div><div class="kpi-label">投入數</div></div>
                         <div class="kpi-card cursor-pointer" @click="openDafOutputDetail"><div class="kpi-icon green"><i class="fas fa-circle-check"></i></div><div class="kpi-value text-success">{{ dafStatsResult.totalGood.toLocaleString() }}</div><div class="kpi-label">良品數</div></div>
@@ -1831,7 +1832,7 @@
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608181901"></script>
-<script src="js/daf.js?v=202608192250"></script>
+<script src="js/daf.js?v=202608192345"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
 <script src="js/dashboard.js?v=202608192230"></script>

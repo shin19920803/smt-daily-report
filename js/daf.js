@@ -25,6 +25,8 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
     const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
     const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v3';
+    const MODEL_MAPPING_REMOTE_LINE = '__KOYA_MODEL_MAPPING__';
+    const MODEL_MAPPING_REMOTE_PREFIX = '__KOYA_MODEL_MAPPING__';
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
@@ -266,6 +268,77 @@ SMT.daf = function (ctx) {
             dafModelMappings.value = normalized;
             localStorage.setItem(currentDafMappingStorageKey(), JSON.stringify(normalized));
         } catch (e) {}
+    };
+    const modelMappingRemoteId = code => `${MODEL_MAPPING_REMOTE_PREFIX}${encodeURIComponent(normalizeText(code))}`;
+    const modelMappingRemoteRow = (code, model) => {
+        const normalizedCode = normalizeText(code);
+        const normalizedModel = normalizeModelName(model);
+        return {
+            id: modelMappingRemoteId(normalizedCode), line: MODEL_MAPPING_REMOTE_LINE,
+            file_name: '非 SMT 製程機種對應記憶', uploaded_at: new Date().toISOString(),
+            model_name: normalizedModel, product_code: normalizedCode, work_order: null,
+            report_date: null, date_start: null, date_end: null, input_count: 0,
+            good_count: 0, fail_count: 0, yield_rate: 0, defect_rate: 0,
+            unknown_status_count: 0, unknown_status_text: null, row_count: 1,
+            raw_column_count: 0, records: [{ productCode: normalizedCode, model: normalizedModel }]
+        };
+    };
+    const saveRemoteModelMapping = async (code, model) => {
+        const normalizedCode = normalizeText(code);
+        const normalizedModel = normalizeModelName(model);
+        if (!normalizedCode || normalizedModel === '未識別機種' || !_supabase) return false;
+        const { data, error } = await _supabase.from(REMOTE_TABLE)
+            .upsert(modelMappingRemoteRow(normalizedCode, normalizedModel), { onConflict: 'id' })
+            .select('id').maybeSingle();
+        if (error || data?.id !== modelMappingRemoteId(normalizedCode)) {
+            console.warn('機種對應記憶寫入 Supabase 失敗', error || '未確認寫入');
+            return false;
+        }
+        return true;
+    };
+    const loadRemoteModelMappings = async () => {
+        if (!_supabase) return false;
+        const rows = [];
+        for (let offset = 0; ; offset += 1000) {
+            const { data: page, error } = await _supabase.from(REMOTE_TABLE)
+                .select('id,product_code,model_name,records')
+                .eq('line', MODEL_MAPPING_REMOTE_LINE)
+                .order('uploaded_at', { ascending: false })
+                .range(offset, offset + 999);
+            if (error) {
+                console.warn('機種對應記憶讀取 Supabase 失敗', error);
+                return false;
+            }
+            rows.push(...(page || []));
+            if (!page || page.length < 1000) break;
+        }
+        const remoteMappings = {};
+        rows.forEach(row => {
+            const record = Array.isArray(row.records) ? row.records[0] : row.records;
+            const code = normalizeText(row.product_code || record?.productCode);
+            const model = normalizeModelName(row.model_name || record?.model);
+            if (code && model !== '未識別機種' && !remoteMappings[code]) remoteMappings[code] = model;
+        });
+        const localMappings = readModelMappings();
+        const merged = { ...localMappings, ...remoteMappings };
+        dafModelMappings.value = merged;
+        persistModelMappings();
+        const remoteCodes = new Set(Object.keys(remoteMappings));
+        await Promise.all(Object.entries(localMappings)
+            .filter(([code, model]) => !remoteCodes.has(code))
+            .map(([code, model]) => saveRemoteModelMapping(code, model)));
+        return true;
+    };
+    let dafModelMappingsReadyPromise = null;
+    const ensureDafModelMappingsReady = () => {
+        if (!dafModelMappingsReadyPromise) {
+            dafModelMappingsReadyPromise = loadRemoteModelMappings().catch(error => {
+                dafModelMappingsReadyPromise = null;
+                console.warn('機種對應記憶初始化失敗，沿用本機既有設定', error);
+                return false;
+            });
+        }
+        return dafModelMappingsReadyPromise;
     };
     const learnModelMappings = (batches) => {
         let changed = false;
@@ -2181,6 +2254,7 @@ SMT.daf = function (ctx) {
         if (queue.success) await loadDafData({ force: true });
     };
     const processDafUploadQueue = async queue => {
+        await ensureDafModelMappingsReady();
         const referenceState = await loadDafMachineReferences();
         const storedMachineReferences = referenceState.error ? new Map() : referenceState.map;
         if (referenceState.error) toast('待比對機台資料讀取失敗，本次僅使用目前檔案內的比對資料', 'warning');
@@ -2285,6 +2359,7 @@ SMT.daf = function (ctx) {
         const modelName = created || selected;
         dafModelMappings.value = { ...dafModelMappings.value, [normalizeText(code)]: normalizeModelName(modelName) };
         persistModelMappings();
+        await saveRemoteModelMapping(code, modelName);
         if (modal.currentIndex < modal.items.length - 1) {
             dafUnknownModelModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedModel: '', newModel: '' };
             return;
@@ -2412,6 +2487,7 @@ SMT.daf = function (ctx) {
         });
     };
     dafModelMappings.value = readModelMappings();
+    void ensureDafModelMappingsReady();
     learnModelMappings(dafBatches.value);
     watch(() => [dafStatsFilter.value.start, dafStatsFilter.value.end], () => {
         if (!applyingDafQuick && !applyingDafSharedStats) {

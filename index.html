@@ -403,7 +403,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>檔案上傳</h3>
-                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。熱壓投入僅作跨日比對，不列入統計；未匹配資料保留 30 天。</p>
+                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 與功能一測試會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。熱壓投入僅作跨日比對，不列入統計；未匹配資料保留 30 天。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700" :title="dafRemoteError"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else-if="dafRemoteChecking" class="badge-hint text-blue-700"><i class="fas fa-spinner fa-spin"></i>正在確認共用資料庫</span>
@@ -453,7 +453,7 @@
                                         <div><span class="text-gray-400 block">當日不良</span><b class="text-red-600">{{ batch.dateDefects.toLocaleString() }}</b></div>
                                         <div><span class="text-gray-400 block">檔案區間</span><b>{{ batch.reportDate }}</b></div>
                                     </div>
-                                    <div v-if="dafProcess === 'DAF' && batch.machines && batch.machines.length" class="mt-2 text-xs text-indigo-700"><i class="fas fa-server mr-1"></i>機台：<b>{{ batch.machines.join('、') }}</b></div>
+                                    <div v-if="['DAF', 'FT1'].includes(dafProcess) && batch.machines && batch.machines.length" class="mt-2 text-xs text-indigo-700"><i class="fas fa-server mr-1"></i>機台：<b>{{ batch.machines.join('、') }}</b></div>
                                     <div v-if="batch.unknownStatusCount" class="mt-2 text-xs text-orange-600"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ batch.unknownStatusCount }} 筆：{{ batch.unknownStatusText }}<span v-if="batch.unknownStatusText.includes('SCRAP')" class="ml-1">（SCRAP 代表報廢，未列入 GOOD／FAIL 投入統計）</span></div>
                                 </div>
                             </div>
@@ -1105,7 +1105,7 @@
                     </div>
                     <div v-if="dafStatsResult.unknownStatusCount" class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800"><i class="fas fa-triangle-exclamation mr-1"></i>其他狀態 {{ dafStatsResult.unknownStatusCount }} 筆：{{ dafStatsResult.unknownStatusText }}；不列入投入、良品與不良統計。</div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢 <span v-if="dafProcess === 'DAF'" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊日期查看機台明細</span></h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
+                        <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-chart-line text-blue-600"></i>產出量與良率趨勢 <span v-if="['DAF', 'FT1'].includes(dafProcess)" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊日期查看機台明細</span></h3><div v-if="dafStatsResult.daily.length" id="dafTrendChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-calendar-times"></i><div class="hint">沒有可用日期資料</div></div></div>
                         <div class="section-card p-4"><h3 class="card-title"><i class="fas fa-sort-amount-down text-red-600"></i>不良現象 Pareto 圖分析 <span v-if="dafStatsResult.byType.length" class="badge-hint ml-auto"><i class="fas fa-hand-pointer"></i>點擊柱狀查看每日趨勢、機種與工單</span></h3><div v-if="dafStatsResult.byType.length" id="dafReasonChart" style="width:100%;height:340px;"></div><div v-else class="empty-state py-12"><i class="fas fa-circle-check text-green-500"></i><div class="hint">此區間沒有不良資料</div></div></div>
                     </div>
                     <div class="section-card p-4">
@@ -1831,7 +1831,7 @@
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608181901"></script>
-<script src="js/daf.js?v=202608181715"></script>
+<script src="js/daf.js?v=202608191200"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
 <script src="js/dashboard.js?v=202608181400"></script>

@@ -24,6 +24,7 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_REFERENCE_LINE = '__DAF_MACHINE_REFERENCE__';
     const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
     const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+    const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v1';
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
@@ -54,6 +55,7 @@ SMT.daf = function (ctx) {
     const currentDafLabel = () => isUnifiedTestLine() ? dafProcessMeta.value.label : currentLineMeta.value.label;
     const processLabel = line => TEST_PROCESS_OPTIONS.find(item => item.id === line)?.label || line;
     const defaultDafDefect = processLine => processLine === 'FT2' ? '偵測失效' : '未填寫不良原因';
+    const isMachineClassifiedProcess = processLine => processLine === 'DAF' || processLine === 'FT1';
     const detectDafMachine = value => {
         const operator = normalizeText(value).replace(/[^A-Z0-9]/g, '');
         if (operator.includes('Y0176')) return '1號機';
@@ -500,7 +502,7 @@ SMT.daf = function (ctx) {
                     status,
                     model: resolveDafModel(row[columns.productCode]),
                     sourceFormat: CURRENT_SOURCE_FORMAT,
-                    machine: processLine === 'DAF'
+                    machine: isMachineClassifiedProcess(processLine)
                         ? (isDafMachineLabel(dafMachine)
                             ? dafMachine
                             : DAF_MACHINE_UNKNOWN)
@@ -852,7 +854,7 @@ SMT.daf = function (ctx) {
                     .filter(([date]) => (!filter.start || date >= filter.start) && (!filter.end || date <= filter.end)));
             }
         });
-        return { kind: 'koya-daf-stats-snapshot-v1', filter, versions: versions || null, results, days };
+        return { kind: 'koya-daf-stats-snapshot-v1', machineClassificationVersion: DAF_MACHINE_CLASSIFICATION_VERSION, filter, versions: versions || null, results, days };
     };
     const sharedDafSnapshotResult = (line, filter, snapshot = dafSharedStatsSnapshot) => {
         if (!snapshot?.filter || !snapshot?.days?.[line]) return null;
@@ -896,6 +898,7 @@ SMT.daf = function (ctx) {
             quickMode: dafQuickMode.value || null,
             quickOffset: Number(dafQuickOffset.value) || 0,
             versions: versions || null,
+            machineClassificationVersion: DAF_MACHINE_CLASSIFICATION_VERSION,
             snapshot,
             updatedAt
         };
@@ -980,7 +983,7 @@ SMT.daf = function (ctx) {
             saveDafStatsState();
             if (state.snapshot) {
                 dafSharedStatsSnapshot = state.snapshot;
-                const snapshotNeedsRefresh = TEST_PROCESS_IDS.some(line => {
+                const snapshotNeedsRefresh = state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION || TEST_PROCESS_IDS.some(line => {
                     const result = state.snapshot.results?.[line];
                     return result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, state);
                 });
@@ -1165,6 +1168,56 @@ SMT.daf = function (ctx) {
         }
         return success;
     };
+    const collectDafMachineMap = () => {
+        const machineMap = new Map();
+        dafMachineReferenceCache.forEach((reference, key) => {
+            if (isDafMachineLabel(reference?.machine)) machineMap.set(normalizeText(key), reference.machine);
+        });
+        dafBatches.value.filter(batch => (batch.line || 'DAF') === 'DAF').forEach(batch => {
+            (batch.records || []).forEach(record => {
+                const key = normalizeText(record.dedupKey);
+                if (key && isDafMachineLabel(record.machine)) machineMap.set(key, record.machine);
+            });
+        });
+        return machineMap;
+    };
+    const applyDafMachineMapToBatches = (batches, machineMap) => {
+        let changed = false;
+        const nextBatches = (batches || []).map(batch => {
+            if (!isMachineClassifiedProcess(batch.line) || !Array.isArray(batch.records) || !batch.records.length) return batch;
+            let batchChanged = false;
+            const records = batch.records.map(record => {
+                const machine = machineMap.get(normalizeText(record.dedupKey));
+                if (!isDafMachineLabel(machine) || record.machine === machine) return record;
+                batchChanged = true;
+                return { ...record, machine };
+            });
+            if (!batchChanged) return batch;
+            changed = true;
+            return rebuildDafBatch({ ...batch, records });
+        });
+        return { batches: nextBatches, changed };
+    };
+    const syncLoadedDafMachineClassification = async (line, { start = '', end = '' } = {}) => {
+        if (!isMachineClassifiedProcess(line)) return true;
+        if (!dafMachineReferenceCache.size) await loadDafMachineReferences();
+        let machineMap = collectDafMachineMap();
+        if (line === 'FT1' && !dafDetailRangeLoaded('DAF', start, end)) {
+            await ensureDafProcessDetails('DAF', { start, end });
+            machineMap = collectDafMachineMap();
+        }
+        if (!machineMap.size) return true;
+        const before = dafBatches.value;
+        const applied = applyDafMachineMapToBatches(before, machineMap);
+        if (!applied.changed) return true;
+        if (!(await syncDafRemoteChanges(before, applied.batches))) return false;
+        dafBatches.value = applied.batches;
+        allRecordsCacheSource = null;
+        dafDateIndexSource = null;
+        dafStatsRangeCache.clear();
+        dafDashboardCache.clear();
+        return true;
+    };
     const mergeDafBatch = async incoming => {
         const before = dafBatches.value.map(rebuildDafBatch);
         const incomingLine = incoming.line || currentDafLine();
@@ -1331,6 +1384,9 @@ SMT.daf = function (ctx) {
             }
             const remoteBatches = filterGhostDafRows(result.data || []).map(fromRemote);
             dafBatches.value = mergeDafDetailBatches(dafBatches.value, remoteBatches, line, force ? { replaceStart: start, replaceEnd: end } : {});
+            if (!(await syncLoadedDafMachineClassification(line, { start, end }))) {
+                dafRemoteError.value = `${processLabel(line)} 機台分類同步失敗，已保留原始統計資料`;
+            }
             dafDetailLoadedLines.add(detailKey);
             if (dafStatsResults.value[line]) {
                 dafStatsResults.value = { ...dafStatsResults.value, [line]: buildDafStats(line) };
@@ -1630,7 +1686,7 @@ SMT.daf = function (ctx) {
         const modelMap = {};
         const workOrderMap = {};
         const dayMap = {};
-        const machineValues = processLine === 'DAF' && includeMachine && sourceRows.length
+        const machineValues = isMachineClassifiedProcess(processLine) && includeMachine && sourceRows.length
             ? [...new Set(sourceRows.map(dafMachineForRecord))]
             : [];
         const machineNames = machineValues.length
@@ -1775,6 +1831,7 @@ SMT.daf = function (ctx) {
     );
     const sharedDafEntryNeedsRefresh = (entry, line, filter) => {
         if (entry?.snapshot?.kind !== 'koya-daf-stats-snapshot-v1') return false;
+        if (line === 'FT1' && entry.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION) return true;
         const result = entry.results?.[line];
         return Boolean(result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, filter));
     };
@@ -2105,7 +2162,17 @@ SMT.daf = function (ctx) {
                     queue.failed.push(`${file.name}：共用資料庫未連線，檔案未寫入`);
                     continue;
                 }
-                const batches = await analyzeFile(file, storedMachineReferences);
+                let batches = await analyzeFile(file, storedMachineReferences);
+                if (batches.some(batch => (batch.line || '') === 'FT1')) {
+                    const dates = batches.flatMap(batch => [batch.dateStart, batch.dateEnd]).filter(Boolean).sort();
+                    await syncLoadedDafMachineClassification('FT1', { start: dates[0] || '', end: dates[dates.length - 1] || '' });
+                    const applied = applyDafMachineMapToBatches(batches, collectDafMachineMap());
+                    if (applied.changed) {
+                        applied.batches.machineReferences = batches.machineReferences;
+                        applied.batches.matchedMachineReferenceKeys = batches.matchedMachineReferenceKeys;
+                        batches = applied.batches;
+                    }
+                }
                 const machineReferences = batches.machineReferences || [];
                 const matchedMachineReferenceKeys = batches.matchedMachineReferenceKeys || [];
                 if (!batches.length) {

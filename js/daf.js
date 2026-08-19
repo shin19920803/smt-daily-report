@@ -1131,7 +1131,10 @@ SMT.daf = function (ctx) {
         return true;
     };
     const saveSharedDafStatsState = (...args) => {
-        const request = saveSharedDafStatsStateInternal(...args);
+        const request = saveSharedDafStatsStateInternal(...args).catch(error => {
+            console.warn('共用數據統計狀態保存失敗', error);
+            return false;
+        });
         dafStatsSharedSavePromise = request;
         request.then(() => {
             if (dafStatsSharedSavePromise === request) dafStatsSharedSavePromise = null;
@@ -1191,21 +1194,6 @@ SMT.daf = function (ctx) {
             saveDafStatsState();
             if (state.snapshot) {
                 dafSharedStatsSnapshot = state.snapshot;
-                const currentVersions = await loadDafVersions(false);
-                const snapshotVersionsChanged = Boolean(currentVersions && (
-                    !state.snapshot.versions || !sameDafVersions(state.snapshot.versions, currentVersions)
-                ));
-                const snapshotNeedsRefresh = snapshotVersionsChanged || state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION || TEST_PROCESS_IDS.some(line => {
-                    const result = state.snapshot.results?.[line];
-                    return result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, state);
-                });
-                if (snapshotNeedsRefresh) {
-                    // 共用快照可能在某站明細尚未完成時被保存為 0 筆；不能把它當成最新統計結果。
-                    dafStatsRangeCache.clear();
-                    dafStatsResults.value = {};
-                    dafStatsResult.value = null;
-                    return Boolean(await calculateDafStats(false, { refreshRemote: true, publishShared: true }));
-                }
                 const sharedResults = Object.fromEntries(TEST_PROCESS_IDS.map(line => [line, stripSharedDafResult(state.snapshot.results?.[line]) || mergeSharedDafResults([])]));
                 const localEntry = dafStatsRangeCache.get(dafStatsRangeKey());
                 const canPreserveLocalRows = Boolean(localEntry && (!state.snapshot.versions || !localEntry.versions || sameDafVersions(localEntry.versions, state.snapshot.versions)));
@@ -1224,6 +1212,22 @@ SMT.daf = function (ctx) {
                     results,
                     snapshot: state.snapshot
                 });
+
+                // 先套用 Supabase 共用快照，版本查詢較慢時也不能讓統計頁保持空白。
+                const currentVersions = await loadDafVersions(false);
+                const snapshotVersionsChanged = Boolean(currentVersions && (
+                    !state.snapshot.versions || !sameDafVersions(state.snapshot.versions, currentVersions)
+                ));
+                const snapshotNeedsRefresh = snapshotVersionsChanged || state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION || TEST_PROCESS_IDS.some(line => {
+                    const result = state.snapshot.results?.[line];
+                    return result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, state);
+                });
+                if (snapshotNeedsRefresh) {
+                    // 共用快照可能在某站明細尚未完成時被保存為 0 筆；不能把它當成最新統計結果。
+                    // 保留剛套用的共用快照，背景重新整理失敗時也不能讓頁面變成空白。
+                    dafStatsRangeCache.clear();
+                    return Boolean(await calculateDafStats(false, { refreshRemote: true, publishShared: true }));
+                }
                 return true;
             }
             await calculateDafStats(false);
@@ -2349,9 +2353,8 @@ SMT.daf = function (ctx) {
             dafStatsResult.value = reusedResults[currentDafLine()] || null;
             if (reusableEntry !== cachedEntry) dafStatsRangeCache.set(rangeKey, { ...reusableEntry, filter: requestedRange, results: reusedResults, snapshot });
             if (publishShared) {
-                void saveSharedDafStatsState(remoteVersions, calculationFilter, reusedResults, calculationQuickMode, calculationQuickOffset).then(sharedSaved => {
-                    if (!sharedSaved) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
-                }).catch(error => console.warn('共用數據統計狀態背景保存失敗', error));
+                const sharedSaved = await saveSharedDafStatsState(remoteVersions, calculationFilter, reusedResults, calculationQuickMode, calculationQuickOffset);
+                if (!sharedSaved) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
             }
             return true;
         }
@@ -2378,6 +2381,11 @@ SMT.daf = function (ctx) {
                 dafStatsResults.value = summaryResults;
                 dafStatsResult.value = summaryResults[currentDafLine()] || null;
                 dafStatsRangeCache.set(rangeKey, { filter: requestedRange, versions: remoteVersions, results: summaryResults, summaryOnly: true });
+                if (publishShared) {
+                    // 詳細 LOG 尚在背景整理時，先把摘要快照寫入 Supabase，重新開啟也不能回到空白。
+                    const sharedSaved = await saveSharedDafStatsState(remoteVersions, calculationFilter, summaryResults, calculationQuickMode, calculationQuickOffset);
+                    if (!sharedSaved) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
+                }
                 if (showToast) toast('已先顯示摘要，詳細不良原因正在背景整理');
                 detailLoadPromise.then(results => {
                     if (results.some(result => result === false) || calculationInteractionVersion !== dafStatsInteractionVersion) return;
@@ -2400,10 +2408,9 @@ SMT.daf = function (ctx) {
             dafStatsRangeCache.set(rangeKey, { filter: requestedRange, versions: remoteVersions, results: nextResults });
             dafStatsResult.value = nextResults[currentDafLine()] || null;
             if (publishShared) {
-                // 先解除統計載入狀態，快照寫回 Supabase 在背景完成，避免使用者看到結果後仍長時間轉圈。
-                void saveSharedDafStatsState(remoteVersions, calculationFilter, nextResults, calculationQuickMode, calculationQuickOffset).then(sharedSaved => {
-                    if (!sharedSaved) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
-                }).catch(error => console.warn('共用數據統計狀態背景保存失敗', error));
+                // 統計完成前必須確認共用快照已寫入 Supabase，避免關閉頁面後其他電腦讀到空的舊結果。
+                const sharedSaved = await saveSharedDafStatsState(remoteVersions, calculationFilter, nextResults, calculationQuickMode, calculationQuickOffset);
+                if (!sharedSaved) toast('統計完成，但跨電腦同步狀態保存失敗', 'warning');
             }
             if (showToast) toast(`${isUnifiedTestLine() ? '五個測試製程' : currentDafLabel()} 統計完成，共 ${dafStatsResult.value?.sourceFiles.length || 0} 個檔案`);
             return true;

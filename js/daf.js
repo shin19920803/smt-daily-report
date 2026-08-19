@@ -1220,7 +1220,7 @@ SMT.daf = function (ctx) {
                 ));
                 const snapshotNeedsRefresh = snapshotVersionsChanged || state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION || TEST_PROCESS_IDS.some(line => {
                     const result = state.snapshot.results?.[line];
-                    return result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, state);
+                    return result && (result.summaryOnly || (!result.sourceFiles?.length && dafSummaryHasDataForRange(line, state)));
                 });
                 if (snapshotNeedsRefresh) {
                     // 共用快照可能在某站明細尚未完成時被保存為 0 筆；不能把它當成最新統計結果。
@@ -1925,14 +1925,14 @@ SMT.daf = function (ctx) {
     });
     const dafModelOptions = computed(() => [...new Set([
         ...allRecords().filter(row => row.processLine === currentDafLine()).map(row => normalizeModelName(row.model)),
-        ...(dafStatsResult.value?.byModel || []).map(row => normalizeModelName(row.name)),
+        ...(!dafStatsResult.value?.summaryOnly ? (dafStatsResult.value?.byModel || []).map(row => normalizeModelName(row.name)) : []),
         ...(data?.value?.models || []).map(model => normalizeModelName(model.name)),
         ...Object.values(dafModelMappings.value).map(normalizeModelName),
         ...Object.values(MODEL_MAPPING).map(normalizeModelName)
     ].filter(model => model && model !== '未識別機種'))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const dafWorkOrderOptions = computed(() => [...new Set([
         ...allRecords().filter(row => row.processLine === currentDafLine()).map(row => row.workOrder),
-        ...(dafStatsResult.value?.byWorkOrder || []).map(row => row.workOrder)
+        ...(!dafStatsResult.value?.summaryOnly ? (dafStatsResult.value?.byWorkOrder || []).map(row => row.workOrder) : [])
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
     const filterRecords = (processLine = currentDafLine(), filter = dafStatsFilter.value) => allRecords().filter(row => row.processLine === processLine).filter(row => {
         if (filter.start && (!row.date || row.date < filter.start)) return false;
@@ -2113,7 +2113,7 @@ SMT.daf = function (ctx) {
         if (entry?.snapshot?.kind !== 'koya-daf-stats-snapshot-v1') return false;
         if (line === 'FT1' && entry.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION) return true;
         const result = entry.results?.[line];
-        return Boolean(result && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, filter));
+        return Boolean(result && (result.summaryOnly || (!result.sourceFiles?.length && dafSummaryHasDataForRange(line, filter))));
     };
     let dafDashboardCacheSource = null;
     let dafDashboardSummaryCacheSource = null;
@@ -2388,7 +2388,11 @@ SMT.daf = function (ctx) {
                 }
                 if (showToast) toast('已先顯示摘要，詳細不良原因正在背景整理');
                 detailLoadPromise.then(results => {
-                    if (results.some(result => result === false) || calculationInteractionVersion !== dafStatsInteractionVersion) return;
+                    if (results.some(result => result === false)) return;
+                    // 切換五個製程不應取消同一日期範圍的 raw 分類；只有日期／機種／工單改變才避免覆蓋目前操作。
+                    const currentFilter = dafStatsRangeInfo();
+                    const filterChanged = ['start', 'end', 'model', 'workOrder'].some(key => currentFilter[key] !== calculationFilter[key]);
+                    if (filterChanged) return;
                     void calculateDafStats(false, { publishShared: true }).catch(error => console.warn('詳細統計背景整理失敗', error));
                 }).catch(error => console.warn('詳細統計背景載入失敗', error));
                 return true;

@@ -666,6 +666,44 @@ SMT.daf = function (ctx) {
         }
         return true;
     };
+    const deleteRemoteDafFileBatches = async fileName => {
+        const normalizedFileName = cleanText(fileName);
+        if (!normalizedFileName || !_supabase) return false;
+        const { data: existing, error: readError } = await _supabase.from(REMOTE_TABLE)
+            .select('id,line').in('line', TEST_PROCESS_IDS).eq('file_name', normalizedFileName);
+        if (readError) {
+            dafRemoteError.value = `舊檔案批次讀取失敗：${readError.message || '資料讀取失敗'}`;
+            return false;
+        }
+        const ids = [...new Set((existing || []).map(row => row.id).filter(Boolean))];
+        for (let index = 0; index < ids.length; index += 100) {
+            const chunk = ids.slice(index, index + 100);
+            const { error } = await _supabase.from(REMOTE_TABLE).delete()
+                .in('id', chunk).in('line', TEST_PROCESS_IDS);
+            if (error) {
+                dafRemoteError.value = `舊檔案批次刪除失敗：${error.message || '資料刪除失敗'}`;
+                return false;
+            }
+        }
+        const { data: remaining, error: verifyError } = await _supabase.from(REMOTE_TABLE)
+            .select('id').in('line', TEST_PROCESS_IDS).eq('file_name', normalizedFileName).limit(1);
+        if (verifyError || remaining?.length) {
+            dafRemoteError.value = verifyError?.message || '舊檔案批次刪除後仍存在，未繼續上傳';
+            return false;
+        }
+        return true;
+    };
+    const removeLocalDafFileBatches = fileName => {
+        const normalizedFileName = cleanText(fileName);
+        dafBatches.value = dafBatches.value.filter(batch => cleanText(batch.fileName) !== normalizedFileName);
+        dafSummaryBatches.value = dafSummaryBatches.value.filter(batch => cleanText(batch.fileName) !== normalizedFileName);
+        dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
+    };
+    const replaceDafFileBatches = async fileName => {
+        if (!(await deleteRemoteDafFileBatches(fileName))) return false;
+        removeLocalDafFileBatches(fileName);
+        return true;
+    };
     const getDafSummaryCacheUrl = path => {
         const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
         return base ? `${base}${path}` : '';
@@ -2301,6 +2339,10 @@ SMT.daf = function (ctx) {
                     toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
+                if (!(await replaceDafFileBatches(file.name))) {
+                    queue.failed.push(`${file.name}：舊批次未清除，為避免資料重疊而停止上傳`);
+                    continue;
+                }
                 let fileSaved = true;
                 let dafBatchSaved = false;
                 for (const batch of batches) {
@@ -2379,13 +2421,14 @@ SMT.daf = function (ctx) {
     };
     const deleteDafBatch = async (id) => {
         const batch = dafBatches.value.find(item => item.id === id) || dafSummaryBatches.value.find(item => item.id === id);
-        if (!batch || !confirm(`確定刪除 ${batch.fileName} 的 ${currentDafLabel()} 統計？`)) return;
-        if (!(await deleteRemote(id, batch))) return;
+        if (!batch || !confirm(`確定刪除 ${batch.fileName} 的全部五大製程批次？`)) return;
+        if (!(await deleteRemoteDafFileBatches(batch.fileName))) return;
+        removeLocalDafFileBatches(batch.fileName);
         await invalidateDafSummaryCache();
         // 刪除後立即以 Supabase 最新結果重建清單，避免只刪本機陣列，其他電腦或重新整理又把舊資料帶回來。
         await loadDafData({ force: true });
         if (isUnifiedTestLine()) await calculateDafStats(false, { refreshRemote: true, publishShared: true });
-        toast(`${currentDafLabel()} 檔案統計已刪除`, 'info');
+        toast(`${batch.fileName} 的五大製程批次已刪除`, 'info');
     };
 
     const exportDafStats = async () => {

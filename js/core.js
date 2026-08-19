@@ -88,12 +88,23 @@ SMT.core = function (ctx) {
         const loadBaseData = async () => {
             const L = currentLine.value;
             if (L === 'TEST') {
-                const [modelResults, defectResults] = await Promise.all([
+                const emptyTestBaseData = () => ({ workOrders: [], models: [], defectTypes: [], defectLocations: [], machines: [], oocCauses: [] });
+                const applyTestBaseData = ([modelResults, defectResults]) => {
+                    const uniqueByName = rows => [...new Map((rows || []).map(row => [String(row.name || '').trim().toUpperCase(), row])).values()];
+                    data.value = { workOrders: [], models: uniqueByName(modelResults.flatMap(result => result.data || [])), defectTypes: uniqueByName(defectResults.flatMap(result => result.data || [])), defectLocations: [], machines: [], oocCauses: [] };
+                };
+                const request = Promise.all([
                     Promise.all(SMT.TEST_PROCESS_IDS.map(line => _supabase.from('models').select('*').eq('line', line))),
                     Promise.all(SMT.TEST_PROCESS_IDS.map(line => _supabase.from('defect_types').select('*').eq('line', line)))
-                ]);
-                const uniqueByName = rows => [...new Map((rows || []).map(row => [String(row.name || '').trim().toUpperCase(), row])).values()];
-                data.value = { workOrders: [], models: uniqueByName(modelResults.flatMap(result => result.data || [])), defectTypes: uniqueByName(defectResults.flatMap(result => result.data || [])), defectLocations: [], machines: [], oocCauses: [] };
+                ]).then(results => {
+                    if (currentLine.value === 'TEST') applyTestBaseData(results);
+                    return results;
+                }).catch(error => {
+                    console.warn('測試製程基礎設定讀取失敗', error);
+                    return null;
+                });
+                const results = await Promise.race([request, new Promise(resolve => setTimeout(() => resolve(null), 1200))]);
+                if (!results && currentLine.value === 'TEST') data.value = emptyTestBaseData();
                 return;
             }
             if (L !== 'SMT') {

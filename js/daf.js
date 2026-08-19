@@ -24,7 +24,7 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_REFERENCE_LINE = '__DAF_MACHINE_REFERENCE__';
     const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
     const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-    const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v1';
+    const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v2';
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
@@ -1036,6 +1036,13 @@ SMT.daf = function (ctx) {
             if (cachedResult) return cachedResult;
         } else {
             const cachedResult = await loadDafDetailRows(line, start, end, force);
+            const cachedRows = cachedResult?.data || [];
+            const cachedDetailLooksIncomplete = cachedResult && !cachedRows.length && dafSummaryHasDataForRange(line, { start, end });
+            if (cachedResult && !cachedDetailLooksIncomplete) return cachedResult;
+            if (cachedDetailLooksIncomplete && !force) {
+                const refreshedResult = await loadDafDetailRows(line, start, end, true);
+                if (refreshedResult) return refreshedResult;
+            }
             if (cachedResult) return cachedResult;
         }
         let pageSize = includeRecords ? 3 : 100;

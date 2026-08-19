@@ -1190,6 +1190,7 @@ SMT.daf = function (ctx) {
     };
     const applyDafMachineMapToBatches = (batches, machineMap) => {
         let changed = false;
+        const changedBatchIds = [];
         const nextBatches = (batches || []).map(batch => {
             if (!isMachineClassifiedProcess(batch.line) || !Array.isArray(batch.records) || !batch.records.length) return batch;
             let batchChanged = false;
@@ -1201,9 +1202,22 @@ SMT.daf = function (ctx) {
             });
             if (!batchChanged) return batch;
             changed = true;
+            changedBatchIds.push(batch.id);
             return rebuildDafBatch({ ...batch, records });
         });
-        return { batches: nextBatches, changed };
+        return { batches: nextBatches, changed, changedBatchIds };
+    };
+    const syncDafMachineClassificationRemotely = async (batches, machineMap, changedBatchIds) => {
+        const changedIds = new Set(changedBatchIds || []);
+        for (const batch of (batches || []).filter(item => changedIds.has(item.id))) {
+            const { data: remoteRow, error } = await _supabase.from(REMOTE_TABLE)
+                .select(REMOTE_DETAIL_COLUMNS).eq('id', batch.id).eq('line', batch.line).maybeSingle();
+            if (error || !remoteRow) return false;
+            const remoteBatch = fromRemote(remoteRow);
+            const remapped = applyDafMachineMapToBatches([remoteBatch], machineMap);
+            if (remapped.changed && !(await saveRemote(remapped.batches[0]))) return false;
+        }
+        return true;
     };
     const syncLoadedDafMachineClassification = async (line, { start = '', end = '' } = {}) => {
         if (!isMachineClassifiedProcess(line)) return true;
@@ -1217,7 +1231,7 @@ SMT.daf = function (ctx) {
         const before = dafBatches.value;
         const applied = applyDafMachineMapToBatches(before, machineMap);
         if (!applied.changed) return true;
-        if (!(await syncDafRemoteChanges(before, applied.batches))) return false;
+        if (!(await syncDafMachineClassificationRemotely(applied.batches, machineMap, applied.changedBatchIds))) return false;
         dafBatches.value = applied.batches;
         allRecordsCacheSource = null;
         dafDateIndexSource = null;

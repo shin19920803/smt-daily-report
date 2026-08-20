@@ -1485,11 +1485,10 @@ SMT.assembly = function (ctx) {
             const quantities = rows.map(row => row.qty);
             previous.setOption({
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                legend: { data: ['停機／不良次數'], top: 8, right: 10, textStyle: { fontSize: 11, color: '#6b7280' } },
-                grid: { top: 64, right: 58, bottom: 64, left: 48 },
-                xAxis: { type: 'category', data: names, triggerEvent: true, axisLabel: { rotate: names.some(name => name.length > 5) ? 20 : 0, fontSize: 10, color: '#374151' }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-                yAxis: { type: 'value', name: '次數', nameTextStyle: { color: '#6b7280', fontSize: 10 }, axisLabel: { fontSize: 10, color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
-                series: [{ name: '停機／不良次數', type: 'bar', data: quantities, barMaxWidth: 40, itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#dc2626' }, { offset: 1, color: '#fca5a5' }] }, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', fontSize: 10 } }]
+                grid: { top: 12, right: 24, bottom: 24, left: 120 },
+                xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
+                yAxis: { type: 'category', data: rows.map(row => row.name), axisLabel: { fontSize: 10, color: '#6b7280' } },
+                series: [{ name: '停機／不良次數', type: 'bar', data: quantities, barMaxWidth: 18, itemStyle: { color: '#dc2626', borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right', fontSize: 10 } }]
             });
             if (previous.off) previous.off('click');
             if (onClick && previous.on) {

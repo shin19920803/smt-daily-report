@@ -52,6 +52,8 @@ SMT.assembly = function (ctx) {
     let applyingAssemblyQuick = false;
 
     const NO_MODEL = '無機種區分';
+    const ASSEMBLY_MACHINE_DEFECT = '調機異常項目';
+    const ASSEMBLY_IGNORED_DEFECT = '偽異常項目';
 
     const WEEKDAY_TW = ['日', '一', '二', '三', '四', '五', '六'];
     const fmtLocal = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -82,6 +84,8 @@ SMT.assembly = function (ctx) {
 
     const RULES = [
         { keywords: ['取图像成功', '取圖像成功'], category: '生產成功', type: 'SUCCESS' },
+        { keywords: ['出標送料超時(R)', '出標送料超時（R）'], category: ASSEMBLY_MACHINE_DEFECT, type: 'NG' },
+        { keywords: ['偽異常項目', '偽異常', '伪异常项目', '伪异常'], category: ASSEMBLY_IGNORED_DEFECT, type: 'IGNORE' },
         { keywords: ['Mark1失敗', 'Mark1失败'], category: 'Mark點辨識失敗', type: 'NG' },
         { keywords: ['请手动清除', '請手動清除'], category: '吸取Mylar失敗', type: 'NG' },
         {
@@ -423,6 +427,13 @@ SMT.assembly = function (ctx) {
         const match = String(value || '').match(/^(\d{1,2})/);
         return match ? String(Math.min(23, Number(match[1]))).padStart(2, '0') : '';
     };
+    const isIgnoredAssemblyDefect = value => /偽異常|伪异常/i.test(normalizeMessage(value));
+    const normalizeAssemblyDefectCategory = value => {
+        const category = normalizeMessage(value);
+        if (!category || isIgnoredAssemblyDefect(category)) return null;
+        if (/出標送料超時\s*[（(]\s*r\s*[）)]/i.test(category)) return ASSEMBLY_MACHINE_DEFECT;
+        return category;
+    };
 
     const parseLogLine = (line, fallbackDate) => {
         const original = String(line || '').trim().replace(/\0/g, '');
@@ -451,7 +462,12 @@ SMT.assembly = function (ctx) {
             }
         }
         const mappedCategory = mappingMap.get(normalizeMessage(message));
-        if (mappedCategory) return { type: 'NG', category: mappedCategory, keyword: 'user-mapping' };
+        if (mappedCategory) {
+            const category = normalizeAssemblyDefectCategory(mappedCategory);
+            return category
+                ? { type: 'NG', category, keyword: 'user-mapping' }
+                : { type: 'IGNORE', category: ASSEMBLY_IGNORED_DEFECT, keyword: 'user-mapping' };
+        }
         return null;
     };
 
@@ -509,6 +525,110 @@ SMT.assembly = function (ctx) {
         return { buckets, parsedLineCount, ignoredCount, unclassifiedCount, lineCount: lines.length, unknownMessages: [...unknownMap.values()] };
     };
 
+    const normalizeAssemblyBucketForAggregate = source => {
+        const original = source || {};
+        const originalByType = original.byType || {};
+        const byType = {};
+        const sourceByType = {};
+        const ignoredByType = {};
+        let ignoredCategoryTotal = 0;
+        let ignoredSourceCategoryTotal = 0;
+        const addSourceMessage = (category, message, quantity) => {
+            const qty = Number(quantity) || 0;
+            if (!qty) return;
+            const normalizedCategory = normalizeAssemblyDefectCategory(category || message);
+            if (!normalizedCategory || isIgnoredAssemblyDefect(message)) {
+                ignoredSourceCategoryTotal += qty;
+                const categoryForCount = normalizeAssemblyDefectCategory(category);
+                if (categoryForCount) increment(ignoredByType, categoryForCount, qty);
+                return;
+            }
+            const categoryMap = sourceByType[normalizedCategory] || (sourceByType[normalizedCategory] = {});
+            increment(categoryMap, normalizeMessage(message), qty);
+        };
+        Object.entries(originalByType).forEach(([category, quantity]) => {
+            const normalizedCategory = normalizeAssemblyDefectCategory(category);
+            if (!normalizedCategory) ignoredCategoryTotal += Number(quantity) || 0;
+            if (normalizedCategory) increment(byType, normalizedCategory, Number(quantity) || 0);
+        });
+        Object.entries(original.sourceByType || {}).forEach(([category, messages]) => {
+            Object.entries(messages || {}).forEach(([message, quantity]) => addSourceMessage(category, message, quantity));
+        });
+        Object.entries(ignoredByType).forEach(([category, quantity]) => {
+            byType[category] = Math.max(0, Number(byType[category] || 0) - Number(quantity || 0));
+            if (byType[category] === 0) delete byType[category];
+        });
+
+        const hourlyByType = {};
+        const ignoredByHour = {};
+        Object.entries(original.hourlyByType || {}).forEach(([category, hours]) => {
+            const normalizedCategory = normalizeAssemblyDefectCategory(category);
+            Object.entries(hours || {}).forEach(([hour, quantity]) => {
+                const qty = Number(quantity) || 0;
+                if (!qty) return;
+                if (!normalizedCategory) {
+                    increment(ignoredByHour, hour, qty);
+                    return;
+                }
+                const categoryHours = hourlyByType[normalizedCategory] || (hourlyByType[normalizedCategory] = {});
+                increment(categoryHours, hour, qty);
+            });
+        });
+        const hourlyNg = { ...(original.hourlyNg || {}) };
+        Object.entries(ignoredByHour).forEach(([hour, quantity]) => {
+            hourlyNg[hour] = Math.max(0, Number(hourlyNg[hour] || 0) - Number(quantity || 0));
+            if (hourlyNg[hour] === 0) delete hourlyNg[hour];
+        });
+
+        const originalTotal = Number(original.success || 0) + Number(original.ng || 0);
+        const originalEvents = Array.isArray(original.events) ? original.events : [];
+        const eventsComplete = originalEvents.length === originalTotal;
+        let events = originalEvents;
+        let ignoredEventCount = 0;
+        if (eventsComplete) {
+            events = originalEvents.reduce((items, event) => {
+                if (event?.type !== 'NG') {
+                    items.push(event);
+                    return items;
+                }
+                const category = normalizeAssemblyDefectCategory(event.category);
+                if (!category) {
+                    ignoredEventCount++;
+                    return items;
+                }
+                items.push({ ...event, category });
+                return items;
+            }, []);
+        }
+        const remappedIgnoredTotal = Object.values(ignoredByType)
+            .reduce((sum, quantity) => sum + Number(quantity || 0), 0);
+        const sourceDerivedIgnoredCount = Math.max(ignoredCategoryTotal, ignoredSourceCategoryTotal - remappedIgnoredTotal) + remappedIgnoredTotal;
+        const ignoredCount = eventsComplete
+            ? Math.max(ignoredEventCount, sourceDerivedIgnoredCount)
+            : sourceDerivedIgnoredCount;
+        const ignoredByHourTotal = Object.values(ignoredByHour).reduce((sum, quantity) => sum + Number(quantity || 0), 0);
+        const unallocatedIgnoredCount = Math.max(0, ignoredCount - ignoredByHourTotal);
+        const hourlyNgTotal = Object.values(hourlyNg).reduce((sum, quantity) => sum + Number(quantity || 0), 0);
+        if (unallocatedIgnoredCount > 0 && hourlyNgTotal > 0) {
+            const remainingHourlyNg = Math.max(0, hourlyNgTotal - unallocatedIgnoredCount);
+            const scale = remainingHourlyNg / hourlyNgTotal;
+            Object.keys(hourlyNg).forEach(hour => {
+                hourlyNg[hour] = Number((Number(hourlyNg[hour] || 0) * scale).toFixed(2));
+                if (hourlyNg[hour] === 0) delete hourlyNg[hour];
+            });
+        }
+        const ng = Math.max(0, Number(original.ng || 0) - ignoredCount);
+        return {
+            ...original,
+            ng,
+            ignored: Number(original.ignored || 0) + ignoredCount,
+            byType,
+            sourceByType,
+            hourlyNg,
+            hourlyByType,
+            events
+        };
+    };
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
     const aggregate = (batches, start = '', end = '') => {
         const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {}, hourlyByType = {}, byModel = {};
@@ -523,8 +643,9 @@ SMT.assembly = function (ctx) {
         });
         Object.values(statusNotesByHour).forEach(items => items.sort((a, b) => a.date.localeCompare(b.date)));
         let success = 0, ng = 0, ignored = 0, unclassified = 0, parsedLines = 0;
-        (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, source]) => {
+        (batches || []).forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, rawSource]) => {
             if (!inRange(date, start, end)) return;
+            const source = normalizeAssemblyBucketForAggregate(rawSource);
             const day = byDate[date] || (byDate[date] = { date, success: 0, ng: 0, byType: {}, byModel: {} });
             success += source.success || 0;
             ng += source.ng || 0;

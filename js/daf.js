@@ -82,8 +82,8 @@ SMT.daf = function (ctx) {
     const isMachineClassifiedProcess = processLine => processLine === 'DAF' || processLine === 'FT1';
     const detectDafMachine = value => {
         const operator = normalizeText(value).replace(/[^A-Z0-9]/g, '');
-        if (operator.includes('Y0176')) return '1號機';
-        if (operator.includes('Y0137')) return '2號機';
+        if (operator.includes('176')) return '1號機';
+        if (operator.includes('137')) return '2號機';
         return '';
     };
     const isDafMachineReference = value => normalizeText(value).replace(/\s+/g, '').includes('DAF熱壓投入');

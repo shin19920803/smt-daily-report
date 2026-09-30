@@ -147,16 +147,24 @@ SMT.daf = function (ctx) {
         const matched = new Set(matchedKeys || []);
         const matchedIds = [...matched].map(key => storedMap.get(key)?.id).filter(Boolean);
         const referencesToStore = (references || []).filter(reference => isDafMachineLabel(reference.machine) && !matched.has(reference.dedupKey));
-        if (matchedIds.length && !(await deleteDafMachineReferenceRows(matchedIds))) return false;
         if (referencesToStore.length) {
             const { error } = await _supabase.from(REMOTE_TABLE)
                 .upsert(referencesToStore.map(toDafMachineReferenceRemote), { onConflict: 'id' });
             if (error) return false;
+            referencesToStore.forEach(reference => storedMap.set(reference.dedupKey, { ...reference, id: dafMachineReferenceId(reference.dedupKey) }));
+        }
+        if (matchedIds.length && !(await deleteDafMachineReferenceRows(matchedIds))) {
+            if (storedMap !== dafMachineReferenceCache) {
+                dafMachineReferenceCache.clear();
+                storedMap.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
+            }
+            return false;
         }
         matched.forEach(key => storedMap.delete(key));
-        referencesToStore.forEach(reference => storedMap.set(reference.dedupKey, { ...reference, id: dafMachineReferenceId(reference.dedupKey) }));
-        dafMachineReferenceCache.clear();
-        storedMap.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
+        if (storedMap !== dafMachineReferenceCache) {
+            dafMachineReferenceCache.clear();
+            storedMap.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
+        }
         return true;
     };
     const TEST_PROCESS_ALIASES = Object.freeze({
@@ -730,10 +738,72 @@ SMT.daf = function (ctx) {
         dafSummaryBatches.value = dafSummaryBatches.value.filter(batch => cleanText(batch.fileName) !== normalizedFileName);
         dafLastUpload.value = dafBatches.value[0] || dafSummaryBatches.value[0] || null;
     };
+    const snapshotDafFileBatches = async fileName => {
+        const remoteRows = [];
+        for (let offset = 0; ; offset += 1000) {
+            const { data: page, error } = await _supabase.from(REMOTE_TABLE).select('*')
+                .in('line', TEST_PROCESS_IDS).eq('file_name', cleanText(fileName))
+                .order('id', { ascending: true }).range(offset, offset + 999);
+            if (error) {
+                dafRemoteError.value = `舊檔案備份失敗：${error.message || '資料讀取失敗'}`;
+                return null;
+            }
+            remoteRows.push(...(page || []));
+            if (!page || page.length < 1000) break;
+        }
+        const snapshot = {
+            remoteRows,
+            localBatches: dafBatches.value.filter(batch => cleanText(batch.fileName) === cleanText(fileName)).map(rebuildDafBatch),
+            summaryBatches: dafSummaryBatches.value.filter(batch => cleanText(batch.fileName) === cleanText(fileName)).map(rebuildDafBatch),
+            lastUpload: dafLastUpload.value
+        };
+        return snapshot;
+    };
     const replaceDafFileBatches = async fileName => {
         if (!(await deleteRemoteDafFileBatches(fileName))) return false;
         removeLocalDafFileBatches(fileName);
         return true;
+    };
+    const restoreDafFileReplacement = async (snapshot, incomingBatches = []) => {
+        if (!snapshot || !_supabase) return false;
+        try {
+            let restored = true;
+            const incomingIds = [...new Set((incomingBatches || []).map(batch => batch.id).filter(Boolean))];
+            for (let offset = 0; offset < incomingIds.length; offset += 100) {
+                const ids = incomingIds.slice(offset, offset + 100);
+                const { error } = await _supabase.from(REMOTE_TABLE).delete().in('id', ids).in('line', TEST_PROCESS_IDS);
+                if (error) restored = false;
+                const { data, error: verifyError } = await _supabase.from(REMOTE_TABLE).select('id').in('id', ids);
+                if (verifyError || (data || []).length) restored = false;
+            }
+            for (let offset = 0; offset < snapshot.remoteRows.length; offset += 100) {
+                const { error } = await _supabase.from(REMOTE_TABLE).upsert(snapshot.remoteRows.slice(offset, offset + 100), { onConflict: 'id' });
+                if (error) restored = false;
+            }
+            const expectedIds = snapshot.remoteRows.map(row => row.id).filter(Boolean);
+            for (let offset = 0; offset < expectedIds.length; offset += 100) {
+                const ids = expectedIds.slice(offset, offset + 100);
+                const { data, error } = await _supabase.from(REMOTE_TABLE).select('id').in('id', ids);
+                if (error || ids.some(id => !(data || []).some(row => row.id === id))) restored = false;
+            }
+            const restoredBatchIds = new Set(snapshot.localBatches.map(batch => batch.id));
+            const restoredSummaryIds = new Set(snapshot.summaryBatches.map(batch => batch.id));
+            const incomingIdSet = new Set((incomingBatches || []).map(batch => batch.id).filter(Boolean));
+            const currentBatches = dafBatches.value.filter(batch => !restoredBatchIds.has(batch.id) && !incomingIdSet.has(batch.id));
+            const currentSummary = dafSummaryBatches.value.filter(batch => !restoredSummaryIds.has(batch.id) && !incomingIdSet.has(batch.id));
+            dafBatches.value = [...snapshot.localBatches, ...currentBatches];
+            dafSummaryBatches.value = [...snapshot.summaryBatches, ...currentSummary];
+            dafLastUpload.value = snapshot.lastUpload || dafBatches.value[0] || dafSummaryBatches.value[0] || null;
+            allRecordsCacheSource = null;
+            dafDateIndexSource = null;
+            dafStatsRangeCache.clear();
+            dafDashboardCache.clear();
+            if (!restored) dafRemoteError.value = '新檔案寫入失敗，舊檔案回復未能完整確認，請重新整理並檢查共用資料庫';
+            return restored;
+        } catch (error) {
+            dafRemoteError.value = `舊檔案回復失敗：${error.message || '資料庫連線錯誤'}`;
+            return false;
+        }
     };
     const getDafSummaryCacheUrl = path => {
         const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
@@ -1458,6 +1528,27 @@ SMT.daf = function (ctx) {
         }
         return success;
     };
+    const syncDafFileReplacementAtomically = async (fileName, before, after) => {
+        const beforeById = new Map((before || []).map(batch => [batch.id, batch]));
+        const afterById = new Map((after || []).map(batch => [batch.id, batch]));
+        const deleteIds = [...beforeById.keys()].filter(id => !afterById.has(id));
+        const rows = (after || []).filter(batch => {
+            const previous = beforeById.get(batch.id);
+            return !previous || dafBatchSignature(previous) !== dafBatchSignature(batch);
+        }).map(toRemote);
+        try {
+            const { data, error } = await _supabase.rpc('replace_daf_log_file_atomic', {
+                p_file_name: cleanText(fileName), p_delete_ids: deleteIds, p_rows: rows
+            });
+            if (error) {
+                const unavailable = error.code === 'PGRST202' || error.code === '42883';
+                return { saved: false, unavailable, error };
+            }
+            return { saved: data === true, unavailable: false };
+        } catch (error) {
+            return { saved: false, unavailable: false, error };
+        }
+    };
     const collectDafMachineMap = () => {
         const machineMap = new Map();
         dafMachineReferenceCache.forEach((reference, key) => {
@@ -1522,8 +1613,9 @@ SMT.daf = function (ctx) {
         dafDashboardCache.clear();
         return true;
     };
-    const mergeDafBatches = async incomingBatches => {
-        const before = dafBatches.value.map(rebuildDafBatch);
+    const mergeDafBatches = async (incomingBatches, { replaceFileName = '' } = {}) => {
+        const before = dafBatches.value.map(rebuildDafBatch)
+            .filter(batch => !replaceFileName || cleanText(batch.fileName) !== cleanText(replaceFileName));
         const existingByKey = new Map();
         before.forEach(batch => (batch.records || []).forEach(record => {
             const rawKey = normalizeText(record.dedupKey);
@@ -1578,13 +1670,18 @@ SMT.daf = function (ctx) {
             .filter(batch => Array.isArray(batch.records) && batch.records.length)
             .map(batch => batch.id));
         const batches = merged.batches.filter(batch => !(incomingIds.has(batch.id) && incomingHadRecords.has(batch.id) && !batch.records.length));
-        const remoteSaved = await syncDafRemoteChanges(before, batches);
-        if (!remoteSaved) return { batches: [], incomingBatches: [], duplicateCount: duplicateCount + merged.duplicateCount, remoteSaved: false };
+        const remoteResult = replaceFileName
+            ? await syncDafFileReplacementAtomically(replaceFileName, before, batches)
+            : { saved: await syncDafRemoteChanges(before, batches), unavailable: false };
+        if (!remoteResult.saved) return {
+            batches: [], incomingBatches: [], duplicateCount: duplicateCount + merged.duplicateCount,
+            remoteSaved: false, atomicUnavailable: remoteResult.unavailable, remoteError: remoteResult.error
+        };
         dafBatches.value = batches;
         const savedIncomingBatches = batches.filter(batch => incomingIds.has(batch.id));
         dafLastUpload.value = savedIncomingBatches[0] || batches[0] || null;
         learnModelMappings(batches);
-        return { batches, incomingBatches: savedIncomingBatches, duplicateCount: duplicateCount + merged.duplicateCount, remoteSaved };
+        return { batches, incomingBatches: savedIncomingBatches, duplicateCount: duplicateCount + merged.duplicateCount, remoteSaved: remoteResult.saved };
     };
     const mergeDafBatch = async incoming => {
         const result = await mergeDafBatches([incoming]);
@@ -2724,10 +2821,6 @@ SMT.daf = function (ctx) {
                     toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
-                if (!(await replaceDafFileBatches(file.name))) {
-                    queue.failed.push(`${file.name}：舊批次未清除，為避免資料重疊而停止上傳`);
-                    continue;
-                }
                 let fileSaved = true;
                 let dafBatchSaved = false;
                 const batchLines = [...new Set(batches.map(batch => batch.line || currentDafLine()))];
@@ -2751,18 +2844,45 @@ SMT.daf = function (ctx) {
                     queue.failed.push(`${file.name}（${processLabel(line)}）：明細載入失敗，檔案未完成同步`);
                     fileSaved = false;
                 }
+                if (failedDetailLines.size) continue;
                 const readyBatches = batches.filter(batch => !failedDetailLines.has(batch.line || currentDafLine()));
                 for (const batch of readyBatches) await ensureDafBaseSettings(batch);
                 if (readyBatches.length) {
-                    const merged = await mergeDafBatches(readyBatches);
+                    let merged;
+                    let replacementSnapshot = null;
+                    let legacyReplacementStarted = false;
+                    try { merged = await mergeDafBatches(readyBatches, { replaceFileName: file.name }); }
+                    catch (error) {
+                        queue.failed.push(`${file.name}：${error.message || '共用資料庫寫入失敗'}`);
+                        continue;
+                    }
+                    if (merged.atomicUnavailable) {
+                        replacementSnapshot = await snapshotDafFileBatches(file.name);
+                        if (!replacementSnapshot) {
+                            queue.failed.push(`${file.name}：舊批次備份失敗，已停止覆蓋`);
+                            continue;
+                        }
+                        if (!(await replaceDafFileBatches(file.name))) {
+                            await restoreDafFileReplacement(replacementSnapshot);
+                            queue.failed.push(`${file.name}：舊批次清除失敗，已嘗試回復原資料`);
+                            continue;
+                        }
+                        legacyReplacementStarted = true;
+                        try { merged = await mergeDafBatches(readyBatches); }
+                        catch (error) {
+                            await restoreDafFileReplacement(replacementSnapshot, readyBatches);
+                            queue.failed.push(`${file.name}：${error.message || '共用資料庫寫入失敗'}`);
+                            continue;
+                        }
+                    }
+                    if (!merged.remoteSaved) {
+                        if (legacyReplacementStarted) await restoreDafFileReplacement(replacementSnapshot, readyBatches);
+                        queue.failed.push(`${file.name}：${merged.remoteError?.message || '共用資料庫寫入失敗'}`);
+                        continue;
+                    }
                     queue.rows += (merged.incomingBatches || []).reduce((sum, batch) => sum + (Number(batch.rowCount) || 0), 0);
                     queue.duplicates += readyBatches.reduce((sum, batch) => sum + (batch.duplicateCount || 0), 0) + merged.duplicateCount;
-                    if (!merged.remoteSaved) {
-                        queue.failed.push(`${file.name}：共用資料庫寫入失敗`);
-                        fileSaved = false;
-                    } else {
-                        dafBatchSaved = (merged.incomingBatches || []).some(batch => batch.line === 'DAF');
-                    }
+                    dafBatchSaved = (merged.incomingBatches || []).some(batch => batch.line === 'DAF');
                 }
                 const hasDafBatch = readyBatches.some(batch => batch.line === 'DAF');
                 if (machineReferences.length || matchedMachineReferenceKeys.length) {

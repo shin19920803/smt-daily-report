@@ -40,26 +40,44 @@ window.koyaTaiwanDateTime = (value, includeSeconds = false) => {
 };
 
 let cacheInvalidationPromise = null;
+let cacheInvalidationQueued = false;
 window.koyaInvalidateCache = () => {
     const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
     if (!base) return Promise.resolve(false);
-    if (cacheInvalidationPromise) return cacheInvalidationPromise;
-    cacheInvalidationPromise = fetch(`${base}/api/cache/invalidate`, { method: 'POST' })
-        .then(response => response.ok)
-        .catch(() => false)
-        .finally(() => { cacheInvalidationPromise = null; });
+    if (cacheInvalidationPromise) {
+        cacheInvalidationQueued = true;
+        return cacheInvalidationPromise;
+    }
+    cacheInvalidationPromise = (async () => {
+        let ok = true;
+        do {
+            cacheInvalidationQueued = false;
+            try { ok = (await fetch(`${base}/api/cache/invalidate`, { method: 'POST' })).ok && ok; }
+            catch (error) { ok = false; }
+        } while (cacheInvalidationQueued);
+        return ok;
+    })().finally(() => { cacheInvalidationPromise = null; });
     return cacheInvalidationPromise;
 };
 
 let statsStateCacheInvalidationPromise = null;
+let statsStateCacheInvalidationQueued = false;
 window.koyaInvalidateStatsStateCache = () => {
     const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
     if (!base) return Promise.resolve(false);
-    if (statsStateCacheInvalidationPromise) return statsStateCacheInvalidationPromise;
-    statsStateCacheInvalidationPromise = fetch(`${base}/api/daf-stats-state/invalidate`, { method: 'POST' })
-        .then(response => response.ok)
-        .catch(() => false)
-        .finally(() => { statsStateCacheInvalidationPromise = null; });
+    if (statsStateCacheInvalidationPromise) {
+        statsStateCacheInvalidationQueued = true;
+        return statsStateCacheInvalidationPromise;
+    }
+    statsStateCacheInvalidationPromise = (async () => {
+        let ok = true;
+        do {
+            statsStateCacheInvalidationQueued = false;
+            try { ok = (await fetch(`${base}/api/daf-stats-state/invalidate`, { method: 'POST' })).ok && ok; }
+            catch (error) { ok = false; }
+        } while (statsStateCacheInvalidationQueued);
+        return ok;
+    })().finally(() => { statsStateCacheInvalidationPromise = null; });
     return statsStateCacheInvalidationPromise;
 };
 

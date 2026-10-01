@@ -9,7 +9,7 @@ const SUMMARY_COLUMNS = [
     'yield_rate', 'defect_rate', 'unknown_status_count', 'unknown_status_text',
     'row_count', 'raw_column_count'
 ].join(',');
-const VERSION_COLUMNS = 'id,uploaded_at,date_start,date_end,row_count,input_count,good_count,fail_count,yield_rate,defect_rate';
+const VERSION_COLUMNS = 'id,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,row_count,raw_column_count,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text';
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': APP_ORIGIN,
@@ -36,6 +36,16 @@ const cacheKey = (requestUrl, pathname, params = {}) => {
 };
 
 const cacheKeyForLine = (requestUrl, pathname, line) => cacheKey(requestUrl, pathname, { line });
+const dafDetailsGenerationKey = (requestUrl, line) => cacheKey(requestUrl, '/api/daf-details-generation', { line });
+const readDafDetailsGeneration = async (requestUrl, line) => {
+    const cached = await caches.default.match(dafDetailsGenerationKey(requestUrl, line));
+    return cached ? cached.text() : '0';
+};
+const updateDafDetailsGeneration = async (requestUrl, line) => {
+    await caches.default.put(dafDetailsGenerationKey(requestUrl, line), new Response(crypto.randomUUID(), {
+        headers: { 'Cache-Control': 'public, max-age=86400' }
+    }));
+};
 
 const readSupabasePages = async (table, configure, pageSize = 1000) => {
     const rows = [];
@@ -59,7 +69,7 @@ const readDafSummaryFromSupabase = async line => {
         // 只傳摘要欄位，避免儀表板把 records 一起拉下來；新欄位不會影響既有欄位解析。
         url.searchParams.set('select', SUMMARY_COLUMNS);
         url.searchParams.set('line', `eq.${line}`);
-        url.searchParams.set('order', 'uploaded_at.desc');
+        url.searchParams.set('order', 'uploaded_at.desc,id.asc');
     });
     if (result.error) return result.error;
     return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
@@ -69,25 +79,13 @@ const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
     const result = await readSupabasePages('daf_log_batches', url => {
         url.searchParams.set('select', '*');
         url.searchParams.set('line', `eq.${line}`);
-        // 先用批次日期在 Supabase 端縮小範圍，避免把其他日期的巨大 records 全部讀進 Worker 後才過濾。
         if (start) url.searchParams.set('date_end', `gte.${start}`);
         if (end) url.searchParams.set('date_start', `lte.${end}`);
-        url.searchParams.set('order', 'uploaded_at.desc');
-    }, 3);
+        url.searchParams.set('order', 'uploaded_at.desc,id.asc');
+    }, 100);
     if (result.error) return result.error;
-    const rows = start || end
-        ? result.rows.map(row => {
-            const records = Array.isArray(row.records) ? row.records.filter(record => {
-                const date = String(record?.date || '').slice(0, 10);
-                if (!date) return false;
-                if (start && date < start) return false;
-                if (end && date > end) return false;
-                return true;
-            }) : [];
-            return records.length ? { ...row, records } : null;
-        }).filter(Boolean)
-        : result.rows;
-    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=86400' });
+    // 只取涵蓋所選日期的批次，但每個批次保留完整 records，避免明細切片被當成完整資料。
+    return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=60' });
 };
 
 const sha256 = async value => {
@@ -105,8 +103,10 @@ const readDafVersionsFromSupabase = async lines => {
         }, 100);
         if (result.error) return { line, error: result.error };
         const signature = result.rows.map(row => [
-            row.id, row.uploaded_at, row.date_start, row.date_end, row.row_count,
-            row.input_count, row.good_count, row.fail_count, row.yield_rate, row.defect_rate
+            row.id, row.file_name, row.uploaded_at, row.model_name, row.product_code, row.work_order,
+            row.report_date, row.date_start, row.date_end, row.row_count, row.raw_column_count,
+            row.input_count, row.good_count, row.fail_count, row.yield_rate, row.defect_rate,
+            row.unknown_status_count, row.unknown_status_text
         ].join('|')).join('\n');
         return { line, version: await sha256(signature), count: result.rows.length };
     }));
@@ -116,14 +116,26 @@ const readDafVersionsFromSupabase = async lines => {
     return jsonResponse({ versions }, 200, { 'Cache-Control': 'public, max-age=15, s-maxage=60' });
 };
 
-const readDafStatsStateFromSupabase = async () => {
+const readDafStatsStateFromSupabase = async line => {
     const result = await readSupabasePages('daf_log_batches', url => {
-        // 共用數據統計只讀一筆快照；完整 LOG 不經過這個端點。
-        url.searchParams.set('select', 'uploaded_at,records');
-        url.searchParams.set('id', `eq.${SHARED_STATS_STATE_ID}`);
-    }, 1);
+        // 只讀小型統計快照列；完整 LOG 不經過這個端點。
+        url.searchParams.set('select', 'id,file_name,uploaded_at,records');
+        url.searchParams.set('line', 'eq.__STATS_STATE__');
+        url.searchParams.set('file_name', 'eq.系統共用數據統計狀態');
+        url.searchParams.set('order', 'uploaded_at.desc,id.asc');
+    }, 100);
     if (result.error) return result.error;
-    return jsonResponse(result.rows[0] || null, 200, { 'Cache-Control': 'public, max-age=0, s-maxage=60' });
+    const prefix = line && PROCESS_LINES.includes(line) ? `${SHARED_STATS_STATE_ID}:${line}` : '';
+    let rows = result.rows.filter(row => !prefix || row.id === prefix || row.id.startsWith(`${prefix}:`));
+    if (!rows.length) {
+        const legacy = await readSupabasePages('daf_log_batches', url => {
+            url.searchParams.set('select', 'id,file_name,uploaded_at,records');
+            url.searchParams.set('id', `eq.${SHARED_STATS_STATE_ID}`);
+        }, 1);
+        if (legacy.error) return legacy.error;
+        rows = legacy.rows;
+    }
+    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=0, s-maxage=60' });
 };
 
 const readSmtDataFromSupabase = async () => {
@@ -180,17 +192,24 @@ const invalidateCache = async requestUrl => {
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-summary', line)),
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-details', line)),
         cacheKey(requestUrl, '/api/daf-version', { lines: PROCESS_LINES.join(',') }),
+        ...PROCESS_LINES.map(line => cacheKey(requestUrl, '/api/daf-stats-state', { line })),
         cacheKey(requestUrl, '/api/daf-stats-state'),
         cacheKey(requestUrl, '/api/smt-data'),
         cacheKey(requestUrl, '/api/assembly-data')
     ];
     await Promise.all(keys.map(key => cache.delete(key)));
+    await Promise.all(PROCESS_LINES.map(line => updateDafDetailsGeneration(requestUrl, line)));
     return keys.length;
 };
 
 const invalidateDafStatsStateCache = async requestUrl => {
-    await caches.default.delete(cacheKey(requestUrl, '/api/daf-stats-state'));
-    return 1;
+    const cache = caches.default;
+    const keys = [
+        ...PROCESS_LINES.map(line => cacheKey(requestUrl, '/api/daf-stats-state', { line })),
+        cacheKey(requestUrl, '/api/daf-stats-state')
+    ];
+    await Promise.all(keys.map(request => cache.delete(request)));
+    return keys.length;
 };
 
 export default {
@@ -199,7 +218,7 @@ export default {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
         if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '202608171730' });
+            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '202610011958' });
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-summary') {
@@ -213,9 +232,11 @@ export default {
             if (!PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
             const start = requestUrl.searchParams.get('start') || '';
             const end = requestUrl.searchParams.get('end') || '';
-            const params = { line };
-            if (start) params.start = start;
-            if (end) params.end = end;
+            const isDate = value => !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+            if (!isDate(start) || !isDate(end) || (start && end && start > end)) return jsonResponse({ error: 'Invalid date range' }, 400);
+            const generation = await readDafDetailsGeneration(requestUrl, line);
+            const params = { line, start, end, generation };
+            // 日期區間各自快取；資料更新會改 generation，使舊區間鍵不再被讀取。
             return withCache(requestUrl, '/api/daf-details', params, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line, start, end));
         }
 
@@ -227,7 +248,10 @@ export default {
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-stats-state') {
-            return withCache(requestUrl, '/api/daf-stats-state', {}, requestUrl.searchParams.get('refresh') === '1', readDafStatsStateFromSupabase);
+            const line = requestUrl.searchParams.get('line') || '';
+            if (line && !PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
+            const params = line ? { line } : {};
+            return withCache(requestUrl, '/api/daf-stats-state', params, requestUrl.searchParams.get('refresh') === '1', () => readDafStatsStateFromSupabase(line));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {

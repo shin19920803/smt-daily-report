@@ -10,6 +10,7 @@ SMT.daf = function (ctx) {
     const REMOTE_DETAIL_COLUMNS = `${REMOTE_SUMMARY_COLUMNS},records`;
     const REMOTE_VERSION_COLUMNS = 'id,line,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,row_count,raw_column_count,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text';
     const DAF_REMOTE_REQUEST_TIMEOUT_MS = 20000;
+    const DAF_FINALIZE_REQUEST_TIMEOUT_MS = 58000;
     const DAF_CACHE_REQUEST_TIMEOUT_MS = 25000;
     const DAF_ATOMIC_REPLACE_MAX_ROWS = 3000;
     const DAF_IMPORT_CHUNK_MAX_ROWS = 500;
@@ -727,12 +728,12 @@ SMT.daf = function (ctx) {
         maxRows: DAF_IMPORT_CHUNK_MAX_ROWS, maxBytes: DAF_IMPORT_CHUNK_MAX_BYTES
     });
     const hashDafImportPayload = payload => window.SMT_DAF_UPLOAD_UTILS.hashPayload(payload);
-    const dafImportRetry = async (action, label, retries = 3) => {
+    const dafImportRetry = async (action, label, retries = 3, timeoutMs = DAF_REMOTE_REQUEST_TIMEOUT_MS) => {
         let lastError;
         for (let attempt = 0; attempt < retries; attempt++) {
             const controller = new AbortController();
             try {
-                const result = await withDafRequestTimeout(action(controller.signal), label, DAF_REMOTE_REQUEST_TIMEOUT_MS);
+                const result = await withDafRequestTimeout(action(controller.signal), label, timeoutMs);
                 if (result?.error) throw result.error;
                 return result?.data;
             } catch (error) {
@@ -783,7 +784,7 @@ SMT.daf = function (ctx) {
             p_job_id: jobId, p_file_name: file.name, p_metadata: metadata, p_expected_chunks: chunkPlan.length
         }).abortSignal(signal), '建立上傳工作');
         if (start?.status === 'published') {
-            const result = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認已完成的上傳');
+            const result = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認已完成的上傳', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
             try { localStorage.removeItem(resumeKey); } catch (error) {}
             return { acceptedCount: Number(result?.accepted_count) || 0, duplicateCount: Number(result?.duplicate_count) || 0 };
         }
@@ -825,7 +826,7 @@ SMT.daf = function (ctx) {
         setDafUploadProgress(file.name, '比對跨檔 E 欄並發布資料', chunkPlan.length, chunkPlan.length);
         let finalized;
         try {
-            finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '發布上傳資料');
+            finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '發布上傳資料', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
         } catch (error) {
             const statusController = new AbortController();
             const status = await withDafRequestTimeout(
@@ -833,7 +834,7 @@ SMT.daf = function (ctx) {
                 '確認發布狀態', 10000
             );
             if (!status.error && status.data?.status === 'published') {
-                finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認發布結果');
+                finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認發布結果', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
             } else throw error;
         }
         if (!finalized?.published) throw new Error('Supabase 尚未確認發布，已保留暫存資料；重新選取同一檔案可續傳');

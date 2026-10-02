@@ -417,11 +417,40 @@
                         <button @click="loadDafData({ force: true })" class="btn-ghost"><i class="fas fa-sync-alt mr-1"></i>重新整理</button>
                     </div>
                     <div class="mt-3 text-xs text-gray-400">可一次上傳多個工單檔案；每個檔案會獨立保存，統計時可依日期、機種與工單篩選。</div>
-                    <div v-if="dafUploadSummary.files" class="mt-3 p-3 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-800">
-                        <i class="fas fa-circle-check mr-1"></i>本次完成 {{ dafUploadSummary.files }} 個檔案，共 {{ dafUploadSummary.rows.toLocaleString() }} 列
-                        <span v-if="dafUploadSummary.referenceRows" class="text-indigo-700 ml-2">待比對機台 {{ dafUploadSummary.referenceRows.toLocaleString() }} 筆</span>
-                        <span v-if="dafUploadSummary.duplicates" class="text-orange-700 ml-2">已排除重複 {{ dafUploadSummary.duplicates.toLocaleString() }} 列</span>
-                        <span v-if="dafUploadSummary.failed.length" class="text-red-600 ml-2">失敗 {{ dafUploadSummary.failed.length }} 個：{{ dafUploadSummary.failed.join('；') }}</span>
+                    <div v-if="dafUploadSummary.files || dafUploadSummary.failed.length" class="mt-3 p-3 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-800 flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <span v-if="dafUploadSummary.files"><i class="fas fa-circle-check mr-1"></i>本次完成 {{ dafUploadSummary.files }} 個檔案，共 {{ dafUploadSummary.rows.toLocaleString() }} 列</span>
+                        <span v-else class="text-red-700"><i class="fas fa-triangle-exclamation mr-1"></i>本次檔案未完成上傳</span>
+                        <span v-if="dafUploadSummary.referenceRows" class="text-indigo-700">待比對機台 {{ dafUploadSummary.referenceRows.toLocaleString() }} 筆</span>
+                        <span v-if="dafUploadSummary.duplicates" class="text-orange-700">已排除重複 {{ dafUploadSummary.duplicates.toLocaleString() }} 列</span>
+                        <button v-if="dafUploadSummary.failed.length" @click="openDafUploadErrorDetail" class="font-bold text-red-700 underline underline-offset-2 hover:text-red-900" type="button">
+                            查看錯誤原因（{{ dafUploadSummary.failed.length }}）
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="dafUploadErrorDetail.show && currentLine === 'TEST'" class="fixed inset-0 bg-black/55 modal-backdrop flex justify-center items-center z-[80] p-4" @click.self="closeDafUploadErrorDetail" role="dialog" aria-modal="true" aria-labelledby="daf-upload-error-title">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-fade-in">
+                        <div class="flex items-start justify-between gap-3 border-b p-5 md:p-6">
+                            <div>
+                                <h3 id="daf-upload-error-title" class="text-lg font-black text-red-800"><i class="fas fa-circle-exclamation mr-2 text-red-600"></i>上傳錯誤原因</h3>
+                                <p class="text-xs text-gray-500 mt-1">逐筆列出檔案、製程、失敗階段與資料庫回傳訊息。</p>
+                            </div>
+                            <button @click="closeDafUploadErrorDetail" class="btn-ghost text-xs whitespace-nowrap">關閉</button>
+                        </div>
+                        <div class="p-4 md:p-6 space-y-3 overflow-y-auto">
+                            <article v-for="(item, index) in dafUploadErrorDetail.items" :key="`${item.fileName}-${index}`" class="rounded-xl border border-red-200 bg-red-50/60 p-4">
+                                <div class="flex flex-wrap items-center gap-2 mb-2">
+                                    <span class="font-bold text-gray-800 break-all">{{ item.fileName }}</span>
+                                    <span class="rounded-full bg-white border border-red-200 px-2 py-0.5 text-xs font-bold text-red-700">{{ item.process }}</span>
+                                    <span class="text-xs text-gray-500">{{ item.stage }}</span>
+                                </div>
+                                <p class="text-sm text-red-900 whitespace-pre-wrap break-words">{{ item.message }}</p>
+                                <p v-if="item.code" class="mt-2 text-xs text-gray-600 break-all">錯誤代碼／狀態：{{ item.code }}</p>
+                                <p v-if="item.details" class="mt-2 text-xs text-gray-600 whitespace-pre-wrap break-words">補充資訊：{{ item.details }}</p>
+                                <p v-if="item.hint" class="mt-1 text-xs text-gray-600 whitespace-pre-wrap break-words">系統提示：{{ item.hint }}</p>
+                            </article>
+                        </div>
+                        <div class="border-t p-4 flex justify-end"><button @click="closeDafUploadErrorDetail" class="btn-primary" type="button">我知道了</button></div>
                     </div>
                 </div>
 
@@ -1832,7 +1861,7 @@
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608200852"></script>
-<script src="js/daf.js?v=202610011958"></script>
+<script src="js/daf.js?v=202610020900"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
 <script src="js/dashboard.js?v=202608192230"></script>

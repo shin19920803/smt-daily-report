@@ -110,12 +110,12 @@ SMT.daf = function (ctx) {
             capturedAt: new Date(capturedTime).toISOString(), sourceFile: cleanText(reference?.sourceFile || row?.file_name)
         };
     };
-    const deleteDafMachineReferenceRows = async ids => {
+    const deleteDafMachineReferenceRows = async (ids, { onError } = {}) => {
         const uniqueIds = [...new Set((ids || []).filter(Boolean))];
         for (let index = 0; index < uniqueIds.length; index += 100) {
             const chunk = uniqueIds.slice(index, index + 100);
             const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('line', DAF_MACHINE_REFERENCE_LINE).in('id', chunk);
-            if (error) return false;
+            if (error) { onError?.(error); return false; }
         }
         return true;
     };
@@ -143,17 +143,17 @@ SMT.daf = function (ctx) {
         machineReferences.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
         return { map: dafMachineReferenceCache, error: null };
     };
-    const persistDafMachineReferences = async ({ references = [], matchedKeys = [], storedMap = new Map() } = {}) => {
+    const persistDafMachineReferences = async ({ references = [], matchedKeys = [], storedMap = new Map(), onError } = {}) => {
         const matched = new Set(matchedKeys || []);
         const matchedIds = [...matched].map(key => storedMap.get(key)?.id).filter(Boolean);
         const referencesToStore = (references || []).filter(reference => isDafMachineLabel(reference.machine) && !matched.has(reference.dedupKey));
         if (referencesToStore.length) {
             const { error } = await _supabase.from(REMOTE_TABLE)
                 .upsert(referencesToStore.map(toDafMachineReferenceRemote), { onConflict: 'id' });
-            if (error) return false;
+            if (error) { onError?.(error); return false; }
             referencesToStore.forEach(reference => storedMap.set(reference.dedupKey, { ...reference, id: dafMachineReferenceId(reference.dedupKey) }));
         }
-        if (matchedIds.length && !(await deleteDafMachineReferenceRows(matchedIds))) {
+        if (matchedIds.length && !(await deleteDafMachineReferenceRows(matchedIds, { onError }))) {
             if (storedMap !== dafMachineReferenceCache) {
                 dafMachineReferenceCache.clear();
                 storedMap.forEach((reference, key) => dafMachineReferenceCache.set(key, reference));
@@ -245,7 +245,8 @@ SMT.daf = function (ctx) {
     const dafRemoteChecking = ref(false);
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
-    const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [] });
+    const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [], failureDetails: [] });
+    const dafUploadErrorDetail = ref({ show: false, items: [] });
     const dafModelMappings = ref({});
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
     const pendingDafUpload = ref(null);
@@ -1821,7 +1822,7 @@ SMT.daf = function (ctx) {
         });
         return deduplicateDafBatches([...batchMap.values()]).batches;
     };
-    const ensureDafProcessDetails = async (line, { force = false, start = '', end = '', statsOnly = false } = {}) => {
+    const ensureDafProcessDetails = async (line, { force = false, start = '', end = '', statsOnly = false, onError } = {}) => {
         if (!TEST_PROCESS_IDS.includes(line)) return true;
         // 統計明細不等待背景連線探測；直接由 Supabase／Cloudflare 讀取並自行決定備援，避免探測卡住整個統計。
         const rangeKey = `${line}|${start}|${end}`;
@@ -1842,6 +1843,7 @@ SMT.daf = function (ctx) {
             if (!isCurrentLoad()) return false;
             if (result.error) {
                 dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
+                onError?.(result.error);
                 return false;
             }
             return { batches: filterGhostDafRows(result.data || []).map(fromRemote), generation: loadGeneration };
@@ -1849,7 +1851,10 @@ SMT.daf = function (ctx) {
             dafDetailLoadPromises.set(rangeKey, request);
         }
         const remoteResult = await request;
-        if (!remoteResult || remoteResult === false || !isCurrentLoad()) return false;
+        if (!remoteResult || remoteResult === false || !isCurrentLoad()) {
+            onError?.(new Error(`${processLabel(line)} 明細載入未完成，可能已逾時或被新的同步取代`));
+            return false;
+        }
         const remoteBatches = remoteResult.batches;
         if (statsOnly) {
             let normalized = deduplicateDafBatches(remoteBatches).batches;
@@ -2750,11 +2755,45 @@ SMT.daf = function (ctx) {
             toast(`${label} 檔案已分析，但基礎設定自動新增失敗`, 'warning');
         }
     };
+    const recordDafUploadFailure = (queue, fileName, stage, reason, line = '') => {
+        const error = reason && typeof reason === 'object' ? reason : null;
+        const message = String(error?.message || reason || '系統未提供錯誤訊息').trim();
+        const stringifyField = value => {
+            if (value == null || value === '') return '';
+            if (typeof value === 'string') return value;
+            try { return JSON.stringify(value); } catch (e) { return String(value); }
+        };
+        const detail = {
+            fileName: String(fileName || '未識別檔案'),
+            process: line ? processLabel(line) : '檔案處理',
+            stage: String(stage || '上傳處理'),
+            message,
+            code: String(error?.code || error?.status || ''),
+            details: stringifyField(error?.details),
+            hint: stringifyField(error?.hint)
+        };
+        queue.failureDetails ||= [];
+        queue.failureDetails.push(detail);
+        queue.failed.push(`${detail.fileName}${line ? `（${detail.process}）` : ''}：${detail.stage}：${detail.message}`);
+    };
+    const openDafUploadErrorDetail = () => {
+        const items = dafUploadSummary.value.failureDetails || [];
+        if (items.length) dafUploadErrorDetail.value = { show: true, items };
+    };
+    const closeDafUploadErrorDetail = () => {
+        dafUploadErrorDetail.value = { show: false, items: [] };
+    };
     const finishDafUploadQueue = async queue => {
-        dafUploadSummary.value = { files: queue.success, rows: queue.rows, duplicates: queue.duplicates, referenceRows: queue.referenceRows || 0, failed: queue.failed };
+        queue.finished = true;
+        dafUploadSummary.value = {
+            files: queue.success, rows: queue.rows, duplicates: queue.duplicates,
+            referenceRows: queue.referenceRows || 0, failed: queue.failed,
+            failureDetails: queue.failureDetails || []
+        };
         const referenceText = queue.referenceRows ? `，保留待比對機台 ${queue.referenceRows.toLocaleString()} 筆` : '';
         if (queue.success) toast(`${currentDafLabel()} 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${referenceText}${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
         else toast(`${currentDafLabel()} 檔案全部處理失敗`, 'error');
+        if (queue.failureDetails?.length) openDafUploadErrorDetail();
         try {
             // 上傳成功後立即以 Supabase 摘要重新整理；統計頁由 refreshDetails 再載入完整明細。
             if (queue.success) await loadDafData({ force: true });
@@ -2771,9 +2810,10 @@ SMT.daf = function (ctx) {
         if (referenceState.error) toast('待比對機台資料讀取失敗，本次僅使用目前檔案內的比對資料', 'warning');
         for (let index = queue.index; index < queue.files.length; index++) {
             const file = queue.files[index];
+            queue.currentFile = file.name;
             try {
                 if (!(await ensureDafRemoteConnection())) {
-                    queue.failed.push(`${file.name}：共用資料庫未連線，檔案未寫入`);
+                    recordDafUploadFailure(queue, file.name, 'Supabase 連線檢查', dafRemoteError.value || '共用資料庫連線失敗，檔案未寫入');
                     continue;
                 }
                 let batches = await analyzeFile(file, storedMachineReferences);
@@ -2794,14 +2834,15 @@ SMT.daf = function (ctx) {
                 const matchedMachineReferenceKeys = batches.matchedMachineReferenceKeys || [];
                 if (!batches.length) {
                     if (machineReferences.length) {
-                        const savedReferences = await persistDafMachineReferences({ references: machineReferences, matchedKeys: matchedMachineReferenceKeys, storedMap: storedMachineReferences });
+                        let referenceError = null;
+                        const savedReferences = await persistDafMachineReferences({ references: machineReferences, matchedKeys: matchedMachineReferenceKeys, storedMap: storedMachineReferences, onError: error => { referenceError = error; } });
                         if (savedReferences) {
                             queue.success++;
                             queue.referenceRows = (queue.referenceRows || 0) + machineReferences.length;
-                        } else queue.failed.push(`${file.name}：待比對機台資料寫入 Supabase 失敗`);
+                        } else recordDafUploadFailure(queue, file.name, '待比對機台資料寫入 Supabase', referenceError || '資料庫未確認寫入');
                         continue;
                     }
-                    queue.failed.push(`${file.name}：A 欄沒有符合的五個製程，未寫入 Supabase`);
+                    recordDafUploadFailure(queue, file.name, '製程辨識', 'A 欄沒有符合的五個製程，未寫入 Supabase');
                     continue;
                 }
                 const unknownBatches = batches.filter(batch => batch.unknownProductDetails?.length || batch.unknownProductCodes?.length);
@@ -2820,11 +2861,13 @@ SMT.daf = function (ctx) {
                 const batchLines = [...new Set(batches.map(batch => batch.line || currentDafLine()))];
                 const detailResults = await Promise.all(batchLines.map(async line => {
                     // 寫入前跨日期比對 E 欄，使用完整遠端批次，不能回寫局部日期切片。
-                    return { line, ok: await ensureDafProcessDetails(line, { force: true }) };
+                    let error = null;
+                    const ok = await ensureDafProcessDetails(line, { force: true, onError: detailError => { error = detailError; } });
+                    return { line, ok, error };
                 }));
                 const failedDetailLines = new Set(detailResults.filter(result => !result.ok).map(result => result.line));
-                for (const line of failedDetailLines) {
-                    queue.failed.push(`${file.name}（${processLabel(line)}）：明細載入失敗，檔案未完成同步`);
+                for (const result of detailResults.filter(item => failedDetailLines.has(item.line))) {
+                    recordDafUploadFailure(queue, file.name, '既有明細載入／重複比對', result.error || 'Supabase 與 Cloudflare 明細載入未完成，檔案未寫入', result.line);
                     fileSaved = false;
                 }
                 if (failedDetailLines.size) continue;
@@ -2836,31 +2879,31 @@ SMT.daf = function (ctx) {
                     let legacyReplacementStarted = false;
                     try { merged = await mergeDafBatches(readyBatches, { replaceFileName: file.name }); }
                     catch (error) {
-                        queue.failed.push(`${file.name}：${error.message || '共用資料庫寫入失敗'}`);
+                        recordDafUploadFailure(queue, file.name, '資料整理／Supabase 批次寫入', error);
                         continue;
                     }
                     if (merged.atomicUnavailable) {
                         replacementSnapshot = await snapshotDafFileBatches(file.name);
                         if (!replacementSnapshot) {
-                            queue.failed.push(`${file.name}：舊批次備份失敗，已停止覆蓋`);
+                            recordDafUploadFailure(queue, file.name, '舊批次備份', dafRemoteError.value || '無法讀取舊資料，已停止覆蓋');
                             continue;
                         }
                         if (!(await replaceDafFileBatches(file.name))) {
                             await restoreDafFileReplacement(replacementSnapshot);
-                            queue.failed.push(`${file.name}：舊批次清除失敗，已嘗試回復原資料`);
+                            recordDafUploadFailure(queue, file.name, '舊批次清除／覆蓋', dafRemoteError.value || '舊資料未能確認清除，已嘗試回復原資料');
                             continue;
                         }
                         legacyReplacementStarted = true;
                         try { merged = await mergeDafBatches(readyBatches); }
                         catch (error) {
                             await restoreDafFileReplacement(replacementSnapshot, readyBatches);
-                            queue.failed.push(`${file.name}：${error.message || '共用資料庫寫入失敗'}`);
+                            recordDafUploadFailure(queue, file.name, 'Supabase 批次寫入', error);
                             continue;
                         }
                     }
                     if (!merged.remoteSaved) {
                         if (legacyReplacementStarted) await restoreDafFileReplacement(replacementSnapshot, readyBatches);
-                        queue.failed.push(`${file.name}：${merged.remoteError?.message || '共用資料庫寫入失敗'}`);
+                        recordDafUploadFailure(queue, file.name, 'Supabase 批次寫入', merged.remoteError || '資料庫未確認寫入');
                         continue;
                     }
                     queue.rows += (merged.incomingBatches || []).reduce((sum, batch) => sum + (Number(batch.rowCount) || 0), 0);
@@ -2871,9 +2914,10 @@ SMT.daf = function (ctx) {
                 if (machineReferences.length || matchedMachineReferenceKeys.length) {
                     if (!hasDafBatch || dafBatchSaved) {
                         const matchedKeys = new Set(matchedMachineReferenceKeys);
-                        const savedReferences = await persistDafMachineReferences({ references: machineReferences, matchedKeys: matchedMachineReferenceKeys, storedMap: storedMachineReferences });
+                        let referenceError = null;
+                        const savedReferences = await persistDafMachineReferences({ references: machineReferences, matchedKeys: matchedMachineReferenceKeys, storedMap: storedMachineReferences, onError: error => { referenceError = error; } });
                         if (!savedReferences) {
-                            queue.failed.push(`${file.name}：待比對機台資料寫入 Supabase 失敗`);
+                            recordDafUploadFailure(queue, file.name, '待比對機台資料保存到 Supabase', referenceError || '資料庫未確認寫入');
                             fileSaved = false;
                         } else {
                             queue.referenceRows = (queue.referenceRows || 0) + machineReferences.filter(reference => !matchedKeys.has(reference.dedupKey)).length;
@@ -2881,7 +2925,7 @@ SMT.daf = function (ctx) {
                     }
                 }
                 if (fileSaved) queue.success++;
-            } catch (error) { queue.failed.push(`${file.name}：${error.message}`); }
+            } catch (error) { recordDafUploadFailure(queue, file.name, '檔案解析／同步', error); }
         }
         await finishDafUploadQueue(queue);
         return true;
@@ -2889,11 +2933,22 @@ SMT.daf = function (ctx) {
     const uploadDafFiles = async event => {
         const files = [...(event.target.files || [])];
         if (!files.length) return;
-        const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [] };
+        const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [], failureDetails: [] };
         dafUploadInProgress = true;
         dafRemoteRefreshQueued = false;
         loading.value = true;
         try { await processDafUploadQueue(queue); }
+        catch (error) {
+            if (!queue.finished) {
+                const affectedFiles = queue.currentFile
+                    ? [queue.currentFile]
+                    : files.slice(queue.index || 0).map(file => file.name);
+                for (const fileName of affectedFiles.length ? affectedFiles : ['上傳作業']) {
+                    recordDafUploadFailure(queue, fileName, '上傳初始化／流程', error);
+                }
+                await finishDafUploadQueue(queue);
+            }
+        }
         finally {
             loading.value = false;
             if (!pendingDafUpload.value) {
@@ -3082,7 +3137,8 @@ SMT.daf = function (ctx) {
         if (line === 'TEST') {
             dafModelMappings.value = readModelMappings();
             restoreDafStatsState();
-            dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [] };
+            dafUploadSummary.value = { files: 0, rows: 0, duplicates: 0, failed: [], failureDetails: [] };
+            closeDafUploadErrorDetail();
             dafLastUpload.value = null;
             dafStatsResult.value = dafStatsResults.value[dafProcess.value] || null;
             if (currentTab.value === 'stats') void loadSharedDafStatsState();
@@ -3103,10 +3159,10 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary,
+        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
-        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel,
+        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, openDafUploadErrorDetail, closeDafUploadErrorDetail,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, openDafTrendDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate, isDafDashboardDetailsLoaded, ensureDafDashboardDetails,
         renderDafCharts

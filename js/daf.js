@@ -1896,7 +1896,13 @@ SMT.daf = function (ctx) {
             return null;
         }).catch(error => console.warn(`${currentDafLabel()} 儀表板背景更新失敗`, error));
     };
-    const loadDafData = async ({ background = false, force = false } = {}) => {
+    const loadDafData = async ({ background = false, force = false, allowDuringUpload = false } = {}) => {
+        // 上傳前的完整明細比對期間，摘要刷新不可清除明細載入世代；否則仍在等待的
+        // Supabase 請求會被誤判為「同步取代」，導致整份檔案被拒絕。
+        if (dafUploadInProgress && !allowDuringUpload) {
+            dafRemoteRefreshQueued = true;
+            return true;
+        }
         const line = isUnifiedTestLine() ? 'TEST' : currentDafLine();
         const remoteLoadKey = isUnifiedTestLine() ? `TEST:${currentDafLine()}` : line;
         const preserveStats = currentTab.value === 'stats';
@@ -1917,6 +1923,12 @@ SMT.daf = function (ctx) {
             // 儀表板只讀摘要欄位；完整 records 延後到統計／明細明確操作時才讀取。
             // 五個製程只載入摘要欄位，並行取得後一次替換畫面，避免清單先只出現最新檔案或逐站等待。
             const remoteResults = await Promise.all(processLines.map(processLine => loadDafRemoteRows(processLine, false, { force })));
+            // 若刷新是在上傳開始前啟動，等網路回來時也不可再套用舊摘要或清掉明細快取。
+            if (dafUploadInProgress && !allowDuringUpload) {
+                dafRemoteRefreshQueued = true;
+                dafRemoteChecking.value = false;
+                return;
+            }
             const error = remoteResults.find(result => result.error)?.error || null;
             const usedCloudflareFallback = remoteResults.some(result => result.source === 'cloudflare-fallback');
             const remoteRows = remoteResults.flatMap(result => result.data || []);
@@ -2044,6 +2056,12 @@ SMT.daf = function (ctx) {
                         if (dafStatsLoading.value) dafSharedStatsForceQueued = true;
                         else void loadSharedDafStatsState({ force: true });
                     }
+                    return;
+                }
+                // 上傳中的新增／刪除可能改變摘要，但不可讓 Realtime 事件清除上傳去重所需明細。
+                // 上傳完成後會以 Supabase 最新狀態做一次刷新。
+                if (dafUploadInProgress) {
+                    dafRemoteRefreshQueued = true;
                     return;
                 }
                 if (payload.eventType === 'DELETE') {
@@ -2794,13 +2812,19 @@ SMT.daf = function (ctx) {
         if (queue.success) toast(`${currentDafLabel()} 完成 ${queue.success} 個檔案，共 ${queue.rows.toLocaleString()} 列${referenceText}${queue.duplicates ? `，已排除重複 ${queue.duplicates} 列` : ''}${queue.failed.length ? '；有檔案失敗' : ''}`, queue.failed.length ? 'warning' : 'success');
         else toast(`${currentDafLabel()} 檔案全部處理失敗`, 'error');
         if (queue.failureDetails?.length) openDafUploadErrorDetail();
+        const shouldRefresh = queue.success || dafRemoteRefreshQueued;
+        dafRemoteRefreshQueued = false;
         try {
-            // 上傳成功後立即以 Supabase 摘要重新整理；統計頁由 refreshDetails 再載入完整明細。
-            if (queue.success) await loadDafData({ force: true });
+            // 上傳成功後立即以 Supabase 摘要重新整理；此時明細比對及寫入已完成。
+            if (shouldRefresh) {
+                await loadDafData({ force: true, allowDuringUpload: true });
+            }
         } finally {
-            // 上傳期間收到的 Realtime 事件已由最後一次 Supabase 讀取涵蓋，不再重複觸發整批下載。
+            // 最後一次刷新期間若又收到遠端異動，解除鎖定後再補一次摘要同步。
+            const refreshAgain = dafRemoteRefreshQueued;
             dafRemoteRefreshQueued = false;
             dafUploadInProgress = false;
+            if (refreshAgain) await loadDafData({ background: true, force: true });
         }
     };
     const processDafUploadQueue = async queue => {
@@ -2859,12 +2883,15 @@ SMT.daf = function (ctx) {
                 let fileSaved = true;
                 let dafBatchSaved = false;
                 const batchLines = [...new Set(batches.map(batch => batch.line || currentDafLine()))];
-                const detailResults = await Promise.all(batchLines.map(async line => {
+                const detailResults = [];
+                for (const line of batchLines) {
                     // 寫入前跨日期比對 E 欄，使用完整遠端批次，不能回寫局部日期切片。
+                    // 逐站載入以避免同時下載五站完整歷史 LOG，觸發逾時或互相取消。
                     let error = null;
                     const ok = await ensureDafProcessDetails(line, { force: true, onError: detailError => { error = detailError; } });
-                    return { line, ok, error };
-                }));
+                    detailResults.push({ line, ok, error });
+                    if (!ok) break;
+                }
                 const failedDetailLines = new Set(detailResults.filter(result => !result.ok).map(result => result.line));
                 for (const result of detailResults.filter(item => failedDetailLines.has(item.line))) {
                     recordDafUploadFailure(queue, file.name, '既有明細載入／重複比對', result.error || 'Supabase 與 Cloudflare 明細載入未完成，檔案未寫入', result.line);

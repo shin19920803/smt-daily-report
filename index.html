@@ -84,7 +84,11 @@
         <div v-if="loading" class="absolute inset-0 bg-white/60 flex justify-center items-center z-50" style="backdrop-filter: blur(2px);">
             <div class="flex flex-col items-center gap-3">
                 <div class="w-10 h-10 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin" style="border-width: 3px;"></div>
-                <span class="text-sm text-blue-600 font-bold">同步中...</span>
+                <span class="text-sm text-blue-600 font-bold">{{ dafUploadProgress?.visible ? dafUploadProgress.stage : '同步中...' }}</span>
+                <span v-if="dafUploadProgress?.visible && dafUploadProgress.fileName" class="max-w-[80vw] truncate text-xs text-slate-500">{{ dafUploadProgress.fileName }}</span>
+                <div v-if="dafUploadProgress?.visible && dafUploadProgress.total" class="h-2 w-56 max-w-[70vw] overflow-hidden rounded-full bg-blue-100">
+                    <div class="h-full rounded-full bg-blue-600 transition-all duration-200" :style="{ width: dafUploadProgress.percent + '%' }"></div>
+                </div>
             </div>
         </div>
 
@@ -1856,12 +1860,13 @@
 
 </div>
 
-<script src="js/supabase-client.js?v=202610011958"></script>
+<script src="js/supabase-client.js?v=20261002-staged-import"></script>
 <script src="js/core.js?v=202608191659"></script>
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
 <script src="js/assembly.js?v=202608200852"></script>
-<script src="js/daf.js?v=20261002-57014"></script>
+<script src="js/daf-upload-utils.js?v=20261002-staged-import"></script>
+<script src="js/daf.js?v=20261002-staged-import"></script>
 <script src="js/fpy.js?v=202608141200"></script>
 <script src="js/ooc.js?v=202608141200"></script>
 <script src="js/dashboard.js?v=202608192230"></script>

@@ -12,6 +12,8 @@ SMT.daf = function (ctx) {
     const DAF_REMOTE_REQUEST_TIMEOUT_MS = 20000;
     const DAF_CACHE_REQUEST_TIMEOUT_MS = 25000;
     const DAF_ATOMIC_REPLACE_MAX_ROWS = 3000;
+    const DAF_IMPORT_CHUNK_MAX_ROWS = 500;
+    const DAF_IMPORT_CHUNK_MAX_BYTES = 512 * 1024;
     const withDafRequestTimeout = (request, label, timeoutMs = DAF_REMOTE_REQUEST_TIMEOUT_MS) => new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -149,10 +151,16 @@ SMT.daf = function (ctx) {
         const matchedIds = [...matched].map(key => storedMap.get(key)?.id).filter(Boolean);
         const referencesToStore = (references || []).filter(reference => isDafMachineLabel(reference.machine) && !matched.has(reference.dedupKey));
         if (referencesToStore.length) {
-            const { error } = await _supabase.from(REMOTE_TABLE)
-                .upsert(referencesToStore.map(toDafMachineReferenceRemote), { onConflict: 'id' });
-            if (error) { onError?.(error); return false; }
+            for (let offset = 0; offset < referencesToStore.length; offset += 100) {
+                const { error } = await _supabase.from(REMOTE_TABLE)
+                    .upsert(referencesToStore.slice(offset, offset + 100).map(toDafMachineReferenceRemote), { onConflict: 'id' });
+                if (error) { onError?.(error); return false; }
+            }
             referencesToStore.forEach(reference => storedMap.set(reference.dedupKey, { ...reference, id: dafMachineReferenceId(reference.dedupKey) }));
+            if (await isDafStagedImportReady()) {
+                const error = await updateDafStagedMachineLabels(referencesToStore.map(reference => ({ dedup_key: reference.dedupKey, machine: reference.machine })));
+                if (error) { onError?.(error); return false; }
+            }
         }
         if (matchedIds.length && !(await deleteDafMachineReferenceRows(matchedIds, { onError }))) {
             if (storedMap !== dafMachineReferenceCache) {
@@ -247,6 +255,7 @@ SMT.daf = function (ctx) {
     const dafRemoteError = ref('');
     const dafLastUpload = ref(null);
     const dafUploadSummary = ref({ files: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [], failureDetails: [] });
+    const dafUploadProgress = ref({ visible: false, fileName: '', stage: '', completed: 0, total: 0, percent: 0 });
     const dafUploadErrorDetail = ref({ show: false, items: [] });
     const dafModelMappings = ref({});
     const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
@@ -256,6 +265,8 @@ SMT.daf = function (ctx) {
     const dafWorkOrderDetail = ref({ show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [], byMachine: [] });
     const dafOutputDetail = ref({ show: false, title: '', subtitle: '', result: null });
     const dafMachineReferenceCache = new Map();
+    let dafStagedImportAvailability = null;
+    let dafStagedImportAvailabilityPromise = null;
     const dafQuickMode = ref(null);
     const dafQuickOffset = ref(0);
     let applyingDafQuick = false;
@@ -685,6 +696,155 @@ SMT.daf = function (ctx) {
     });
     const isGhostDafRow = row => Number(row?.row_count) > 0 && Number(row?.input_count || 0) === 0 && Number(row?.good_count || 0) === 0 && Number(row?.fail_count || 0) === 0 && Number(row?.unknown_status_count || 0) === 0;
     const filterGhostDafRows = rows => (rows || []).filter(row => !isGhostDafRow(row));
+    const isMissingDafImportRpc = error => ['PGRST202', '42883'].includes(String(error?.code || ''));
+    const isDafStagedImportReady = async () => {
+        if (dafStagedImportAvailability !== null) return dafStagedImportAvailability;
+        if (!dafStagedImportAvailabilityPromise) {
+            dafStagedImportAvailabilityPromise = (async () => {
+                const controller = new AbortController();
+                try {
+                    const { data, error } = await withDafRequestTimeout(
+                        _supabase.rpc('daf_log_import_pipeline_ready').abortSignal(controller.signal),
+                        '檢查 Supabase 上傳服務', 8000
+                    );
+                    if (error && !isMissingDafImportRpc(error)) throw error;
+                    dafStagedImportAvailability = !error && data === 'staged-v1';
+                } catch (error) {
+                    controller.abort(error);
+                    if (isMissingDafImportRpc(error)) dafStagedImportAvailability = false;
+                    else throw new Error(`無法確認 Supabase 分批上傳服務：${error?.message || '連線失敗'}；為避免改走舊流程下載全部 LOG，已停止本次上傳`);
+                }
+                return dafStagedImportAvailability;
+            })().finally(() => { dafStagedImportAvailabilityPromise = null; });
+        }
+        return dafStagedImportAvailabilityPromise;
+    };
+    const setDafUploadProgress = (fileName, stage, completed = 0, total = 0) => {
+        const percent = total > 0 ? Math.min(100, Math.round(completed / total * 100)) : 0;
+        dafUploadProgress.value = { visible: true, fileName: fileName || '', stage: stage || '', completed, total, percent };
+    };
+    const splitDafRecordsIntoChunks = records => window.SMT_DAF_UPLOAD_UTILS.splitRecordsIntoChunks(records, {
+        maxRows: DAF_IMPORT_CHUNK_MAX_ROWS, maxBytes: DAF_IMPORT_CHUNK_MAX_BYTES
+    });
+    const hashDafImportPayload = payload => window.SMT_DAF_UPLOAD_UTILS.hashPayload(payload);
+    const dafImportRetry = async (action, label, retries = 3) => {
+        let lastError;
+        for (let attempt = 0; attempt < retries; attempt++) {
+            const controller = new AbortController();
+            try {
+                const result = await withDafRequestTimeout(action(controller.signal), label, DAF_REMOTE_REQUEST_TIMEOUT_MS);
+                if (result?.error) throw result.error;
+                return result?.data;
+            } catch (error) {
+                controller.abort(error);
+                lastError = error;
+                if (isMissingDafImportRpc(error) || !window.SMT_DAF_UPLOAD_UTILS.isRetryableUploadError(error) || attempt === retries - 1) break;
+                await new Promise(resolve => setTimeout(resolve, 400 * (2 ** attempt)));
+            }
+        }
+        throw lastError || new Error(`${label}失敗`);
+    };
+    const updateDafStagedMachineLabels = async mappings => {
+        const unique = [...new Map((mappings || [])
+            .filter(item => item?.dedup_key && isDafMachineLabel(item.machine))
+            .map(item => [normalizeText(item.dedup_key), { dedup_key: normalizeText(item.dedup_key), machine: item.machine }])).values()];
+        for (let offset = 0; offset < unique.length; offset += 100) {
+            const { error } = await _supabase.rpc('daf_update_machine_classification', {
+                p_mappings: unique.slice(offset, offset + 100)
+            });
+            if (error) return error;
+        }
+        if (unique.length) await window.koyaInvalidateCache?.();
+        return null;
+    };
+    const uploadDafBatchesStaged = async (file, batches) => {
+        const chunkPlan = [];
+        for (const batch of batches) {
+            const line = batch.line || currentDafLine();
+            splitDafRecordsIntoChunks(batch.records || []).forEach((records, chunkIndex) => {
+                chunkPlan.push({ line, chunkIndex, records });
+            });
+        }
+        if (!chunkPlan.length) return { acceptedCount: 0, duplicateCount: 0 };
+        const metadata = batches.map(batch => {
+            const row = toRemote(batch);
+            delete row.records;
+            return row;
+        });
+        const resumeKey = `koya-daf-import-v2:${file.name}:${file.size}:${file.lastModified}`;
+        let jobId = '';
+        try { jobId = localStorage.getItem(resumeKey) || ''; } catch (error) {}
+        if (!jobId) {
+            jobId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+            try { localStorage.setItem(resumeKey, jobId); } catch (error) {}
+        }
+        setDafUploadProgress(file.name, '建立可恢復的上傳工作');
+        const start = await dafImportRetry(signal => _supabase.rpc('daf_start_log_import', {
+            p_job_id: jobId, p_file_name: file.name, p_metadata: metadata, p_expected_chunks: chunkPlan.length
+        }).abortSignal(signal), '建立上傳工作');
+        if (start?.status === 'published') {
+            const result = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認已完成的上傳');
+            try { localStorage.removeItem(resumeKey); } catch (error) {}
+            return { acceptedCount: Number(result?.accepted_count) || 0, duplicateCount: Number(result?.duplicate_count) || 0 };
+        }
+        let completed = 0;
+        let firstChunkError = null;
+        setDafUploadProgress(file.name, `分批寫入 Supabase（${completed}/${chunkPlan.length}）`, completed, chunkPlan.length);
+        let nextChunkIndex = 0;
+        const uploadChunkWorker = async () => {
+            while (!firstChunkError && nextChunkIndex < chunkPlan.length) {
+                const chunk = chunkPlan[nextChunkIndex++];
+                try {
+                    const payload = JSON.stringify(chunk.records);
+                    const contentHash = await hashDafImportPayload(payload);
+                    await dafImportRetry(signal => _supabase.rpc('daf_stage_log_import_chunk', {
+                        p_job_id: jobId, p_line: chunk.line, p_chunk_index: chunk.chunkIndex,
+                        p_content_hash: contentHash, p_records: chunk.records
+                    }).abortSignal(signal), `${processLabel(chunk.line)} 第 ${chunk.chunkIndex + 1} 批`);
+                    completed++;
+                    setDafUploadProgress(file.name, `分批寫入 Supabase（${completed}/${chunkPlan.length}）`, completed, chunkPlan.length);
+                } catch (error) {
+                    firstChunkError ||= error;
+                    throw error;
+                }
+            }
+        };
+        const pending = Array.from({ length: Math.min(2, chunkPlan.length) }, uploadChunkWorker);
+        const chunkResults = await Promise.allSettled(pending);
+        const failedChunk = chunkResults.find(result => result.status === 'rejected');
+        if (failedChunk) {
+            const statusController = new AbortController();
+            const status = await withDafRequestTimeout(
+                _supabase.rpc('daf_get_log_import_status', { p_job_id: jobId }).abortSignal(statusController.signal),
+                '確認分批上傳狀態', 10000
+            );
+            if (status.error) throw firstChunkError || failedChunk.reason;
+            const received = Number(status.data?.received_chunks) || 0;
+            if (received !== chunkPlan.length) throw new Error(`${(firstChunkError || failedChunk.reason)?.message || firstChunkError || failedChunk.reason}；已保存 ${received}/${chunkPlan.length} 批，可重新選取同一檔案續傳`);
+        }
+        setDafUploadProgress(file.name, '比對跨檔 E 欄並發布資料', chunkPlan.length, chunkPlan.length);
+        let finalized;
+        try {
+            finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '發布上傳資料');
+        } catch (error) {
+            const statusController = new AbortController();
+            const status = await withDafRequestTimeout(
+                _supabase.rpc('daf_get_log_import_status', { p_job_id: jobId }).abortSignal(statusController.signal),
+                '確認發布狀態', 10000
+            );
+            if (!status.error && status.data?.status === 'published') {
+                finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認發布結果');
+            } else throw error;
+        }
+        if (!finalized?.published) throw new Error('Supabase 尚未確認發布，已保留暫存資料；重新選取同一檔案可續傳');
+        try { localStorage.removeItem(resumeKey); } catch (error) {}
+        if (!(await window.koyaInvalidateCache?.())) console.warn('上傳已寫入 Supabase，但 Cloudflare 快取未確認失效');
+        setDafUploadProgress(file.name, '已發布，正在更新共用摘要', 1, 1);
+        return {
+            acceptedCount: Number(finalized.accepted_count) || 0,
+            duplicateCount: Number(finalized.duplicate_count) || 0
+        };
+    };
     const saveRemote = async (batch) => {
         if (!dafRemoteReady.value) return false;
         const { data, error } = await _supabase.from(REMOTE_TABLE).upsert(toRemote(batch), { onConflict: 'id' }).select('id').maybeSingle();
@@ -712,6 +872,14 @@ SMT.daf = function (ctx) {
     const deleteRemoteDafFileBatches = async fileName => {
         const normalizedFileName = cleanText(fileName);
         if (!normalizedFileName || !_supabase) return false;
+        if (await isDafStagedImportReady()) {
+            const { data, error } = await _supabase.rpc('daf_delete_log_file', { p_file_name: normalizedFileName });
+            if (error || data !== true) {
+                dafRemoteError.value = `五站檔案刪除失敗：${error?.message || '資料庫未確認刪除'}`;
+                return false;
+            }
+            return true;
+        }
         const { data: existing, error: readError } = await _supabase.from(REMOTE_TABLE)
             .select('id,line').in('line', TEST_PROCESS_IDS).eq('file_name', normalizedFileName);
         if (readError) {
@@ -1412,6 +1580,13 @@ SMT.daf = function (ctx) {
         return request;
     };
     const loadDafRemoteRowsFromSupabase = async (line = currentDafLine(), includeRecords = false, { start = '', end = '', signal } = {}) => {
+        if (includeRecords) {
+            const stagedResult = await _supabase.rpc('daf_get_log_process_details', {
+                p_line: line, p_start: start, p_end: end
+            }).abortSignal(signal);
+            if (!stagedResult.error) return { data: stagedResult.data || [], error: null };
+            if (!isMissingDafImportRpc(stagedResult.error)) return { data: [], error: stagedResult.error };
+        }
         const summaryRows = [];
         for (let offset = 0; ; offset += 100) {
             let summaryQuery = _supabase.from(REMOTE_TABLE)
@@ -1647,6 +1822,20 @@ SMT.daf = function (ctx) {
     };
     const syncDafMachineClassificationRemotely = async (batches, machineMap, changedBatchIds) => {
         const changedIds = new Set(changedBatchIds || []);
+        if (await isDafStagedImportReady()) {
+            const mappings = new Map();
+            for (const batch of (batches || []).filter(item => changedIds.has(item.id))) {
+                for (const record of batch.records || []) {
+                    const key = normalizeText(record.dedupKey);
+                    const machine = machineMap.get(key);
+                    if (key && isDafMachineLabel(machine)) mappings.set(key, machine);
+                }
+            }
+            if (!mappings.size) return true;
+            const error = await updateDafStagedMachineLabels([...mappings].map(([dedup_key, machine]) => ({ dedup_key, machine })));
+            if (error) return false;
+            return true;
+        }
         for (const batch of (batches || []).filter(item => changedIds.has(item.id))) {
             const { data: remoteRow, error } = await _supabase.from(REMOTE_TABLE)
                 .select(REMOTE_DETAIL_COLUMNS).eq('id', batch.id).eq('line', batch.line).maybeSingle();
@@ -2832,6 +3021,7 @@ SMT.daf = function (ctx) {
             const refreshAgain = dafRemoteRefreshQueued;
             dafRemoteRefreshQueued = false;
             dafUploadInProgress = false;
+            dafUploadProgress.value = { ...dafUploadProgress.value, visible: false };
             if (refreshAgain) await loadDafData({ background: true, force: true });
         }
     };
@@ -2844,6 +3034,7 @@ SMT.daf = function (ctx) {
             const file = queue.files[index];
             queue.currentFile = file.name;
             try {
+                setDafUploadProgress(file.name, '讀取檔案並依 A 欄整理資料');
                 if (!(await ensureDafRemoteConnection())) {
                     recordDafUploadFailure(queue, file.name, 'Supabase 連線檢查', dafRemoteError.value || '共用資料庫連線失敗，檔案未寫入');
                     continue;
@@ -2890,60 +3081,72 @@ SMT.daf = function (ctx) {
                 }
                 let fileSaved = true;
                 let dafBatchSaved = false;
-                const batchLines = [...new Set(batches.map(batch => batch.line || currentDafLine()))];
-                const detailResults = [];
-                for (const line of batchLines) {
-                    // 寫入前跨日期比對 E 欄，使用完整遠端批次，不能回寫局部日期切片。
-                    // 逐站載入以避免同時下載五站完整歷史 LOG，觸發逾時或互相取消。
-                    let error = null;
-                    const ok = await ensureDafProcessDetails(line, { force: true, onError: detailError => { error = detailError; } });
-                    detailResults.push({ line, ok, error });
-                    if (!ok) break;
-                }
-                const failedDetailLines = new Set(detailResults.filter(result => !result.ok).map(result => result.line));
-                for (const result of detailResults.filter(item => failedDetailLines.has(item.line))) {
-                    recordDafUploadFailure(queue, file.name, '既有明細載入／重複比對', result.error || 'Supabase 與 Cloudflare 明細載入未完成，檔案未寫入', result.line);
-                    fileSaved = false;
-                }
-                if (failedDetailLines.size) continue;
-                const readyBatches = batches.filter(batch => !failedDetailLines.has(batch.line || currentDafLine()));
-                for (const batch of readyBatches) await ensureDafBaseSettings(batch);
-                if (readyBatches.length) {
-                    let merged;
-                    let replacementSnapshot = null;
-                    let legacyReplacementStarted = false;
-                    try { merged = await mergeDafBatches(readyBatches, { replaceFileName: file.name }); }
-                    catch (error) {
-                        recordDafUploadFailure(queue, file.name, '資料整理／Supabase 批次寫入', error);
+                const readyBatches = batches;
+                if (await isDafStagedImportReady()) {
+                    for (const batch of readyBatches) await ensureDafBaseSettings(batch);
+                    try {
+                        const result = await uploadDafBatchesStaged(file, readyBatches);
+                        queue.rows += result.acceptedCount;
+                        queue.duplicates += result.duplicateCount;
+                        dafBatchSaved = readyBatches.some(batch => batch.line === 'DAF');
+                    } catch (error) {
+                        recordDafUploadFailure(queue, file.name, '分批上傳／原子發布', error);
                         continue;
                     }
-                    if (merged.atomicUnavailable) {
-                        replacementSnapshot = await snapshotDafFileBatches(file.name);
-                        if (!replacementSnapshot) {
-                            recordDafUploadFailure(queue, file.name, '舊批次備份', dafRemoteError.value || '無法讀取舊資料，已停止覆蓋');
-                            continue;
-                        }
-                        if (!(await replaceDafFileBatches(file.name))) {
-                            await restoreDafFileReplacement(replacementSnapshot);
-                            recordDafUploadFailure(queue, file.name, '舊批次清除／覆蓋', dafRemoteError.value || '舊資料未能確認清除，已嘗試回復原資料');
-                            continue;
-                        }
-                        legacyReplacementStarted = true;
-                        try { merged = await mergeDafBatches(readyBatches); }
+                } else {
+                    const batchLines = [...new Set(readyBatches.map(batch => batch.line || currentDafLine()))];
+                    const detailResults = [];
+                    for (const line of batchLines) {
+                        setDafUploadProgress(file.name, `載入${processLabel(line)}既有明細並比對 E 欄`);
+                        let error = null;
+                        const ok = await ensureDafProcessDetails(line, { force: true, onError: detailError => { error = detailError; } });
+                        detailResults.push({ line, ok, error });
+                        if (!ok) break;
+                    }
+                    const failedDetailLines = new Set(detailResults.filter(result => !result.ok).map(result => result.line));
+                    for (const result of detailResults.filter(item => failedDetailLines.has(item.line))) {
+                        recordDafUploadFailure(queue, file.name, '既有明細載入／重複比對', result.error || 'Supabase 與 Cloudflare 明細載入未完成，檔案未寫入', result.line);
+                        fileSaved = false;
+                    }
+                    if (failedDetailLines.size) continue;
+                    for (const batch of readyBatches) await ensureDafBaseSettings(batch);
+                    if (readyBatches.length) {
+                        let merged;
+                        let replacementSnapshot = null;
+                        let legacyReplacementStarted = false;
+                        try { merged = await mergeDafBatches(readyBatches, { replaceFileName: file.name }); }
                         catch (error) {
-                            await restoreDafFileReplacement(replacementSnapshot, readyBatches);
-                            recordDafUploadFailure(queue, file.name, 'Supabase 批次寫入', error);
+                            recordDafUploadFailure(queue, file.name, '資料整理／Supabase 批次寫入', error);
                             continue;
                         }
+                        if (merged.atomicUnavailable) {
+                            replacementSnapshot = await snapshotDafFileBatches(file.name);
+                            if (!replacementSnapshot) {
+                                recordDafUploadFailure(queue, file.name, '舊批次備份', dafRemoteError.value || '無法讀取舊資料，已停止覆蓋');
+                                continue;
+                            }
+                            if (!(await replaceDafFileBatches(file.name))) {
+                                await restoreDafFileReplacement(replacementSnapshot);
+                                recordDafUploadFailure(queue, file.name, '舊批次清除／覆蓋', dafRemoteError.value || '舊資料未能確認清除，已嘗試回復原資料');
+                                continue;
+                            }
+                            legacyReplacementStarted = true;
+                            try { merged = await mergeDafBatches(readyBatches); }
+                            catch (error) {
+                                await restoreDafFileReplacement(replacementSnapshot, readyBatches);
+                                recordDafUploadFailure(queue, file.name, 'Supabase 批次寫入', error);
+                                continue;
+                            }
+                        }
+                        if (!merged.remoteSaved) {
+                            if (legacyReplacementStarted) await restoreDafFileReplacement(replacementSnapshot, readyBatches);
+                            recordDafUploadFailure(queue, file.name, 'Supabase 批次寫入', merged.remoteError || '資料庫未確認寫入');
+                            continue;
+                        }
+                        queue.rows += (merged.incomingBatches || []).reduce((sum, batch) => sum + (Number(batch.rowCount) || 0), 0);
+                        queue.duplicates += readyBatches.reduce((sum, batch) => sum + (batch.duplicateCount || 0), 0) + merged.duplicateCount;
+                        dafBatchSaved = (merged.incomingBatches || []).some(batch => batch.line === 'DAF');
                     }
-                    if (!merged.remoteSaved) {
-                        if (legacyReplacementStarted) await restoreDafFileReplacement(replacementSnapshot, readyBatches);
-                        recordDafUploadFailure(queue, file.name, 'Supabase 批次寫入', merged.remoteError || '資料庫未確認寫入');
-                        continue;
-                    }
-                    queue.rows += (merged.incomingBatches || []).reduce((sum, batch) => sum + (Number(batch.rowCount) || 0), 0);
-                    queue.duplicates += readyBatches.reduce((sum, batch) => sum + (batch.duplicateCount || 0), 0) + merged.duplicateCount;
-                    dafBatchSaved = (merged.incomingBatches || []).some(batch => batch.line === 'DAF');
                 }
                 const hasDafBatch = readyBatches.some(batch => batch.line === 'DAF');
                 if (machineReferences.length || matchedMachineReferenceKeys.length) {
@@ -3194,7 +3397,7 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadErrorDetail,
+        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, openDafUploadErrorDetail, closeDafUploadErrorDetail,

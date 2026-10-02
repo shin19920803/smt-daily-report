@@ -99,7 +99,9 @@ const trackedFetch = async (input, init = {}) => {
     const isStatsStateWrite = String(init.body || '').includes('__koya_shared_daf_stats_state_v1__');
     const requestUrl = input instanceof Request ? input.url : String(input);
     const isDafMachineReferenceWrite = requestUrl.includes('__DAF_MACHINE_REFERENCE__') || String(init.body || '').includes('__DAF_MACHINE_REFERENCE__');
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok && !isStatsStateWrite && !isDafMachineReferenceWrite) void window.koyaInvalidateCache();
+    const isDafImportStagingRequest = /\/rpc\/daf_(log_import_pipeline_ready|start_log_import|stage_log_import_chunk|get_log_import_status|finalize_log_import|delete_log_file)(\?|$)/.test(requestUrl);
+    const isDafMachineClassificationWrite = /\/rpc\/daf_update_machine_classification(\?|$)/.test(requestUrl);
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok && !isStatsStateWrite && !isDafMachineReferenceWrite && !isDafImportStagingRequest && !isDafMachineClassificationWrite) void window.koyaInvalidateCache();
     return response;
 };
 const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: trackedFetch } });

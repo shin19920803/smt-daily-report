@@ -76,6 +76,20 @@ const readDafSummaryFromSupabase = async line => {
 };
 
 const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
+    const stagedResponse = await fetch(`${SUPABASE_URL}/rest/v1/rpc/daf_get_log_process_details`, {
+        method: 'POST',
+        headers: { ...supabaseHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_line: line, p_start: start, p_end: end })
+    });
+    if (stagedResponse.ok) {
+        const rows = await stagedResponse.json();
+        if (!Array.isArray(rows)) return jsonResponse({ error: 'Staged detail response is not an array' }, 502);
+        return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=60' });
+    }
+    const stagedError = await stagedResponse.text();
+    if (!/PGRST202|42883|Could not find the function/i.test(stagedError)) {
+        return jsonResponse({ error: 'Supabase staged detail query failed', details: stagedError, status: stagedResponse.status }, 502);
+    }
     const result = await readSupabasePages('daf_log_batches', url => {
         url.searchParams.set('select', '*');
         url.searchParams.set('line', `eq.${line}`);
@@ -218,7 +232,7 @@ export default {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
         if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '202610011958' });
+            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '202610021550' });
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-summary') {

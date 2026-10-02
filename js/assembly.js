@@ -15,6 +15,7 @@ SMT.assembly = function (ctx) {
     const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
     const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
     const STATUS_NOTES_STORAGE_KEY = 'koya_assy_log_status_notes_v1';
+    const SUCCESS_DIVISOR_STORAGE_KEY = 'koya_assy_success_divisor_v1';
     const today = () => window.koyaTodayDate();
     const previousDayValue = window.koyaShiftDate(today(), -1);
 
@@ -41,6 +42,13 @@ SMT.assembly = function (ctx) {
     const assemblyStatusNoteEditorOpen = ref(false);
     const assemblyStatusNoteHour = ref('09');
     const assemblyStatusNoteDraft = ref('');
+    const readAssemblySuccessDivideByTwo = () => {
+        try { return localStorage.getItem(SUCCESS_DIVISOR_STORAGE_KEY) === '2'; } catch (e) { return false; }
+    };
+    const persistAssemblySuccessDivideByTwo = value => {
+        try { localStorage.setItem(SUCCESS_DIVISOR_STORAGE_KEY, value ? '2' : '1'); } catch (e) {}
+    };
+    const assemblySuccessDivideByTwo = ref(readAssemblySuccessDivideByTwo());
     const pendingAssemblyUpload = ref(null);
     const assemblyUnknownModal = ref({ show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' });
     const assemblySourceDetail = ref({ show: false, category: '', items: [], hourly: [], hourlyTitle: '每小時發生次數', hourlyHint: '', total: 0, note: '', draftNote: '', dailyTrend: [] });
@@ -471,13 +479,15 @@ SMT.assembly = function (ctx) {
         return null;
     };
 
-    const emptyBucket = () => ({
+    const normalizeSuccessDivisor = value => Number(value) === 2 ? 2 : 1;
+    const emptyBucket = (successDivisor = 1) => ({
         success: 0, ng: 0, ignored: 0, unclassified: 0, parsedLines: 0,
+        successDivisor: normalizeSuccessDivisor(successDivisor),
         byType: {}, sourceByType: {}, hourlySuccess: {}, hourlyNg: {}, hourlyByType: {}, events: []
     });
     const increment = (map, key, amount = 1) => { if (key) map[key] = (map[key] || 0) + amount; };
 
-    const parseText = (text, fallbackDate, mappings = assemblyMappings.value) => {
+    const parseText = (text, fallbackDate, mappings = assemblyMappings.value, successDivisor = 1) => {
         const buckets = {};
         const mappingMap = new Map((mappings || []).map(item => [item.logMessage, item.defectName]));
         const unknownMap = new Map();
@@ -489,7 +499,7 @@ SMT.assembly = function (ctx) {
             parsedLineCount++;
             const result = classify(parsed.message, mappingMap);
             const date = parsed.date || fallbackDate;
-            const bucket = buckets[date] || (buckets[date] = emptyBucket());
+            const bucket = buckets[date] || (buckets[date] = emptyBucket(successDivisor));
             bucket.parsedLines++;
             if (!result) {
                 bucket.unclassified++;
@@ -527,6 +537,7 @@ SMT.assembly = function (ctx) {
 
     const normalizeAssemblyBucketForAggregate = source => {
         const original = source || {};
+        const successDivisor = normalizeSuccessDivisor(original.successDivisor);
         const originalByType = original.byType || {};
         const byType = {};
         const sourceByType = {};
@@ -580,7 +591,12 @@ SMT.assembly = function (ctx) {
             if (hourlyNg[hour] === 0) delete hourlyNg[hour];
         });
 
-        const originalTotal = Number(original.success || 0) + Number(original.ng || 0);
+        const originalSuccess = Number(original.success || 0);
+        const success = originalSuccess / successDivisor;
+        const hourlySuccess = Object.fromEntries(Object.entries(original.hourlySuccess || {})
+            .map(([hour, quantity]) => [hour, Number(quantity || 0) / successDivisor])
+            .filter(([, quantity]) => quantity > 0));
+        const originalTotal = originalSuccess + Number(original.ng || 0);
         const originalEvents = Array.isArray(original.events) ? original.events : [];
         const eventsComplete = originalEvents.length === originalTotal;
         let events = originalEvents;
@@ -588,7 +604,7 @@ SMT.assembly = function (ctx) {
         if (eventsComplete) {
             events = originalEvents.reduce((items, event) => {
                 if (event?.type !== 'NG') {
-                    items.push(event);
+                    items.push({ ...event, quantity: 1 / successDivisor });
                     return items;
                 }
                 const category = normalizeAssemblyDefectCategory(event.category);
@@ -620,15 +636,20 @@ SMT.assembly = function (ctx) {
         const ng = Math.max(0, Number(original.ng || 0) - ignoredCount);
         return {
             ...original,
+            success,
+            successDivisor,
+            hourlySuccess,
             ng,
             ignored: Number(original.ignored || 0) + ignoredCount,
             byType,
             sourceByType,
             hourlyNg,
             hourlyByType,
-            events
+            events,
+            eventsComplete
         };
     };
+    const assemblyBucketSuccess = (batch, date) => normalizeAssemblyBucketForAggregate(batch?.buckets?.[date]).success;
     const inRange = (date, start, end) => (!start || date >= start) && (!end || date <= end);
     const aggregate = (batches, start = '', end = '') => {
         const byType = {}, byDate = {}, sourceByType = {}, hourlySuccess = {}, hourlyNg = {}, hourlyByType = {}, byModel = {};
@@ -669,17 +690,21 @@ SMT.assembly = function (ctx) {
                 Object.entries(hours || {}).forEach(([hour, qty]) => increment(categoryHours, hour, qty));
             });
             const sourceTotal = (source.success || 0) + (source.ng || 0);
-            const detailedEvents = Array.isArray(source.events) && source.events.length === sourceTotal;
+            const detailedEvents = source.eventsComplete === true || (Array.isArray(source.events) && source.events.length === sourceTotal);
             const modelEntry = model => byModel[model] || (byModel[model] = { success: 0, ng: 0, byType: {} });
             if (detailedEvents) {
                 source.events.forEach(event => {
                     const model = modelForLogTime(date, event.time);
                     const summary = modelEntry(model);
-                    increment(day.byModel, model);
-                    if (event.type === 'SUCCESS') summary.success++;
+                    if (event.type === 'SUCCESS') {
+                        const quantity = Number(event.quantity || 1);
+                        summary.success += quantity;
+                        increment(day.byModel, model, quantity);
+                    }
                     else if (event.type === 'NG') {
                         summary.ng++;
                         increment(summary.byType, event.category);
+                        increment(day.byModel, model);
                     }
                 });
             } else if (sourceTotal > 0) {
@@ -912,7 +937,12 @@ SMT.assembly = function (ctx) {
             pendingAssemblyUpload.value = null;
             assemblyUnknownModal.value = { show: false, items: [], currentIndex: 0, selectedDefectName: '', newDefectName: '' };
             if (pendingState) {
-                const parsed = parseText(pendingState.pending.text, pendingState.pending.fallbackDate, assemblyMappings.value);
+                const parsed = parseText(
+                    pendingState.pending.text,
+                    pendingState.pending.fallbackDate,
+                    assemblyMappings.value,
+                    pendingState.queue.successDivisor
+                );
                 if (parsed.unknownMessages.length) return toast('仍有未分類 LOG，請重新上傳處理', 'warning');
                 await saveAssemblyBatch(pendingState.pending, parsed);
                 pendingState.queue.success++;
@@ -1279,7 +1309,7 @@ SMT.assembly = function (ctx) {
             try {
                 const decoded = decodeBytes(await file.arrayBuffer());
                 const fallbackDate = today();
-                const parsed = parseText(decoded.text, fallbackDate, assemblyMappings.value);
+                const parsed = parseText(decoded.text, fallbackDate, assemblyMappings.value, queue.successDivisor);
                 setAssemblyDateFromParsedLog(parsed, fallbackDate);
                 const pending = { text: decoded.text, fallbackDate, encoding: decoded.encoding, fileName: file.name };
                 if (parsed.unknownMessages.length) {
@@ -1301,7 +1331,13 @@ SMT.assembly = function (ctx) {
     const uploadAssemblyLog = async (event) => {
         const files = [...(event.target.files || [])].filter(file => /\.(txt|log|csv)$/i.test(file.name || ''));
         if (!files.length) return;
-        const queue = { files, index: 0, success: 0, failed: [] };
+        const queue = {
+            files,
+            index: 0,
+            success: 0,
+            failed: [],
+            successDivisor: assemblySuccessDivideByTwo.value ? 2 : 1
+        };
         loading.value = true;
         try { await processAssemblyUploadQueue(queue); }
         finally {
@@ -1567,6 +1603,7 @@ SMT.assembly = function (ctx) {
         refreshAssemblyReport();
         if (assemblyStatusNoteEditorOpen.value) syncAssemblyStatusNoteDraft();
     });
+    watch(assemblySuccessDivideByTwo, value => persistAssemblySuccessDivideByTwo(value));
     watch(assemblyStatusNoteHour, () => {
         if (assemblyStatusNoteEditorOpen.value) syncAssemblyStatusNoteDraft();
     });
@@ -1596,6 +1633,7 @@ SMT.assembly = function (ctx) {
         assemblyModelScheduleRemoteReady, assemblyModelScheduleRemoteError, assemblyModelSchedules, assemblyModelSchedulesForDate,
         assemblyModelOptions, assemblyModelScheduleModal, assemblyModelScheduleForm, assemblyModelScheduleError,
         assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail, assemblyDailyDetail, assemblyModelDetail,
+        assemblySuccessDivideByTwo, assemblyBucketSuccess,
         assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectNotes, assemblyHourlyNotes, assemblyStatusNotes, assemblyStatusNoteHours, assemblyStatusNoteEditorOpen, assemblyStatusNoteHour, assemblyStatusNoteDraft, assemblyStatusNoteCurrent,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,

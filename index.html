@@ -274,6 +274,10 @@
                                 <i class="fas fa-folder-open mr-1"></i>選擇 LOG 資料夾
                                 <input type="file" accept=".txt,.log,.csv" webkitdirectory directory multiple @change="uploadAssemblyLog" class="hidden">
                             </label>
+                            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-200 bg-orange-50 text-sm font-bold text-orange-800 cursor-pointer select-none">
+                                <input type="checkbox" v-model="assemblySuccessDivideByTwo" class="accent-orange-500 w-4 h-4">
+                                <span>取圖像成功數量 ÷ 2</span>
+                            </label>
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <button @click="openAssemblyModelScheduleModal" class="btn-ghost"><i class="fas fa-microchip mr-1"></i>設定機種</button>
@@ -301,7 +305,7 @@
                         <div v-for="batch in assemblyBatchesForDate" :key="batch.id" class="flex items-center gap-2 bg-orange-50/60 border border-orange-100 rounded-lg px-3 py-2 text-xs">
                             <i class="fas fa-file-lines text-orange-500"></i>
                             <span class="font-bold truncate flex-1">{{ batch.fileName }}</span>
-                            <span class="text-gray-500 whitespace-nowrap">成功 {{ batch.buckets[assemblyUploadDate].success }}／NG {{ batch.buckets[assemblyUploadDate].ng }}</span>
+                            <span class="text-gray-500 whitespace-nowrap">成功 {{ assemblyBucketSuccess(batch, assemblyUploadDate) }}／NG {{ batch.buckets[assemblyUploadDate].ng }}</span>
                             <button @click="deleteAssemblyBatch(batch.id)" class="text-red-400 hover:text-red-600 px-1" title="刪除此上傳統計"><i class="fas fa-trash-alt"></i></button>
                         </div>
                     </div>
@@ -1864,7 +1868,7 @@
 <script src="js/core.js?v=202608191659"></script>
 <script src="js/orders.js?v=202608141200"></script>
 <script src="js/report.js?v=202608141200"></script>
-<script src="js/assembly.js?v=202608200852"></script>
+<script src="js/assembly.js?v=202610020001"></script>
 <script src="js/daf-upload-utils.js?v=20261002-staged-import"></script>
 <script src="js/daf.js?v=20261002-staged-import"></script>
 <script src="js/fpy.js?v=202608141200"></script>

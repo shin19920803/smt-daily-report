@@ -11,6 +11,7 @@ SMT.daf = function (ctx) {
     const REMOTE_VERSION_COLUMNS = 'id,line,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,row_count,raw_column_count,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text';
     const DAF_REMOTE_REQUEST_TIMEOUT_MS = 20000;
     const DAF_CACHE_REQUEST_TIMEOUT_MS = 25000;
+    const DAF_ATOMIC_REPLACE_MAX_ROWS = 3000;
     const withDafRequestTimeout = (request, label, timeoutMs = DAF_REMOTE_REQUEST_TIMEOUT_MS) => new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -1592,12 +1593,19 @@ SMT.daf = function (ctx) {
             const previous = beforeById.get(batch.id);
             return !previous || dafBatchSignature(previous) !== dafBatchSignature(batch);
         }).map(toRemote);
+        // 多批次／大檔一次塞進單一 RPC 會讓 PostgreSQL 解析／寫入整包 JSONB 超時。
+        // 交由上傳流程先備份同名舊檔，再以逐批 upsert 寫入，失敗時可回復。
+        const affectedRows = rows.reduce((total, row) => total + (Number(row.row_count) || 0), 0);
+        if (rows.length > 1 || affectedRows > DAF_ATOMIC_REPLACE_MAX_ROWS) {
+            return { saved: false, unavailable: true, error: new Error('批次資料量較大，改用備份後逐批寫入') };
+        }
         try {
             const { data, error } = await _supabase.rpc('replace_daf_log_file_atomic', {
                 p_file_name: cleanText(fileName), p_delete_ids: deleteIds, p_rows: rows
             });
             if (error) {
-                const unavailable = error.code === 'PGRST202' || error.code === '42883';
+                // 57014 = PostgreSQL statement timeout；RPC 交易已取消，安全改走已備份的分批備援。
+                const unavailable = ['PGRST202', '42883', '57014'].includes(error.code);
                 return { saved: false, unavailable, error };
             }
             return { saved: data === true, unavailable: false };

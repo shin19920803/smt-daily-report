@@ -1,7 +1,15 @@
 window.SMT = window.SMT || {};
 SMT.report = function (ctx) {
         const { data, toast, loading, loadBaseData, activeWoNumbers, currentLine, currentTab } = ctx;
-        const report = ref({ date: window.koyaTodayDate(), wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
+        const previousWorkday = dateValue => {
+            let date = dateValue || window.koyaTodayDate();
+            do {
+                date = window.koyaShiftDate(date, -1);
+            } while ([0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()));
+            return date;
+        };
+        const defaultReportDate = () => previousWorkday(window.koyaTodayDate());
+        const report = ref({ date: defaultReportDate(), wo_id: null, selectedWoNumber: null, inputQty: 0, currentId: null, logs: [], isEditing: false, originalDate: null });
         const defectForm = ref({ typeId: null, locationId: null, qty: 1 });
         const historyList = ref([]);
         const reportHistoryList = computed(() => report.value.wo_id
@@ -30,6 +38,19 @@ SMT.report = function (ctx) {
             }
             backToWoList();
         };
+        const prepareDailyReport = () => {
+            report.value = {
+                ...report.value,
+                date: defaultReportDate(),
+                wo_id: null,
+                selectedWoNumber: null,
+                inputQty: 0,
+                currentId: null,
+                logs: [],
+                isEditing: false,
+                originalDate: null
+            };
+        };
         
         // 日期變更處理：編輯模式下不重新查詢，僅記錄新日期待儲存時一併更新
         const onDateChange = () => {
@@ -47,7 +68,7 @@ SMT.report = function (ctx) {
             report.value.currentId = null;
             report.value.logs = [];
             report.value.inputQty = 0;
-            report.value.date = window.koyaTodayDate();
+            report.value.date = defaultReportDate();
             report.value.wo_id = null;
             report.value.selectedWoNumber = null;
         };
@@ -193,7 +214,7 @@ SMT.report = function (ctx) {
         return {
             report, defectForm, historyList, reportHistoryList, rawExportFilter,
             availableModelsForSelectedWo, reportWoList, onWoNumberChange, selectReportWo, backToWoList, backFromReport,
-            onDateChange, cancelEdit, loadHistory, loadRecordForEdit, fetchDailyRecord,
+            onDateChange, cancelEdit, prepareDailyReport, loadHistory, loadRecordForEdit, fetchDailyRecord,
             saveDailyInput, addDefect, deleteDefect, importDefectCsv,
             editingDefect, startEditDefect, saveEditDefect, deleteDailyRecord, exportRawData
         };

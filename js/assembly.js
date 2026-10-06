@@ -592,18 +592,22 @@ SMT.assembly = function (ctx) {
         });
 
         const originalSuccess = Number(original.success || 0);
-        const success = Math.floor(originalSuccess / successDivisor);
+        const success = Math.ceil(originalSuccess / successDivisor);
         let successRemainder = 0;
-        const hourlySuccess = Object.fromEntries(Object.entries(original.hourlySuccess || {})
+        const hourlySuccess = {};
+        let lastSuccessHour = '';
+        Object.entries(original.hourlySuccess || {})
             .sort(([hourA], [hourB]) => hourA.localeCompare(hourB))
-            .map(([hour, quantity]) => {
+            .forEach(([hour, quantity]) => {
                 const rawQuantity = Number(quantity || 0);
+                if (rawQuantity <= 0) return;
+                lastSuccessHour = hour;
                 successRemainder += rawQuantity;
                 const normalizedQuantity = Math.floor(successRemainder / successDivisor);
                 successRemainder %= successDivisor;
-                return [hour, normalizedQuantity];
-            })
-            .filter(([, quantity]) => quantity > 0));
+                if (normalizedQuantity > 0) hourlySuccess[hour] = normalizedQuantity;
+            });
+        if (successRemainder > 0 && lastSuccessHour) hourlySuccess[lastSuccessHour] = (hourlySuccess[lastSuccessHour] || 0) + 1;
         const originalTotal = originalSuccess + Number(original.ng || 0);
         const originalEvents = Array.isArray(original.events) ? original.events : [];
         const eventsComplete = originalEvents.length === originalTotal;
@@ -611,11 +615,13 @@ SMT.assembly = function (ctx) {
         let ignoredEventCount = 0;
         if (eventsComplete) {
             let successPairSlot = 0;
+            let lastUnpairedSuccess = null;
             events = originalEvents.reduce((items, event) => {
                 if (event?.type !== 'NG') {
                     const quantity = successDivisor === 1 || successPairSlot === successDivisor - 1 ? 1 : 0;
                     successPairSlot = (successPairSlot + 1) % successDivisor;
                     if (quantity > 0) items.push({ ...event, quantity });
+                    else lastUnpairedSuccess = event;
                     return items;
                 }
                 const category = normalizeAssemblyDefectCategory(event.category);
@@ -626,6 +632,7 @@ SMT.assembly = function (ctx) {
                 items.push({ ...event, category });
                 return items;
             }, []);
+            if (originalSuccess % successDivisor !== 0 && lastUnpairedSuccess) events.push({ ...lastUnpairedSuccess, quantity: 1 });
         }
         const remappedIgnoredTotal = Object.values(ignoredByType)
             .reduce((sum, quantity) => sum + Number(quantity || 0), 0);

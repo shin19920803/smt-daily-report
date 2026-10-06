@@ -592,9 +592,17 @@ SMT.assembly = function (ctx) {
         });
 
         const originalSuccess = Number(original.success || 0);
-        const success = originalSuccess / successDivisor;
+        const success = Math.floor(originalSuccess / successDivisor);
+        let successRemainder = 0;
         const hourlySuccess = Object.fromEntries(Object.entries(original.hourlySuccess || {})
-            .map(([hour, quantity]) => [hour, Number(quantity || 0) / successDivisor])
+            .sort(([hourA], [hourB]) => hourA.localeCompare(hourB))
+            .map(([hour, quantity]) => {
+                const rawQuantity = Number(quantity || 0);
+                successRemainder += rawQuantity;
+                const normalizedQuantity = Math.floor(successRemainder / successDivisor);
+                successRemainder %= successDivisor;
+                return [hour, normalizedQuantity];
+            })
             .filter(([, quantity]) => quantity > 0));
         const originalTotal = originalSuccess + Number(original.ng || 0);
         const originalEvents = Array.isArray(original.events) ? original.events : [];
@@ -602,9 +610,12 @@ SMT.assembly = function (ctx) {
         let events = originalEvents;
         let ignoredEventCount = 0;
         if (eventsComplete) {
+            let successPairSlot = 0;
             events = originalEvents.reduce((items, event) => {
                 if (event?.type !== 'NG') {
-                    items.push({ ...event, quantity: 1 / successDivisor });
+                    const quantity = successDivisor === 1 || successPairSlot === successDivisor - 1 ? 1 : 0;
+                    successPairSlot = (successPairSlot + 1) % successDivisor;
+                    if (quantity > 0) items.push({ ...event, quantity });
                     return items;
                 }
                 const category = normalizeAssemblyDefectCategory(event.category);

@@ -3275,9 +3275,20 @@ SMT.daf = function (ctx) {
         const pareto = [['不良現象', '不良數量', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
         const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
         const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
+        const hasCompactedRows = result.rows.some(row => row.compacted === true);
+        const hasRawColumns = result.rows.some(row => Array.isArray(row.raw) && row.raw.length > 0);
         const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期', '機台', '原始欄位格式'];
-        const rawRows = result.rows.map(row => [row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否', row.isDefect ? '是' : '否', row.date, row.machine || DAF_MACHINE_UNKNOWN, row.sourceFormat === CURRENT_SOURCE_FORMAT ? '新格式 B／D／E／F／H／I' : '舊格式 C／E／F／G／I／J', ...(row.raw || [])]);
-        const rawColumns = result.rows.reduce((max, row) => Math.max(max, (row.raw || []).length), Math.max(LEGACY_COLUMNS.minColumns, CURRENT_COLUMNS.minColumns));
+        if (hasCompactedRows) rawHeader.push('資料保留狀態');
+        const rawRows = result.rows.map(row => [
+            row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否',
+            row.isDefect ? '是' : '否', row.date, row.machine || DAF_MACHINE_UNKNOWN,
+            row.sourceFormat === CURRENT_SOURCE_FORMAT ? '新格式 B／D／E／F／H／I' : '舊格式 C／E／F／G／I／J',
+            ...(hasCompactedRows ? [row.compacted ? '精簡歷史資料（原始欄位已移除）' : (row.raw?.length ? '完整原始欄位' : '來源未包含原始欄位')] : []),
+            ...(row.raw || [])
+        ]);
+        const rawColumns = hasRawColumns
+            ? result.rows.reduce((max, row) => Math.max(max, (row.raw || []).length), Math.max(LEGACY_COLUMNS.minColumns, CURRENT_COLUMNS.minColumns))
+            : 0;
         for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄`);
         const wb = XLSX.utils.book_new();
         const sheets = [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines], ['每日統計', daily], ['每日×機台', dailyMachines], ['原始資料', [rawHeader, ...rawRows]]];

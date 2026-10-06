@@ -31,34 +31,47 @@ schedule_path="$(cd "$(dirname "$0")/.." && pwd)/supabase/daf_historical_compact
 pg_restore --list "$backup_path" >/dev/null || { printf '備份檔無法讀取，拒絕修改線上資料。\n' >&2; exit 2; }
 pg_restore --exit-on-error --file=/dev/null "$backup_path" || { printf '備份內容驗證失敗，拒絕修改線上資料。\n' >&2; exit 2; }
 
-read -r -s -p 'Supabase Database Password（輸入不會顯示）: ' pg_password
-printf '\n'
-[[ -n "$pg_password" ]] || { printf '密碼不可空白。\n' >&2; exit 2; }
+pgpass_file=${KOYA_PGPASSFILE:-}
+pgpass_owned=0
+pgpass_dir=''
+if [[ -n "$pgpass_file" ]]; then
+  [[ -f "$pgpass_file" && -r "$pgpass_file" ]] || {
+    printf '指定的暫存連線憑證無法讀取；拒絕連線。\n' >&2
+    exit 2
+  }
+else
+  read -r -s -p 'Supabase Database Password（輸入不會顯示）: ' pg_password
+  printf '\n'
+  [[ -n "$pg_password" ]] || { printf '密碼不可空白。\n' >&2; exit 2; }
 
-escape_pgpass_field() {
-  local value=${1//\\/\\\\}
-  value=${value//:/\\:}
-  printf '%s' "$value"
-}
+  escape_pgpass_field() {
+    local value=${1//\\/\\\\}
+    value=${value//:/\\:}
+    printf '%s' "$value"
+  }
 
-umask 077
-pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/koya-compact-pgpass.XXXXXX")
-pgpass_file="$pgpass_dir/pgpass"
+  umask 077
+  pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/koya-compact-pgpass.XXXXXX")
+  pgpass_file="$pgpass_dir/pgpass"
+  printf '%s:%s:%s:%s:%s\n' \
+    "$(escape_pgpass_field "$pg_host")" \
+    "$(escape_pgpass_field "$pg_port")" \
+    "$(escape_pgpass_field "$pg_database")" \
+    "$(escape_pgpass_field "$pg_user")" \
+    "$(escape_pgpass_field "$pg_password")" > "$pgpass_file"
+  unset pg_password
+  chmod 600 "$pgpass_file"
+  pgpass_owned=1
+fi
+
 cleanup() {
-  unset pg_password PGPASSWORD
-  rm -f -- "$pgpass_file"
-  rmdir -- "$pgpass_dir" 2>/dev/null || true
+  unset pg_password PGPASSWORD KOYA_PGPASSFILE
+  if [[ "$pgpass_owned" -eq 1 ]]; then
+    rm -f -- "$pgpass_file"
+    rmdir -- "$pgpass_dir" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT HUP INT TERM
-
-printf '%s:%s:%s:%s:%s\n' \
-  "$(escape_pgpass_field "$pg_host")" \
-  "$(escape_pgpass_field "$pg_port")" \
-  "$(escape_pgpass_field "$pg_database")" \
-  "$(escape_pgpass_field "$pg_user")" \
-  "$(escape_pgpass_field "$pg_password")" > "$pgpass_file"
-unset pg_password
-chmod 600 "$pgpass_file"
 
 export PGPASSFILE="$pgpass_file"
 export PGSSLMODE=require

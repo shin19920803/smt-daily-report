@@ -1,10 +1,15 @@
 \set ON_ERROR_STOP on
 
-create role anon nologin;
-create role authenticated nologin;
+do $$
+begin
+    if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
+    if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
+end;
+$$;
 \ir ../supabase/daf_log_batches.sql
 \ir ../supabase/daf_staged_imports.sql
 \ir ../supabase/daf_historical_compaction.sql
+\ir ../supabase/daf_candidate_payload_slimming.sql
 
 select public.daf_start_log_import(
     '00000000-0000-4000-8000-000000000001'::uuid,
@@ -64,6 +69,73 @@ select public.daf_stage_log_import_chunk(
 );
 select public.daf_finalize_log_import('00000000-0000-4000-8000-000000000001'::uuid);
 
+do $$
+declare
+    v_candidate public.daf_log_candidates;
+    v_batch jsonb;
+    v_original jsonb := '{"dedupKey":"E-EXTRA","dedupTime":1768032000000,"date":"2026-01-10","workOrder":"WO-EXTRA","productCode":"P-EXTRA","model":"Model-EXTRA","status":"GOOD","defect":"","machine":"未知機台","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2","customField":"must-survive","raw":[]}'::jsonb;
+    v_expected jsonb;
+    v_slim jsonb;
+begin
+    if exists (
+        select 1 from public.daf_log_candidates c
+        where c.job_id = '00000000-0000-4000-8000-000000000001'::uuid
+          and c.record_storage_version <> 2
+    ) then raise exception 'New eligible uploads were not stored in slim format'; end if;
+    select c.* into v_candidate
+    from public.daf_log_candidates c
+    where c.line = 'DAF' and c.dedup_key = 'E-001'
+    order by c.dedup_time, c.id limit 1;
+    if v_candidate.record_json ?| array[
+        'dedupKey', 'dedupTime', 'date', 'workOrder', 'productCode', 'model',
+        'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
+    ] then raise exception 'Slim JSON still duplicates canonical typed fields'; end if;
+    if public.daf_candidate_to_record(v_candidate) is distinct from
+       '{"dedupKey":"E-001","dedupTime":1768032000000,"date":"2026-01-10","workOrder":"WO-1","productCode":"P-1","model":"Model-1","status":"GOOD","defect":"","machine":"1號機","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2","raw":["DAF","WO-1","","P-1","E-001","2026-01-10 08:00:00","Y0176","","GOOD"]}'::jsonb
+    then raise exception 'Slim JSON did not reconstruct the exact original row'; end if;
+
+    v_expected := v_original - 'customField' - 'raw';
+    v_slim := public.daf_try_slim_candidate_json(v_original, v_expected);
+    if v_slim is null or v_slim->>'customField' <> 'must-survive'
+       or (v_slim || v_expected) is distinct from v_original then
+        raise exception 'Slim conversion did not preserve unknown JSON fields or exact reconstruction';
+    end if;
+    if public.daf_try_slim_candidate_json(v_original || '{"raw":"not-an-array"}'::jsonb, v_expected) is not null then
+        raise exception 'Slim conversion accepted an invalid raw payload';
+    end if;
+
+    insert into public.daf_log_import_jobs(id, file_name, status, metadata)
+    values (
+        '00000000-0000-4000-8000-000000000010'::uuid,
+        'legacy-v1.xlsx', 'published',
+        '[{"line":"DAF","file_name":"legacy-v1.xlsx","date_start":"2026-01-10"}]'::jsonb
+    );
+    insert into public.daf_log_candidates(
+        id, job_id, line, file_name, dedup_key, dedup_time, report_date,
+        work_order, product_code, model_name, status, defect, machine,
+        input_included, is_defect, source_format, record_json, created_at
+    ) values (
+        '00000000-0000-0000-0000-000000000000',
+        '00000000-0000-4000-8000-000000000010'::uuid,
+        'DAF', 'legacy-v1.xlsx', 'E-BACKFILL', 1768118400000,
+        '2026-01-10', 'WO-BACKFILL', 'P-BACKFILL', 'Model-BACKFILL',
+        'GOOD', '', '未知機台', true, false, 'current-v2',
+        '{"dedupKey":"E-BACKFILL","dedupTime":1768118400000,"date":"2026-01-10","workOrder":"WO-BACKFILL","productCode":"P-BACKFILL","model":"Model-BACKFILL","status":"GOOD","defect":"","machine":"未知機台","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2","raw":["DAF","WO-BACKFILL","","P-BACKFILL","E-BACKFILL","2026-01-11 08:00:00","","","GOOD"]}'::jsonb,
+        '2026-01-10T08:00:00Z'
+    );
+    v_batch := public.daf_slim_log_candidates_batch(10, null);
+    if (v_batch->>'converted')::integer <> 1 then
+        raise exception 'Backfill did not convert exactly one compatible legacy row: %', v_batch;
+    end if;
+    select c.* into v_candidate
+    from public.daf_log_candidates c where c.id = '00000000-0000-0000-0000-000000000000';
+    if v_candidate.record_storage_version <> 2
+       or public.daf_candidate_to_record(v_candidate) is distinct from
+          (v_candidate.record_json || '{"dedupKey":"E-BACKFILL","dedupTime":1768118400000,"date":"2026-01-10","workOrder":"WO-BACKFILL","productCode":"P-BACKFILL","model":"Model-BACKFILL","status":"GOOD","defect":"","machine":"未知機台","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2"}'::jsonb)
+    then raise exception 'Backfill failed its reconstructed-row check'; end if;
+end;
+$$;
+
 -- Simulate a legacy duplicate full-record cache in the summary table.
 begin;
 select set_config('koya.allow_daf_summary_write', 'on', true);
@@ -92,7 +164,7 @@ select public.daf_start_log_import(
 -- A legacy raw-column fallback must be detected and must stop that batch.
 begin;
 update public.daf_log_candidates
-set product_code = '', record_json = record_json - 'productCode'
+set product_code = '', record_json = record_json - 'productCode', record_storage_version = 1
 where line = 'DAF' and dedup_key = 'E-001';
 do $$
 declare

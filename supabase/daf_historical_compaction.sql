@@ -5,6 +5,108 @@
 begin;
 set local statement_timeout = '120s';
 
+-- Additive storage version for mixed legacy and slim candidate payloads.
+alter table public.daf_log_candidates
+    add column if not exists record_storage_version smallint not null default 1;
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.daf_log_candidates'::regclass
+          and conname = 'daf_log_candidates_record_storage_version_check'
+    ) then
+        alter table public.daf_log_candidates
+            add constraint daf_log_candidates_record_storage_version_check
+            check (record_storage_version in (1, 2));
+    end if;
+end;
+$$;
+
+create or replace function public.daf_candidate_canonical_json(p_candidate public.daf_log_candidates)
+returns jsonb
+language sql
+immutable
+set search_path = public
+as $$
+    select jsonb_build_object(
+        'dedupKey', p_candidate.dedup_key,
+        'dedupTime', p_candidate.dedup_time,
+        'date', p_candidate.report_date,
+        'workOrder', p_candidate.work_order,
+        'productCode', p_candidate.product_code,
+        'model', p_candidate.model_name,
+        'status', p_candidate.status,
+        'defect', p_candidate.defect,
+        'machine', p_candidate.machine,
+        'inputIncluded', p_candidate.input_included,
+        'isDefect', p_candidate.is_defect,
+        'sourceFormat', p_candidate.source_format
+    );
+$$;
+
+create or replace function public.daf_candidate_to_record(p_candidate public.daf_log_candidates)
+returns jsonb
+language plpgsql
+immutable
+set search_path = public
+as $$
+begin
+    if p_candidate.record_storage_version = 1 then
+        return p_candidate.record_json;
+    elsif p_candidate.record_storage_version = 2 then
+        return p_candidate.record_json || public.daf_candidate_canonical_json(p_candidate);
+    end if;
+    raise exception 'unsupported candidate record storage version: %', p_candidate.record_storage_version;
+end;
+$$;
+
+create or replace function public.daf_candidate_payload_mismatch(p_candidate public.daf_log_candidates)
+returns boolean
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+    v_known_keys text[] := array[
+        'dedupKey', 'dedupTime', 'date', 'workOrder', 'productCode', 'model',
+        'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
+    ];
+begin
+    if p_candidate.record_storage_version = 1 then
+        return
+            nullif(upper(btrim(p_candidate.record_json->>'dedupKey')), '') is distinct from p_candidate.dedup_key
+            or case when coalesce(p_candidate.record_json->>'dedupTime', '') ~ '^-?[0-9]+$'
+                    then (p_candidate.record_json->>'dedupTime')::bigint else null end is distinct from p_candidate.dedup_time
+            or nullif(p_candidate.record_json->>'date', '') is distinct from p_candidate.report_date
+            or coalesce(p_candidate.record_json->>'workOrder', '') is distinct from p_candidate.work_order
+            or coalesce(p_candidate.record_json->>'productCode', '') is distinct from p_candidate.product_code
+            or coalesce(p_candidate.record_json->>'model', '') is distinct from p_candidate.model_name
+            or coalesce(p_candidate.record_json->>'status', '') is distinct from p_candidate.status
+            or coalesce(p_candidate.record_json->>'defect', '') is distinct from p_candidate.defect
+            or coalesce(p_candidate.record_json->>'machine', '') is distinct from p_candidate.machine
+            or coalesce((p_candidate.record_json->>'inputIncluded')::boolean, false) is distinct from p_candidate.input_included
+            or coalesce((p_candidate.record_json->>'isDefect')::boolean, false) is distinct from p_candidate.is_defect
+            or coalesce(p_candidate.record_json->>'sourceFormat', '') is distinct from p_candidate.source_format
+            or (coalesce(p_candidate.record_json->>'productCode', '') = '' and
+                coalesce(p_candidate.record_json->'raw'->>(case when p_candidate.source_format = 'current-v2' or p_candidate.line = 'FT1' then 3 else 4 end), '') <> '')
+            or (coalesce(p_candidate.record_json->>'dedupKey', '') = '' and
+                coalesce(p_candidate.record_json->'raw'->>(case when p_candidate.source_format = 'current-v2' or p_candidate.line = 'FT1' then 4 else 5 end), '') <> '')
+            or (coalesce(p_candidate.record_json->>'dedupTime', '') = '' and
+                coalesce(p_candidate.record_json->'raw'->>(case when p_candidate.source_format = 'current-v2' or p_candidate.line = 'FT1' then 5 else 6 end), '') <> '');
+    elsif p_candidate.record_storage_version = 2 then
+        return coalesce(p_candidate.record_json ?| v_known_keys, true)
+            or (p_candidate.record_json ? 'raw'
+                and jsonb_typeof(p_candidate.record_json->'raw') is distinct from 'array');
+    end if;
+    return true;
+end;
+$$;
+
+revoke all on function public.daf_candidate_canonical_json(public.daf_log_candidates),
+    public.daf_candidate_to_record(public.daf_log_candidates),
+    public.daf_candidate_payload_mismatch(public.daf_log_candidates)
+from public, anon, authenticated;
+
 create table if not exists public.daf_log_compact_facts (
     candidate_id text primary key,
     line text not null check (line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')),
@@ -92,29 +194,7 @@ as $$
         join public.daf_log_winners w on w.candidate_id = c.id
         where c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
           and c.report_date < p_cutoff::text
-          and (
-              nullif(upper(btrim(c.record_json->>'dedupKey')), '') is distinct from c.dedup_key
-              or case when coalesce(c.record_json->>'dedupTime', '') ~ '^-?[0-9]+$'
-                    then (c.record_json->>'dedupTime')::bigint else null end is distinct from c.dedup_time
-              or nullif(c.record_json->>'date', '') is distinct from c.report_date
-              or coalesce(c.record_json->>'workOrder', '') is distinct from c.work_order
-              or coalesce(c.record_json->>'productCode', '') is distinct from c.product_code
-              or coalesce(c.record_json->>'model', '') is distinct from c.model_name
-              or coalesce(c.record_json->>'status', '') is distinct from c.status
-              or coalesce(c.record_json->>'defect', '') is distinct from c.defect
-              or coalesce(c.record_json->>'machine', '') is distinct from c.machine
-              or coalesce((c.record_json->>'inputIncluded')::boolean, false) is distinct from c.input_included
-              or coalesce((c.record_json->>'isDefect')::boolean, false) is distinct from c.is_defect
-              or coalesce(c.record_json->>'sourceFormat', '') is distinct from c.source_format
-              -- The browser has legacy raw-column fallbacks for product code, E key,
-              -- and timestamp. Refuse compaction if any such fallback would be lost.
-              or (coalesce(c.record_json->>'productCode', '') = '' and
-                  coalesce(c.record_json->'raw'->>(case when c.source_format = 'current-v2' or c.line = 'FT1' then 3 else 4 end), '') <> '')
-              or (coalesce(c.record_json->>'dedupKey', '') = '' and
-                  coalesce(c.record_json->'raw'->>(case when c.source_format = 'current-v2' or c.line = 'FT1' then 4 else 5 end), '') <> '')
-              or (coalesce(c.record_json->>'dedupTime', '') = '' and
-                  coalesce(c.record_json->'raw'->>(case when c.source_format = 'current-v2' or c.line = 'FT1' then 5 else 6 end), '') <> '')
-          )
+          and public.daf_candidate_payload_mismatch(c)
         group by c.line
     ), compacted as (
         select f.line, count(*)::bigint as n
@@ -248,27 +328,7 @@ begin
         from public.daf_log_candidates c
         join public.daf_log_winners w on w.candidate_id = c.id
         where c.id = any(v_ids)
-          and (
-              nullif(upper(btrim(c.record_json->>'dedupKey')), '') is distinct from c.dedup_key
-              or case when coalesce(c.record_json->>'dedupTime', '') ~ '^-?[0-9]+$'
-                    then (c.record_json->>'dedupTime')::bigint else null end is distinct from c.dedup_time
-              or nullif(c.record_json->>'date', '') is distinct from c.report_date
-              or coalesce(c.record_json->>'workOrder', '') is distinct from c.work_order
-              or coalesce(c.record_json->>'productCode', '') is distinct from c.product_code
-              or coalesce(c.record_json->>'model', '') is distinct from c.model_name
-              or coalesce(c.record_json->>'status', '') is distinct from c.status
-              or coalesce(c.record_json->>'defect', '') is distinct from c.defect
-              or coalesce(c.record_json->>'machine', '') is distinct from c.machine
-              or coalesce((c.record_json->>'inputIncluded')::boolean, false) is distinct from c.input_included
-              or coalesce((c.record_json->>'isDefect')::boolean, false) is distinct from c.is_defect
-              or coalesce(c.record_json->>'sourceFormat', '') is distinct from c.source_format
-              or (coalesce(c.record_json->>'productCode', '') = '' and
-                  coalesce(c.record_json->'raw'->>(case when c.source_format = 'current-v2' or c.line = 'FT1' then 3 else 4 end), '') <> '')
-              or (coalesce(c.record_json->>'dedupKey', '') = '' and
-                  coalesce(c.record_json->'raw'->>(case when c.source_format = 'current-v2' or c.line = 'FT1' then 4 else 5 end), '') <> '')
-              or (coalesce(c.record_json->>'dedupTime', '') = '' and
-                  coalesce(c.record_json->'raw'->>(case when c.source_format = 'current-v2' or c.line = 'FT1' then 5 else 6 end), '') <> '')
-          )
+          and public.daf_candidate_payload_mismatch(c)
     ) then raise exception '本批資料的明細欄位與儲存欄位不一致，為避免改變 Dashboard，已停止封存'; end if;
 
     select count(*)::integer into v_expected_winners
@@ -412,7 +472,7 @@ as $$
                select jsonb_agg(r.record_json order by r.dedup_time nulls last, r.created_at, r.record_id)
                from (
                    select c.line, c.file_name, c.dedup_time, c.created_at, c.id as record_id,
-                          c.report_date, c.record_json
+                          c.report_date, public.daf_candidate_to_record(c) as record_json
                    from public.daf_log_winners w
                    join public.daf_log_candidates c on c.id = w.candidate_id
                    where w.line = b.line and w.file_name = b.file_name
@@ -526,7 +586,10 @@ begin
         where machine in ('1號機', '2號機') and nullif(btrim(dedup_key), '') is not null
     )
     update public.daf_log_candidates c
-       set machine = m.machine, record_json = jsonb_set(c.record_json, '{machine}', to_jsonb(m.machine), true)
+       set machine = m.machine,
+           record_json = case when c.record_storage_version = 1
+                              then jsonb_set(c.record_json, '{machine}', to_jsonb(m.machine), true)
+                              else c.record_json end
       from mapping m
      where c.line in ('DAF', 'FT1') and c.dedup_key = m.dedup_key and c.machine is distinct from m.machine;
     get diagnostics v_updated_candidates = row_count;

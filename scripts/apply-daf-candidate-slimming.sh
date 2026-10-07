@@ -99,16 +99,38 @@ if [[ "$base_schema" != 't' ]]; then
 fi
 
 snapshot_cutoff=$(psql_exec -At -c "select clock_timestamp()::text")
-receiving_jobs=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "select count(*) from public.daf_log_import_jobs where status='receiving' and created_at < :'snapshot_cutoff'::timestamptz")
+receiving_jobs=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
+select count(*) from public.daf_log_import_jobs
+where status='receiving' and created_at < :'snapshot_cutoff'::timestamptz;
+SQL
+)
 if [[ "$receiving_jobs" != '0' ]]; then
   printf '目前有 %s 個上傳工作進行中；請等其完成後再套用，以免部署快照混入上傳變更。\n' "$receiving_jobs" >&2
   exit 3
 fi
 
-candidate_snapshot_sql="select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '') || '|' || md5(coalesce(string_agg(md5((to_jsonb(c) - array['record_json','record_storage_version'])::text), '' order by id), '')) from public.daf_log_candidates c where c.created_at < :'snapshot_cutoff'::timestamptz group by line order by line"
-winner_snapshot_sql="select w.line || '|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(w)::text), '' order by w.candidate_id), '')) from public.daf_log_winners w join public.daf_log_candidates c on c.id=w.candidate_id where c.created_at < :'snapshot_cutoff'::timestamptz group by w.line order by w.line"
-candidate_before=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "$candidate_snapshot_sql")
-winner_before=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "$winner_snapshot_sql")
+candidate_snapshot() {
+  psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
+select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '') || '|' ||
+       md5(coalesce(string_agg(md5((to_jsonb(c) - array['record_json','record_storage_version'])::text), '' order by id), ''))
+from public.daf_log_candidates c
+where c.created_at < :'snapshot_cutoff'::timestamptz
+group by line order by line;
+SQL
+}
+
+winner_snapshot() {
+  psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
+select w.line || '|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(w)::text), '' order by w.candidate_id), ''))
+from public.daf_log_winners w
+join public.daf_log_candidates c on c.id=w.candidate_id
+where c.created_at < :'snapshot_cutoff'::timestamptz
+group by w.line order by w.line;
+SQL
+}
+
+candidate_before=$(candidate_snapshot)
+winner_before=$(winner_snapshot)
 size_before=$(psql_exec -At -c "select pg_total_relation_size('public.daf_log_candidates'::regclass)")
 
 compatible=$(psql_exec -At -c "select
@@ -140,7 +162,11 @@ after_id=''
 batch_no=0
 while :; do
   batch_no=$((batch_no + 1))
-  result=$(psql_exec -At -F '|' -v cursor="$after_id" -c "select r->>'scanned', r->>'converted', r->>'retained_original', coalesce(r->>'next_id',''), r->>'has_more' from (select public.daf_slim_log_candidates_batch(5000, nullif(:'cursor','')) as r) q")
+  result=$(psql_exec -At -F '|' -v cursor="$after_id" -f - <<'SQL'
+select r->>'scanned', r->>'converted', r->>'retained_original', coalesce(r->>'next_id',''), r->>'has_more'
+from (select public.daf_slim_log_candidates_batch(5000, nullif(:'cursor','')) as r) q;
+SQL
+)
   IFS='|' read -r scanned converted retained after_id has_more <<< "$result"
   printf '批次 %s：掃描 %s、精簡 %s、保留原格式 %s、仍有後續=%s\n' "$batch_no" "$scanned" "$converted" "$retained" "$has_more"
   [[ "$has_more" == 'true' ]] || break
@@ -159,8 +185,8 @@ fi
 # after confirming its supported extension version and free-disk headroom.
 psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_candidates'
 
-candidate_after=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "$candidate_snapshot_sql")
-winner_after=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "$winner_snapshot_sql")
+candidate_after=$(candidate_snapshot)
+winner_after=$(winner_snapshot)
 if [[ "$candidate_before" != "$candidate_after" ]]; then
   printf '候選列 ID／統計欄位快照不一致；停止宣告完成。\n' >&2
   diff -u <(printf '%s\n' "$candidate_before") <(printf '%s\n' "$candidate_after") >&2 || true

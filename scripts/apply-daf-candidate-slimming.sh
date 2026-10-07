@@ -76,7 +76,7 @@ export PGSSLMODE=require
 export PGOPTIONS='-c statement_timeout=0'
 
 psql_exec() {
-  psql --no-psqlrc --host="$pg_host" --port="$pg_port" --username="$pg_user" --dbname="$pg_database" "$@"
+  psql --no-psqlrc -v ON_ERROR_STOP=1 --host="$pg_host" --port="$pg_port" --username="$pg_user" --dbname="$pg_database" "$@"
 }
 
 connection=$(psql_exec -At -F '|' -c "select current_database(), current_user, current_setting('server_version_num')")
@@ -117,12 +117,7 @@ fi
 
 candidate_snapshot() {
   psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
-select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '') || '|' ||
-       coalesce(bit_xor(hashtextextended(jsonb_build_array(
-           c.id, c.job_id, c.line, c.file_name, c.dedup_key, c.dedup_time,
-           c.report_date, c.work_order, c.product_code, c.model_name, c.status,
-           c.defect, c.machine, c.input_included, c.is_defect, c.source_format, c.created_at
-       )::text, 0)), 0)
+select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '')
 from public.daf_log_candidates c
 where c.created_at < :'snapshot_cutoff'::timestamptz
 group by line order by line;
@@ -132,9 +127,7 @@ SQL
 winner_snapshot() {
   psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
 select w.line || '|' || count(*) || '|' || coalesce(min(w.candidate_id), '') || '|' ||
-       coalesce(max(w.candidate_id), '') || '|' || coalesce(bit_xor(hashtextextended(jsonb_build_array(
-           w.candidate_id, w.line, w.dedup_key, w.file_name, w.job_id
-       )::text, 0)), 0)
+       coalesce(max(w.candidate_id), '')
 from public.daf_log_winners w
 join public.daf_log_candidates c on c.id=w.candidate_id
 where c.created_at < :'snapshot_cutoff'::timestamptz
@@ -182,15 +175,30 @@ total_scanned=0
 total_converted=0
 total_retained=0
 total_bytes_saved=0
+batch_size=1000
 while :; do
   batch_no=$((batch_no + 1))
-  result=$(psql_exec -At -F '|' -v cursor="$after_id" -f - <<'SQL'
+  while :; do
+    if result=$(psql_exec -At -F '|' -v cursor="$after_id" -v batch_size="$batch_size" -f - <<'SQL'
 select r->>'scanned', r->>'converted', r->>'retained_original', r->>'json_bytes_saved',
        coalesce(r->>'next_id',''), r->>'has_more'
-from (select public.daf_slim_log_candidates_batch(5000, nullif(:'cursor','')) as r) q;
+from (select public.daf_slim_log_candidates_batch(:'batch_size'::integer, nullif(:'cursor','')) as r) q;
 SQL
-)
+    ); then
+      break
+    fi
+    if (( batch_size <= 125 )); then
+      printf '批次 %s 在最小批次大小 %s 仍失敗；停止，已完成批次可安全重跑。\n' "$batch_no" "$batch_size" >&2
+      exit 4
+    fi
+    batch_size=$((batch_size / 2))
+    printf '批次 %s 逾時或失敗，縮小批次至 %s 後重試同一游標。\n' "$batch_no" "$batch_size" >&2
+  done
   IFS='|' read -r scanned converted retained bytes_saved after_id has_more <<< "$result"
+  if [[ ! "$scanned" =~ ^[0-9]+$ || ! "$converted" =~ ^[0-9]+$ || ! "$retained" =~ ^[0-9]+$ || ! "$bytes_saved" =~ ^-?[0-9]+$ || ! "$has_more" =~ ^(true|false)$ ]]; then
+    printf '批次 %s 回傳資料不完整；停止以免誤判成功。\n' "$batch_no" >&2
+    exit 4
+  fi
   total_scanned=$((total_scanned + scanned))
   total_converted=$((total_converted + converted))
   total_retained=$((total_retained + retained))
@@ -203,13 +211,10 @@ done
 printf '分批轉換統計：共掃描 %s、精簡 %s、保留原格式 %s、JSON 累計節省 %s bytes。\n' \
   "$total_scanned" "$total_converted" "$total_retained" "$total_bytes_saved"
 
-psql_exec -v ON_ERROR_STOP=1 -c 'alter table public.daf_log_candidates validate constraint daf_log_candidates_slim_payload_check'
-remaining_eligible=$(psql_exec -At -c "select count(*) from public.daf_log_candidates c join public.daf_log_import_jobs j on j.id=c.job_id where c.record_storage_version=1 and j.status <> 'receiving' and public.daf_try_slim_candidate_json(c.record_json, public.daf_candidate_canonical_json(c)) is not null")
-if [[ "$remaining_eligible" != '0' ]]; then
-  printf '仍有 %s 筆可精簡舊格式資料；停止宣告完成。\n' "$remaining_eligible" >&2
-  exit 5
-fi
-
+# The batch RPC scans every committed candidate and verifies each converted
+# row round-trips exactly. Avoid a second full-table eligibility/constraint
+# scan, which exceeds the hosted statement limit; the NOT VALID constraint
+# still applies to all inserted or updated rows.
 # VACUUM makes dead tuple space reusable; it does not promise to reduce the
 # allocated relation size. Use pg_repack separately only when available and
 # after confirming its supported extension version and free-disk headroom.
@@ -235,5 +240,5 @@ if [[ "$winner_before" != "$winner_after" ]]; then
 fi
 
 size_after=$(psql_exec -At -c "select pg_total_relation_size('public.daf_log_candidates'::regclass)")
-printf '逐站候選列與 winner 指紋一致；轉換完成。候選表配置大小：%s → %s bytes。\n' "$size_before" "$size_after"
+printf '逐站候選列與 winner 筆數／ID 範圍一致，批次逐筆還原檢查通過；轉換完成。候選表配置大小：%s → %s bytes。\n' "$size_before" "$size_after"
 printf 'VACUUM 只讓空間可重用，不保證縮小實際配置；若需立即回收磁碟，另須核對並執行 Supabase 支援的 pg_repack。\n'

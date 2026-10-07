@@ -156,11 +156,93 @@ create table if not exists public.daf_log_compaction_state (
     id text primary key check (id = 'current'),
     cutoff_date date not null,
     raw_cutoff_date date,
+    candidate_retention_days smallint not null default 30 check (candidate_retention_days between 1 and 365),
     updated_at timestamptz not null default now()
 );
 alter table public.daf_log_compaction_state add column if not exists raw_cutoff_date date;
+alter table public.daf_log_compaction_state
+    add column if not exists candidate_retention_days smallint not null default 30
+    check (candidate_retention_days between 1 and 365);
 alter table public.daf_log_compaction_state enable row level security;
 revoke all on public.daf_log_compaction_state from public, anon, authenticated;
+
+-- Preserve file-level delete/overwrite guards even for files whose rows all lost
+-- E-column de-duplication and therefore have no compact winner fact.
+create table if not exists public.daf_log_compacted_files (
+    line text not null check (line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')),
+    file_name text not null,
+    archived_at timestamptz not null default now(),
+    primary key (line, file_name)
+);
+insert into public.daf_log_compacted_files(line, file_name)
+select distinct f.line, f.file_name
+from public.daf_log_compact_facts f
+on conflict (line, file_name) do nothing;
+alter table public.daf_log_compacted_files enable row level security;
+revoke all on public.daf_log_compacted_files from public, anon, authenticated;
+
+create or replace function public.daf_activate_14_day_candidate_retention()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '30s'
+as $$
+declare
+    v_line text;
+    v_cutoff date := (now() at time zone 'Asia/Taipei')::date - 14;
+    v_receiving integer;
+begin
+    for v_line in
+        select line from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
+        order by line
+    loop
+        perform pg_advisory_xact_lock(hashtextextended(v_line, 92742));
+    end loop;
+
+    select count(*)::integer into v_receiving
+    from public.daf_log_import_jobs where status = 'receiving';
+    if v_receiving > 0 then
+        raise exception '目前有 % 個上傳工作進行中；14 天保留政策尚未啟用，請待上傳完成後重試', v_receiving;
+    end if;
+
+    insert into public.daf_log_compaction_state(id, cutoff_date, candidate_retention_days)
+    values ('current', v_cutoff, 14)
+    on conflict (id) do update
+       set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
+           candidate_retention_days = 14,
+           updated_at = now();
+
+    return jsonb_build_object(
+        'candidate_retention_days', 14,
+        'cutoff_date', (select cutoff_date from public.daf_log_compaction_state where id = 'current'),
+        'updated_at', (select updated_at from public.daf_log_compaction_state where id = 'current')
+    );
+end;
+$$;
+revoke all on function public.daf_activate_14_day_candidate_retention() from public, anon, authenticated;
+
+create or replace function public.daf_is_valid_iso_date(p_value text)
+returns boolean
+language plpgsql
+immutable
+set search_path = pg_catalog
+as $$
+declare
+    v_date date;
+begin
+    if p_value is null or p_value !~ '^\d{4}-\d{2}-\d{2}$' then
+        return false;
+    end if;
+    v_date := make_date(substr(p_value, 1, 4)::integer,
+                        substr(p_value, 6, 2)::integer,
+                        substr(p_value, 9, 2)::integer);
+    return to_char(v_date, 'YYYY-MM-DD') = p_value;
+exception when others then
+    return false;
+end;
+$$;
+revoke all on function public.daf_is_valid_iso_date(text) from public, anon, authenticated;
 
 create or replace function public.daf_preview_log_compaction(p_cutoff date)
 returns table (
@@ -188,12 +270,12 @@ as $$
             select 1 from public.daf_log_winners w where w.candidate_id = c.id
         ) as is_winner
         from public.daf_log_candidates c
-        where c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+        where public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < p_cutoff::text
     ), invalid_dates as (
         select c.line, count(*)::bigint as n
         from public.daf_log_candidates c
-        where c.report_date is null or c.report_date !~ '^\d{4}-\d{2}-\d{2}$'
+        where not public.daf_is_valid_iso_date(c.report_date)
         group by c.line
     ), receiving as (
         select m.value->>'line' as line, count(distinct j.id)::bigint as n
@@ -201,21 +283,23 @@ as $$
         cross join lateral jsonb_array_elements(j.metadata) m(value)
         where j.status = 'receiving'
           and m.value->>'line' in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-          and m.value->>'date_start' ~ '^\d{4}-\d{2}-\d{2}$'
-          and m.value->>'date_start' < p_cutoff::text
+          and (
+              (public.daf_is_valid_iso_date(m.value->>'date_start') and m.value->>'date_start' < p_cutoff::text)
+              or (public.daf_is_valid_iso_date(m.value->>'date_end') and m.value->>'date_end' < p_cutoff::text)
+          )
         group by m.value->>'line'
     ), projection_mismatches as (
         select c.line, count(*)::bigint as n
         from public.daf_log_candidates c
         join public.daf_log_winners w on w.candidate_id = c.id
-        where c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+        where public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < p_cutoff::text
           and public.daf_candidate_payload_mismatch(c)
         group by c.line
     ), compacted as (
         select f.line, count(*)::bigint as n
         from public.daf_log_compact_facts f
-        where f.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+        where public.daf_is_valid_iso_date(f.report_date)
           and f.report_date < p_cutoff::text
         group by f.line
     ), dashboard_rows as (
@@ -230,7 +314,7 @@ as $$
                )::text) as row_digest
         from public.daf_log_candidates c
         join public.daf_log_winners w on w.candidate_id = c.id
-        where c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+        where public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < p_cutoff::text
         union all
         select f.line, f.candidate_id,
@@ -243,7 +327,7 @@ as $$
                    'createdAt', f.created_at
                )::text) as row_digest
         from public.daf_log_compact_facts f
-        where f.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+        where public.daf_is_valid_iso_date(f.report_date)
           and f.report_date < p_cutoff::text
     ), dashboard_digests as (
         select line, md5(coalesce(string_agg(row_digest, '' order by candidate_id), '')) as digest
@@ -289,8 +373,11 @@ set search_path = public
 stable
 as $$
     with bounds as (
-        select greatest(coalesce(s.cutoff_date, (now() at time zone 'Asia/Taipei')::date - 30),
-                        (now() at time zone 'Asia/Taipei')::date - 30)::date as archive_cutoff,
+        select greatest(
+                   coalesce(s.cutoff_date,
+                       (now() at time zone 'Asia/Taipei')::date - coalesce(s.candidate_retention_days, 30)),
+                   (now() at time zone 'Asia/Taipei')::date - coalesce(s.candidate_retention_days, 30)
+               )::date as archive_cutoff,
                greatest(coalesce(s.raw_cutoff_date, p_cutoff), p_cutoff)::date as raw_cutoff
         from (select 1) seed
         left join public.daf_log_compaction_state s on s.id = 'current'
@@ -301,7 +388,7 @@ as $$
         cross join bounds b
         left join public.daf_log_import_jobs j on j.id = c.job_id
         where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-          and c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+          and public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < b.raw_cutoff::text
           and c.report_date >= b.archive_cutoff::text
           and c.record_json ? 'raw'
@@ -312,7 +399,7 @@ as $$
                    when jsonb_typeof(item.value) <> 'object'
                      or jsonb_typeof(item.value->'raw') is distinct from 'array'
                      or not (item.value ?& array['date', 'productCode', 'dedupKey', 'dedupTime'])
-                     or item.value->>'date' !~ '^\d{4}-\d{2}-\d{2}$'
+                     or not public.daf_is_valid_iso_date(item.value->>'date')
                    then false
                    else
                        item.value->>'date' < bounds.raw_cutoff::text
@@ -374,9 +461,10 @@ set search_path = public
 set statement_timeout = '55s'
 as $$
 declare
-    v_allowed_cutoff date := (now() at time zone 'Asia/Taipei')::date - 14;
+    v_allowed_cutoff date := (now() at time zone 'Asia/Taipei')::date + 1;
     v_archive_cutoff date;
     v_cutoff date;
+    v_retention_days integer;
     v_candidate_count integer := 0;
     v_batch_count integer := 0;
     v_payload_bytes_saved bigint := 0;
@@ -384,25 +472,11 @@ declare
 begin
     if p_cutoff is null then raise exception '原始欄位清理日期不可空白'; end if;
     if p_cutoff > v_allowed_cutoff then
-        raise exception '原始欄位只能清理嚴格早於 14 天界線的日期（最晚可選 %）', v_allowed_cutoff;
+        raise exception '原始欄位只能清理至今天為止（最晚界線 %）', v_allowed_cutoff;
     end if;
     if p_batch_size is null or p_batch_size < 1 or p_batch_size > 5000 then
         raise exception '每批筆數須介於 1 至 5000';
     end if;
-
-    v_archive_cutoff := greatest(
-        coalesce((select cutoff_date from public.daf_log_compaction_state where id = 'current'), v_allowed_cutoff - 16),
-        (now() at time zone 'Asia/Taipei')::date - 30
-    );
-    insert into public.daf_log_compaction_state(id, cutoff_date, raw_cutoff_date)
-    values ('current', v_archive_cutoff, p_cutoff)
-    on conflict (id) do update
-       set raw_cutoff_date = greatest(coalesce(public.daf_log_compaction_state.raw_cutoff_date, excluded.raw_cutoff_date), excluded.raw_cutoff_date),
-           updated_at = now();
-    select greatest(coalesce(raw_cutoff_date, p_cutoff), p_cutoff)
-      into v_cutoff
-      from public.daf_log_compaction_state where id = 'current';
-    v_cutoff := least(v_cutoff, v_allowed_cutoff);
 
     -- Use the same ordered process locks as publication, file deletion and compaction.
     for v_lock_line in
@@ -412,12 +486,33 @@ begin
         perform pg_advisory_xact_lock(hashtextextended(v_lock_line, 92742));
     end loop;
 
+    select coalesce(candidate_retention_days, 30), cutoff_date
+      into v_retention_days, v_archive_cutoff
+      from public.daf_log_compaction_state where id = 'current';
+    if not found then
+        v_retention_days := 30;
+        v_archive_cutoff := (now() at time zone 'Asia/Taipei')::date - v_retention_days;
+    else
+        v_archive_cutoff := greatest(
+            v_archive_cutoff,
+            (now() at time zone 'Asia/Taipei')::date - v_retention_days
+        );
+    end if;
+    insert into public.daf_log_compaction_state(id, cutoff_date, raw_cutoff_date, candidate_retention_days)
+    values ('current', v_archive_cutoff, p_cutoff, v_retention_days)
+    on conflict (id) do update
+       set raw_cutoff_date = greatest(coalesce(public.daf_log_compaction_state.raw_cutoff_date, excluded.raw_cutoff_date), excluded.raw_cutoff_date),
+           updated_at = now();
+    select least(greatest(coalesce(raw_cutoff_date, p_cutoff), p_cutoff), v_allowed_cutoff)
+      into v_cutoff
+      from public.daf_log_compaction_state where id = 'current';
+
     with picked as materialized (
         select c.id, pg_column_size(c.record_json) - pg_column_size(c.record_json - 'raw') as saved_bytes
         from public.daf_log_candidates c
         join public.daf_log_import_jobs j on j.id = c.job_id and j.status <> 'receiving'
         where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-          and c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+          and public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < v_cutoff::text
           and c.report_date >= v_archive_cutoff::text
           and c.record_storage_version = 2
@@ -451,7 +546,7 @@ begin
               where item.value ? 'raw'
                 and jsonb_typeof(item.value) = 'object'
                 and jsonb_typeof(item.value->'raw') = 'array'
-                and item.value->>'date' ~ '^\d{4}-\d{2}-\d{2}$'
+                and public.daf_is_valid_iso_date(item.value->>'date')
                 and item.value->>'date' < v_cutoff::text
                 and item.value ?& array['productCode', 'dedupKey', 'dedupTime']
                 and (
@@ -476,7 +571,7 @@ begin
                    case when
                        jsonb_typeof(item.value) = 'object'
                        and jsonb_typeof(item.value->'raw') = 'array'
-                       and item.value->>'date' ~ '^\d{4}-\d{2}-\d{2}$'
+                       and public.daf_is_valid_iso_date(item.value->>'date')
                        and item.value->>'date' < v_cutoff::text
                        and item.value ?& array['productCode', 'dedupKey', 'dedupTime']
                        and (
@@ -530,28 +625,20 @@ set statement_timeout = '110s'
 as $$
 declare
     v_cutoff date;
-    v_oldest_allowed_cutoff date := (now() at time zone 'Asia/Taipei')::date - 30;
+    v_retention_days integer;
+    v_oldest_allowed_cutoff date;
     v_ids text[];
     v_expected_winners integer;
     v_inserted integer;
     v_deleted integer;
     v_receiving integer;
+    v_unresolved integer := 0;
     v_lock_line text;
     v_touched_pairs jsonb;
     v_refresh_pairs jsonb;
 begin
     if p_cutoff is null then raise exception '封存日期不可空白'; end if;
-    if p_cutoff > v_oldest_allowed_cutoff then
-        raise exception '封存截止日必須至少早於今天 30 天（最晚可選 %）', v_oldest_allowed_cutoff;
-    end if;
     if p_batch_size < 1 or p_batch_size > 10000 then raise exception '每批筆數須介於 1 至 10000'; end if;
-
-    insert into public.daf_log_compaction_state(id, cutoff_date)
-    values ('current', p_cutoff)
-    on conflict (id) do update
-       set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
-           updated_at = now();
-    select cutoff_date into v_cutoff from public.daf_log_compaction_state where id = 'current';
 
     -- Match the line locks used by upload publication and file deletion.
     for v_lock_line in
@@ -561,18 +648,89 @@ begin
         perform pg_advisory_xact_lock(hashtextextended(v_lock_line, 92742));
     end loop;
 
+    select coalesce(candidate_retention_days, 30), cutoff_date
+      into v_retention_days, v_cutoff
+      from public.daf_log_compaction_state where id = 'current';
+    if not found then
+        v_retention_days := 30;
+        v_cutoff := null;
+    end if;
+    v_oldest_allowed_cutoff := (now() at time zone 'Asia/Taipei')::date - v_retention_days;
+    if p_cutoff > v_oldest_allowed_cutoff then
+        raise exception '封存截止日必須至少早於今天 % 天（最晚可選 %）', v_retention_days, v_oldest_allowed_cutoff;
+    end if;
+    v_cutoff := greatest(coalesce(v_cutoff, p_cutoff), p_cutoff);
+
+    -- Never advance the irreversible boundary while an older upload can still publish.
+    if exists (
+        select 1
+        from public.daf_log_import_jobs j
+        cross join lateral jsonb_to_recordset(coalesce(j.metadata, '[]'::jsonb))
+            as m(line text, date_start text, date_end text)
+        where j.status = 'receiving'
+          and m.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+          and (
+              (public.daf_is_valid_iso_date(m.date_start) and m.date_start < v_cutoff::text)
+              or (public.daf_is_valid_iso_date(m.date_end) and m.date_end < v_cutoff::text)
+          )
+    ) or exists (
+        select 1
+        from public.daf_log_candidates c
+        join public.daf_log_import_jobs j on j.id = c.job_id and j.status = 'receiving'
+        where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+          and public.daf_is_valid_iso_date(c.report_date)
+          and c.report_date < v_cutoff::text
+    ) then
+        raise exception '有上傳中的工作涵蓋封存界線以前的日期；本批未推進界線，請待上傳完成後重試';
+    end if;
+
+    insert into public.daf_log_compaction_state(id, cutoff_date, candidate_retention_days)
+    values ('current', v_cutoff, v_retention_days)
+    on conflict (id) do update
+       set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
+           updated_at = now();
+    select cutoff_date into v_cutoff from public.daf_log_compaction_state where id = 'current';
+
+    -- Pin files containing unprojectable winner rows. Keep those candidate/raw
+    -- records intact, but prevent later overwrite or deletion from changing history.
+    insert into public.daf_log_compacted_files(line, file_name)
+    select distinct c.line, c.file_name
+    from public.daf_log_candidates c
+    join public.daf_log_winners w on w.candidate_id = c.id
+    where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+      and public.daf_is_valid_iso_date(c.report_date)
+      and c.report_date < v_cutoff::text
+      and public.daf_candidate_payload_mismatch(c)
+      and not exists (
+          select 1 from public.daf_log_compacted_files f
+          where f.line = c.line and f.file_name = c.file_name
+      )
+    on conflict (line, file_name) do nothing;
+    select count(*)::integer into v_unresolved
+    from public.daf_log_candidates c
+    join public.daf_log_winners w on w.candidate_id = c.id
+    where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+      and public.daf_is_valid_iso_date(c.report_date)
+      and c.report_date < v_cutoff::text
+      and public.daf_candidate_payload_mismatch(c);
+
     select coalesce(array_agg(id), array[]::text[]) into v_ids from (
         select c.id
         from public.daf_log_candidates c
-        where c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+        where public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < v_cutoff::text
+          and not exists (
+              select 1 from public.daf_log_winners w
+              where w.candidate_id = c.id and public.daf_candidate_payload_mismatch(c)
+          )
         order by c.line, c.report_date, c.id
         limit p_batch_size
         for update skip locked
     ) picked
     ;
     if coalesce(array_length(v_ids, 1), 0) = 0 then
-        return jsonb_build_object('cutoff_date', v_cutoff, 'compacted', 0, 'removed_candidates', 0, 'done', true);
+        return jsonb_build_object('cutoff_date', v_cutoff, 'compacted', 0, 'removed_candidates', 0,
+            'deferred_unresolved_rows', v_unresolved, 'done', true);
     end if;
 
     select count(*)::integer into v_receiving
@@ -585,6 +743,14 @@ begin
       into v_touched_pairs
     from (select distinct line, file_name from public.daf_log_candidates where id = any(v_ids)) touched;
 
+    insert into public.daf_log_compacted_files(line, file_name)
+    select p.line, p.file_name
+    from jsonb_to_recordset(v_touched_pairs) as p(line text, file_name text)
+    join public.daf_log_candidates c on c.line = p.line and c.file_name = p.file_name
+    where c.id = any(v_ids) and public.daf_is_valid_iso_date(c.report_date)
+    group by p.line, p.file_name
+    on conflict (line, file_name) do nothing;
+
     if exists (
         select 1
         from public.daf_log_candidates c
@@ -596,7 +762,7 @@ begin
     select count(*)::integer into v_expected_winners
     from public.daf_log_candidates c
     join public.daf_log_winners w on w.candidate_id = c.id
-    where c.id = any(v_ids);
+    where c.id = any(v_ids) and not public.daf_candidate_payload_mismatch(c);
 
     insert into public.daf_log_compact_facts (
         candidate_id, line, file_name, dedup_key, dedup_time, report_date,
@@ -608,7 +774,7 @@ begin
            c.input_included, c.is_defect, c.source_format, c.created_at
     from public.daf_log_candidates c
     join public.daf_log_winners w on w.candidate_id = c.id
-    where c.id = any(v_ids)
+    where c.id = any(v_ids) and not public.daf_candidate_payload_mismatch(c)
     on conflict (candidate_id) do nothing;
     get diagnostics v_inserted = row_count;
 
@@ -631,7 +797,12 @@ begin
         ) then raise exception '封存資料核對不一致，已取消本批次'; end if;
     end if;
 
-    delete from public.daf_log_candidates where id = any(v_ids);
+    delete from public.daf_log_candidates c
+    where c.id = any(v_ids)
+      and not exists (
+          select 1 from public.daf_log_winners w
+          where w.candidate_id = c.id and public.daf_candidate_payload_mismatch(c)
+      );
     get diagnostics v_deleted = row_count;
 
     -- Once a file has no expired raw candidates left, trim only expired entries
@@ -643,7 +814,7 @@ begin
     where not exists (
         select 1 from public.daf_log_candidates c
         where c.line = p.line and c.file_name = p.file_name
-          and c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+          and public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < v_cutoff::text
     );
     if jsonb_array_length(v_refresh_pairs) > 0 then
@@ -652,8 +823,9 @@ begin
         set records = case when jsonb_typeof(b.records) = 'array' then coalesce((
             select jsonb_agg(item.value order by item.ordinality)
             from jsonb_array_elements(b.records) with ordinality item(value, ordinality)
-            where not (
-                item.value->>'date' ~ '^\d{4}-\d{2}-\d{2}$'
+            where item.value <> '{}'::jsonb
+              and not (
+                public.daf_is_valid_iso_date(item.value->>'date')
                 and item.value->>'date' < v_cutoff::text
             )
         ), '[]'::jsonb) else b.records end
@@ -666,7 +838,8 @@ begin
         'cutoff_date', v_cutoff,
         'compacted', v_expected_winners,
         'removed_candidates', v_deleted,
-        'done', v_deleted < p_batch_size
+        'deferred_unresolved_rows', v_unresolved,
+        'done', coalesce(array_length(v_ids, 1), 0) < p_batch_size
     );
 end;
 $$;
@@ -700,13 +873,17 @@ declare
     v_reference_rows integer;
     v_compaction jsonb;
     v_raw_retention jsonb;
+    v_retention_days integer;
 begin
+    select coalesce(candidate_retention_days, 30) into v_retention_days
+    from public.daf_log_compaction_state where id = 'current';
+    if not found then v_retention_days := 30; end if;
     v_reference_rows := public.daf_prune_expired_machine_references(now());
     v_compaction := public.daf_compact_expired_log_batch(
-        (now() at time zone 'Asia/Taipei')::date - 30, 5000
+        (now() at time zone 'Asia/Taipei')::date - v_retention_days, 5000
     );
     v_raw_retention := public.daf_strip_expired_log_raw_batch(
-        (now() at time zone 'Asia/Taipei')::date - 14, 1000
+        (now() at time zone 'Asia/Taipei')::date + 1, 1000
     );
     return jsonb_build_object(
         'deleted_machine_reference_rows', v_reference_rows,
@@ -883,25 +1060,36 @@ set search_path = public
 as $$
 declare
     v_cutoff date;
+    v_lock_line text;
 begin
+    -- Serialize new jobs against an irreversible cutoff advance.
+    for v_lock_line in
+        select line from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
+        order by line
+    loop
+        perform pg_advisory_xact_lock(hashtextextended(v_lock_line, 92742));
+    end loop;
+
     select cutoff_date into v_cutoff from public.daf_log_compaction_state where id = 'current';
     if v_cutoff is not null then
         if exists (
             select 1
-            from jsonb_to_recordset(coalesce(new.metadata, '[]'::jsonb)) as m(line text, date_start text)
+            from jsonb_to_recordset(coalesce(new.metadata, '[]'::jsonb)) as m(line text, date_start text, date_end text)
             where m.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-              and m.date_start ~ '^\d{4}-\d{2}-\d{2}$'
-              and m.date_start < v_cutoff::text
+              and (
+                  (public.daf_is_valid_iso_date(m.date_start) and m.date_start < v_cutoff::text)
+                  or (public.daf_is_valid_iso_date(m.date_end) and m.date_end < v_cutoff::text)
+              )
         ) then
             raise exception '上傳資料包含已封存日期（早於 %），為保留歷史統計，無法回補此區間', v_cutoff;
         end if;
-        if exists (
-            select 1
-            from jsonb_to_recordset(coalesce(new.metadata, '[]'::jsonb)) as m(line text)
-            join public.daf_log_compact_facts f on f.line = m.line and f.file_name = new.file_name
-        ) then
-            raise exception '此檔案已有超過 30 天的封存資料，不能覆蓋；請使用新檔名上傳未封存日期';
-        end if;
+    end if;
+    if exists (
+        select 1
+        from public.daf_log_compacted_files f
+        where f.file_name = new.file_name
+    ) then
+        raise exception '此檔案含有 14 天前已封存資料，不能覆蓋；請使用新檔名上傳未封存日期';
     end if;
     return new;
 end;
@@ -921,11 +1109,14 @@ as $$
 declare
     v_cutoff date;
 begin
+    if new.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY') then
+        perform pg_advisory_xact_lock(hashtextextended(new.line, 92742));
+    end if;
     select cutoff_date into v_cutoff
     from public.daf_log_compaction_state where id = 'current';
     if v_cutoff is not null
        and new.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-       and new.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+       and public.daf_is_valid_iso_date(new.report_date)
        and new.report_date < v_cutoff::text then
         raise exception '上傳明細包含已封存日期（早於 %），無法寫入原始資料', v_cutoff;
     end if;
@@ -948,8 +1139,11 @@ begin
     if exists (
         select 1 from public.daf_log_compact_facts f
         where f.line = old.line and f.file_name = old.file_name
+    ) or exists (
+        select 1 from public.daf_log_compacted_files f
+        where f.line = old.line and f.file_name = old.file_name
     ) then
-        raise exception '此檔案含有已封存的 30 天以前資料，無法刪除或覆蓋';
+        raise exception '此檔案含有 14 天前已封存資料，無法刪除或覆蓋';
     end if;
     return old;
 end;
@@ -1038,10 +1232,12 @@ begin
     from public.daf_log_compaction_state where id = 'current';
     if v_compaction_cutoff is not null and exists (
         select 1
-        from jsonb_to_recordset(coalesce(v_job.metadata, '[]'::jsonb)) as m(line text, date_start text)
+        from jsonb_to_recordset(coalesce(v_job.metadata, '[]'::jsonb)) as m(line text, date_start text, date_end text)
         where m.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-          and m.date_start ~ '^\d{4}-\d{2}-\d{2}$'
-          and m.date_start < v_compaction_cutoff::text
+          and (
+              (public.daf_is_valid_iso_date(m.date_start) and m.date_start < v_compaction_cutoff::text)
+              or (public.daf_is_valid_iso_date(m.date_end) and m.date_end < v_compaction_cutoff::text)
+          )
     ) then
         raise exception '上傳資料包含已封存日期（早於 %），為保留歷史統計，無法回補此區間', v_compaction_cutoff;
     end if;
@@ -1049,7 +1245,7 @@ begin
         select 1 from public.daf_log_candidates c
         where c.job_id = p_job_id
           and c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
-          and c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+          and public.daf_is_valid_iso_date(c.report_date)
           and c.report_date < v_compaction_cutoff::text
     ) then
         raise exception '上傳明細包含已封存日期（早於 %），此次上傳已取消', v_compaction_cutoff;

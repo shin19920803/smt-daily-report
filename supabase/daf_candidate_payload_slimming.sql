@@ -63,11 +63,28 @@ as $$
         'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
          ]
          and p_record @> p_expected
-         and (not (p_record ? 'raw') or jsonb_typeof(p_record->'raw') = 'array')
-        then p_record - array[
+         and (
+             not (p_record ? 'raw')
+             or (
+                 jsonb_typeof(p_record->'raw') = 'array'
+                 and (
+                     nullif(btrim(coalesce(p_expected->>'productCode', '')), '') is not null
+                     or coalesce(p_record->'raw'->>(case when p_record->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 3 else 4 end), '') = ''
+                 )
+                 and (
+                     nullif(btrim(coalesce(p_expected->>'dedupKey', '')), '') is not null
+                     or coalesce(p_record->'raw'->>(case when p_record->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 4 else 5 end), '') = ''
+                 )
+                 and (
+                     nullif(btrim(coalesce(p_expected->>'dedupTime', '')), '') is not null
+                     or coalesce(p_record->'raw'->>(case when p_record->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 5 else 6 end), '') = ''
+                 )
+             )
+         )
+        then (p_record - array[
             'dedupKey', 'dedupTime', 'date', 'workOrder', 'productCode', 'model',
             'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
-        ]
+        ]) - 'raw'
         else null
     end;
 $$;
@@ -202,7 +219,8 @@ begin
         from _daf_candidate_slim_batch b
         join public.daf_log_candidates c on c.id = b.id
         where b.slim_json is not null
-          and public.daf_candidate_to_record(c) is distinct from b.original_json
+          and public.daf_candidate_to_record(c) is distinct from
+              (b.original_json - case when b.original_json ? 'raw' then array['raw']::text[] else array[]::text[] end)
     ) then
         raise exception '候選資料精簡後無法逐筆還原原 JSON，本批次已回復';
     end if;

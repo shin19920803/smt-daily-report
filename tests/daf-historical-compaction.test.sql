@@ -10,6 +10,7 @@ $$;
 \ir ../supabase/daf_staged_imports.sql
 \ir ../supabase/daf_historical_compaction.sql
 \ir ../supabase/daf_candidate_payload_slimming.sql
+\ir ../supabase/daf_space_reclamation.sql
 
 select public.daf_start_log_import(
     '00000000-0000-4000-8000-000000000001'::uuid,
@@ -91,14 +92,16 @@ begin
         'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
     ] then raise exception 'Slim JSON still duplicates canonical typed fields'; end if;
     if public.daf_candidate_to_record(v_candidate) is distinct from
-       '{"dedupKey":"E-001","dedupTime":1768032000000,"date":"2026-01-10","workOrder":"WO-1","productCode":"P-1","model":"Model-1","status":"GOOD","defect":"","machine":"1號機","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2","raw":["DAF","WO-1","","P-1","E-001","2026-01-10 08:00:00","Y0176","","GOOD"]}'::jsonb
-    then raise exception 'Slim JSON did not reconstruct the exact original row'; end if;
+       '{"dedupKey":"E-001","dedupTime":1768032000000,"date":"2026-01-10","workOrder":"WO-1","productCode":"P-1","model":"Model-1","status":"GOOD","defect":"","machine":"1號機","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2"}'::jsonb
+       or v_candidate.record_json ? 'raw'
+    then raise exception 'Slim JSON did not reconstruct the structured dashboard row without raw columns'; end if;
 
     v_expected := v_original - 'customField' - 'raw';
     v_slim := public.daf_try_slim_candidate_json(v_original, v_expected);
     if v_slim is null or v_slim->>'customField' <> 'must-survive'
-       or (v_slim || v_expected) is distinct from v_original then
-        raise exception 'Slim conversion did not preserve unknown JSON fields or exact reconstruction';
+       or (v_slim || v_expected) is distinct from (v_original - 'raw')
+       or v_slim ? 'raw' then
+        raise exception 'Slim conversion did not preserve unknown JSON fields or strip reconstructable raw columns';
     end if;
     if public.daf_try_slim_candidate_json(v_original || '{"raw":"not-an-array"}'::jsonb, v_expected) is not null then
         raise exception 'Slim conversion accepted an invalid raw payload';
@@ -134,7 +137,7 @@ begin
     end if;
     select c.* into v_candidate
     from public.daf_log_candidates c where c.id = '00000000-0000-0000-0000-000000000000';
-    if v_candidate.record_storage_version <> 2
+    if v_candidate.record_storage_version <> 2 or v_candidate.record_json ? 'raw'
        or public.daf_candidate_to_record(v_candidate) is distinct from
           (v_candidate.record_json || '{"dedupKey":"E-BACKFILL","dedupTime":1768118400000,"date":"2026-01-10","workOrder":"WO-BACKFILL","productCode":"P-BACKFILL","model":"Model-BACKFILL","status":"GOOD","defect":"","machine":"未知機台","inputIncluded":true,"isDefect":false,"sourceFormat":"current-v2"}'::jsonb)
     then raise exception 'Backfill failed its reconstructed-row check'; end if;
@@ -166,26 +169,35 @@ select public.daf_start_log_import(
     1
 );
 
--- A legacy raw-column fallback must be detected and must stop that batch.
+-- A legacy raw-column fallback must stay intact and be reported as unresolved.
 begin;
 update public.daf_log_candidates
-set product_code = '', record_json = record_json - 'productCode', record_storage_version = 1
+set product_code = '',
+    record_json = jsonb_set(
+        record_json - 'productCode', '{raw}',
+        '["DAF","WO-1","","P-1","E-001","2026-01-10 08:00:00","Y0176","","GOOD"]'::jsonb,
+        true
+    ),
+    record_storage_version = 1
 where line = 'DAF' and dedup_key = 'E-001';
 do $$
 declare
     v_mismatches bigint;
-    v_rejected boolean := false;
+    v_result jsonb;
 begin
     select projection_mismatch_rows into v_mismatches
     from public.daf_preview_log_compaction('2026-02-10'::date)
     where line = 'DAF';
     if coalesce(v_mismatches, 0) = 0 then raise exception 'Preview missed a raw-column fallback'; end if;
-    begin
-        perform public.daf_compact_expired_log_batch('2026-02-10'::date, 1000);
-    exception when others then
-        v_rejected := position('明細欄位與儲存欄位不一致' in sqlerrm) > 0;
-    end;
-    if not v_rejected then raise exception 'Unsafe compaction was not stopped'; end if;
+    v_result := public.daf_compact_expired_log_batch('2026-02-10'::date, 1000);
+    if coalesce((v_result->>'deferred_unresolved_rows')::integer, 0) < 1 then
+        raise exception 'Unsafe row was not reported as unresolved';
+    end if;
+    if not exists (
+        select 1 from public.daf_log_candidates c
+        where c.line = 'DAF' and c.dedup_key = 'E-001'
+          and c.record_storage_version = 1 and c.record_json ? 'raw'
+    ) then raise exception 'Unsafe raw fallback was not retained'; end if;
 end;
 $$;
 rollback;
@@ -272,6 +284,14 @@ declare
     v_rejected boolean := false;
     v_error text;
 begin
+    if public.daf_is_valid_iso_date('2026-09-23')
+       is distinct from true
+       or public.daf_is_valid_iso_date('2026-02-30')
+       or public.daf_is_valid_iso_date('2026-99-99')
+       or public.daf_is_valid_iso_date(null) then
+        raise exception 'Strict ISO calendar-date validation failed';
+    end if;
+
     begin
         perform public.daf_stage_log_import_chunk(
             '00000000-0000-4000-8000-000000000004'::uuid,
@@ -393,8 +413,7 @@ begin
 end;
 $$;
 
--- Expire only raw spreadsheet arrays after 14 days while preserving the typed
--- candidates needed for file deletion/reselection through the 30-day boundary.
+-- Keep only structured candidates within 14 days; unresolved raw fallbacks remain.
 do $$
 declare
     v_today date := (now() at time zone 'Asia/Taipei')::date;
@@ -407,6 +426,13 @@ declare
     v_after jsonb;
     v_digest_before jsonb;
     v_digest_after jsonb;
+    v_dashboard_before jsonb;
+    v_dashboard_after jsonb;
+    v_archive_result jsonb;
+    v_archive_done boolean := false;
+    v_archive_batches integer := 0;
+    v_rejected boolean;
+    v_error text;
 begin
     perform public.daf_start_log_import(
         '00000000-0000-4000-8000-000000000020'::uuid, 'retention-first.xlsx',
@@ -428,16 +454,32 @@ begin
                 'status', 'FAIL', 'defect', '邊界不良', 'machine', '2號機', 'inputIncluded', true,
                 'isDefect', true, 'sourceFormat', 'current-v2',
                 'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RET', 'E-RET-BOUNDARY',
-                    '2026-09-23 09:00:00', 'Y0137', '邊界不良', 'FAIL')),
-            jsonb_build_object('dedupKey', 'E-RET-BLOCKED', 'dedupTime', 3000, 'date', v_day_15,
-                'workOrder', 'WO-RET', 'productCode', '', 'model', 'Model-RET',
-                'status', 'GOOD', 'defect', '', 'machine', '未知機台', 'inputIncluded', true,
-                'isDefect', false, 'sourceFormat', 'current-v2',
-                'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RAW-FALLBACK', 'E-RET-BLOCKED',
-                    '2026-09-22 10:00:00', '', '', 'GOOD'))
+                    '2026-09-23 09:00:00', 'Y0137', '邊界不良', 'FAIL'))
         )
     );
     perform public.daf_finalize_log_import('00000000-0000-4000-8000-000000000020'::uuid);
+    drop table if exists _daf_import_keys;
+    drop table if exists _daf_import_pairs;
+    drop table if exists _daf_import_old_jobs;
+
+    perform public.daf_start_log_import(
+        '00000000-0000-4000-8000-000000000024'::uuid, 'unresolved.xlsx',
+        jsonb_build_array(jsonb_build_object('id', 'unresolved-daf', 'line', 'DAF',
+            'file_name', 'unresolved.xlsx', 'date_start', v_day_15,
+            'date_end', v_day_15, 'raw_column_count', 10)), 1
+    );
+    perform public.daf_stage_log_import_chunk(
+        '00000000-0000-4000-8000-000000000024'::uuid, 'DAF', 0, 'unresolved-chunk',
+        jsonb_build_array(jsonb_build_object(
+            'dedupKey', 'E-RET-BLOCKED', 'dedupTime', 3000, 'date', v_day_15,
+            'workOrder', 'WO-RET', 'productCode', '', 'model', 'Model-RET',
+            'status', 'GOOD', 'defect', '', 'machine', '未知機台', 'inputIncluded', true,
+            'isDefect', false, 'sourceFormat', 'current-v2',
+            'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RAW-FALLBACK', 'E-RET-BLOCKED',
+                '2026-09-22 10:00:00', '', '', 'GOOD'))
+        )
+    );
+    perform public.daf_finalize_log_import('00000000-0000-4000-8000-000000000024'::uuid);
     drop table if exists _daf_import_keys;
     drop table if exists _daf_import_pairs;
     drop table if exists _daf_import_old_jobs;
@@ -497,23 +539,23 @@ begin
       from public.daf_preview_log_compaction(v_today - 14);
 
     select * into v_preview
-    from public.daf_preview_log_raw_retention(v_today - 14)
+      from public.daf_preview_log_raw_retention(v_today + 1)
     where line = 'DAF';
-    if v_preview.safe_candidate_rows <> 2 or v_preview.blocked_candidate_rows <> 1
+    if v_preview.safe_candidate_rows <> 0 or v_preview.blocked_candidate_rows <> 1
        or v_preview.safe_batch_rows < 1 then
         raise exception 'Raw-retention preview safety counts are wrong: %', row_to_json(v_preview);
     end if;
 
-    v_result := public.daf_strip_expired_log_raw_batch(v_today - 14, 1000);
-    if (v_result->>'stripped_candidates')::integer <> 2
+    v_result := public.daf_strip_expired_log_raw_batch(v_today + 1, 1000);
+    if (v_result->>'stripped_candidates')::integer <> 0
        or (v_result->>'stripped_batch_summaries')::integer < 1 then
-        raise exception '14-day raw-retention batch did not process the expected rows: %', v_result;
+        raise exception 'Safe raw-retention batch did not process the expected rows: %', v_result;
     end if;
     if not exists (
         select 1 from public.daf_log_candidates c
         where c.line = 'DAF' and c.dedup_key = 'E-RET-BOUNDARY'
-          and c.report_date = v_boundary and c.record_json ? 'raw'
-    ) then raise exception 'The exact 14-day boundary row was incorrectly stripped'; end if;
+          and c.report_date = v_boundary and not (c.record_json ? 'raw')
+    ) then raise exception 'Structured boundary row was not stored without raw columns'; end if;
     if exists (
         select 1 from public.daf_log_candidates c
         where c.line = 'DAF' and c.dedup_key = 'E-RET-DELETE'
@@ -555,7 +597,7 @@ begin
           and not ((b.records->0) ? 'raw') and b.records->0->>'dedupKey' = 'E-LEGACY-RAW'
     ) then raise exception 'Legacy summary raw array was not safely removed'; end if;
 
-    v_result := public.daf_strip_expired_log_raw_batch(v_today - 14, 1000);
+    v_result := public.daf_strip_expired_log_raw_batch(v_today + 1, 1000);
     if (v_result->>'stripped_candidates')::integer <> 0
        or (v_result->>'stripped_batch_summaries')::integer <> 0 then
         raise exception 'Repeated raw-retention batch was not idempotent: %', v_result;
@@ -571,6 +613,198 @@ begin
           and w.file_name = 'retention-second.xlsx'
           and not (c.record_json ? 'raw')
     ) then raise exception 'Deleting the earliest file did not promote the next structured candidate'; end if;
+    drop table if exists _daf_delete_keys;
+    drop table if exists _daf_delete_pairs;
+
+    perform public.daf_start_log_import(
+        '00000000-0000-4000-8000-000000000022'::uuid, 'archive-test.xlsx',
+        jsonb_build_array(jsonb_build_object('id', 'archive-test-daf', 'line', 'DAF',
+            'file_name', 'archive-test.xlsx', 'date_start', v_day_15,
+            'date_end', v_boundary, 'raw_column_count', 10)), 1
+    );
+    perform public.daf_stage_log_import_chunk(
+        '00000000-0000-4000-8000-000000000022'::uuid, 'DAF', 0, 'archive-test-chunk',
+        jsonb_build_array(
+            jsonb_build_object('dedupKey', 'E-RET-ARCHIVE', 'dedupTime', 5000, 'date', v_day_15,
+                'workOrder', 'WO-ARCHIVE', 'productCode', 'P-ARCHIVE', 'model', 'Model-ARCHIVE',
+                'status', 'FAIL', 'defect', '封存不良', 'machine', '1號機', 'inputIncluded', true,
+                'isDefect', true, 'sourceFormat', 'current-v2',
+                'raw', jsonb_build_array('DAF', 'WO-ARCHIVE', '', 'P-ARCHIVE', 'E-RET-ARCHIVE',
+                    '2026-09-22 12:00:00', 'Y0176', '封存不良', 'FAIL')),
+            jsonb_build_object('dedupKey', 'E-RET-BOUNDARY-KEEP', 'dedupTime', 6000, 'date', v_boundary,
+                'workOrder', 'WO-BOUNDARY', 'productCode', 'P-BOUNDARY', 'model', 'Model-BOUNDARY',
+                'status', 'GOOD', 'defect', '', 'machine', '2號機', 'inputIncluded', true,
+                'isDefect', false, 'sourceFormat', 'current-v2',
+                'raw', jsonb_build_array('DAF', 'WO-BOUNDARY', '', 'P-BOUNDARY', 'E-RET-BOUNDARY-KEEP',
+                    '2026-09-23 12:00:00', 'Y0137', '', 'GOOD'))
+        )
+    );
+    perform public.daf_finalize_log_import('00000000-0000-4000-8000-000000000022'::uuid);
+    drop table if exists _daf_import_keys;
+    drop table if exists _daf_import_pairs;
+    drop table if exists _daf_import_old_jobs;
+    if not exists (
+        select 1 from public.daf_log_active_file_processes
+        where line = 'DAF' and file_name = 'archive-test.xlsx'
+    ) then raise exception 'Archive test file was not published into the shared file list'; end if;
+
+    -- This file contains only a later duplicate that loses to archive-test.xlsx.
+    -- Even after its candidate row is pruned, the file must stay protected.
+    perform public.daf_start_log_import(
+        '00000000-0000-4000-8000-000000000025'::uuid, 'loser-only.xlsx',
+        jsonb_build_array(jsonb_build_object('id', 'loser-only-daf', 'line', 'DAF',
+            'file_name', 'loser-only.xlsx', 'date_start', v_day_15,
+            'date_end', v_day_15, 'raw_column_count', 10)), 1
+    );
+    perform public.daf_stage_log_import_chunk(
+        '00000000-0000-4000-8000-000000000025'::uuid, 'DAF', 0, 'loser-only-chunk',
+        jsonb_build_array(jsonb_build_object(
+            'dedupKey', 'E-RET-ARCHIVE', 'dedupTime', 7000, 'date', v_day_15,
+            'workOrder', 'WO-ARCHIVE', 'productCode', 'P-ARCHIVE', 'model', 'Model-ARCHIVE',
+            'status', 'FAIL', 'defect', '較晚重複不良', 'machine', '1號機', 'inputIncluded', true,
+            'isDefect', true, 'sourceFormat', 'current-v2',
+            'raw', jsonb_build_array('DAF', 'WO-ARCHIVE', '', 'P-ARCHIVE', 'E-RET-ARCHIVE',
+                '2026-09-22 12:00:02', 'Y0176', '較晚重複不良', 'FAIL')))
+    );
+    perform public.daf_finalize_log_import('00000000-0000-4000-8000-000000000025'::uuid);
+    drop table if exists _daf_import_keys;
+    drop table if exists _daf_import_pairs;
+    drop table if exists _daf_import_old_jobs;
+    if not exists (
+        select 1 from public.daf_log_active_file_processes
+        where line = 'DAF' and file_name = 'loser-only.xlsx'
+    ) then raise exception 'Duplicate-only file was not published'; end if;
+
+    select jsonb_object_agg(line, dashboard_digest)
+      into v_digest_before
+      from public.daf_preview_log_compaction('9999-12-31'::date);
+    select coalesce(jsonb_agg(
+               (to_jsonb(d) - 'records') || jsonb_build_object(
+                   'records', coalesce((select jsonb_agg(item.value - 'raw' - 'compacted'
+                       order by item.value->>'dedupKey', item.value->>'dedupTime')
+                       from jsonb_array_elements(d.records) item(value)), '[]'::jsonb)
+               ) order by process.line, d.file_name
+           ), '[]'::jsonb)
+      into v_dashboard_before
+      from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
+      cross join lateral public.daf_get_log_process_details(process.line, '', '') d;
+
+    v_result := public.daf_activate_14_day_candidate_retention();
+    if (v_result->>'candidate_retention_days')::integer <> 14 then
+        raise exception '14-day retention activation returned an unexpected policy';
+    end if;
+    insert into public.daf_log_candidates(
+        id, job_id, line, file_name, dedup_key, dedup_time, report_date,
+        work_order, product_code, model_name, status, defect, machine,
+        input_included, is_defect, source_format, record_json, record_storage_version
+    ) values (
+        'invalid-date-candidate', '00000000-0000-4000-8000-000000000001'::uuid,
+        'DAF', 'invalid-date.xlsx', 'E-INVALID-DATE', 1, '2026-99-99',
+        'WO-INVALID', 'P-INVALID', 'Model-INVALID', 'GOOD', '', '未知機台',
+        true, false, 'current-v2',
+        '{"raw":["DAF","WO-INVALID","","P-INVALID","E-INVALID-DATE","2026-10-07 00:00:00"]}'::jsonb,
+        2
+    );
+    while not v_archive_done loop
+        v_archive_result := public.daf_compact_expired_log_batch(v_today - 14, 1000);
+        v_archive_done := coalesce((v_archive_result->>'done')::boolean, false);
+        v_archive_batches := v_archive_batches + 1;
+        if v_archive_batches > 100 then raise exception '14-day compaction did not make progress'; end if;
+    end loop;
+    perform public.daf_strip_expired_log_raw_batch(v_today + 1, 1000);
+
+    if not exists (
+        select 1 from public.daf_log_candidates
+        where id = 'invalid-date-candidate' and report_date = '2026-99-99'
+          and record_json ? 'raw'
+    ) then raise exception 'Invalid calendar date was archived or stripped'; end if;
+
+    if not exists (
+        select 1 from public.daf_log_compact_facts
+        where line = 'DAF' and dedup_key = 'E-RET-ARCHIVE' and report_date = v_day_15
+    ) or exists (
+        select 1 from public.daf_log_candidates
+        where line = 'DAF' and dedup_key = 'E-RET-ARCHIVE'
+    ) then raise exception '15-day safe winner was not moved into compact history'; end if;
+    if not exists (
+        select 1 from public.daf_log_candidates
+        where line = 'DAF' and dedup_key = 'E-RET-BOUNDARY-KEEP' and report_date = v_boundary
+    ) then raise exception 'The exact 14-day boundary candidate was archived early'; end if;
+    if not exists (
+        select 1 from public.daf_log_candidates
+        where line = 'DAF' and dedup_key = 'E-RET-BLOCKED' and record_json ? 'raw'
+    ) then raise exception 'Unresolved raw fallback was not kept after the retention cutoff'; end if;
+    if not exists (
+        select 1 from public.daf_log_compacted_files
+        where line = 'DAF' and file_name = 'archive-test.xlsx'
+    ) then raise exception 'Archived file did not get a permanent overwrite/delete guard'; end if;
+    if exists (
+        select 1 from public.daf_log_candidates
+        where line = 'DAF' and file_name = 'loser-only.xlsx'
+    ) or not exists (
+        select 1 from public.daf_log_compacted_files
+        where line = 'DAF' and file_name = 'loser-only.xlsx'
+    ) then raise exception 'Duplicate-only loser was not pruned and permanently guarded'; end if;
+    if not exists (
+        select 1 from public.daf_log_active_file_processes
+        where line = 'DAF' and file_name = 'archive-test.xlsx'
+    ) then raise exception 'Compaction removed the file from the shared upload list'; end if;
+
+    v_rejected := false;
+    begin
+        perform public.daf_delete_log_file_process('DAF', 'archive-test.xlsx');
+    exception when others then
+        v_error := sqlerrm;
+        v_rejected := position('14 天前' in sqlerrm) > 0;
+    end;
+    if not v_rejected then raise exception 'Archived-file deletion guard did not refuse clearly: %', coalesce(v_error, 'no exception'); end if;
+    drop table if exists _daf_delete_keys;
+    drop table if exists _daf_delete_pairs;
+
+    v_rejected := false;
+    v_error := null;
+    begin
+        perform public.daf_delete_log_file_process('DAF', 'loser-only.xlsx');
+    exception when others then
+        v_error := sqlerrm;
+        v_rejected := position('14 天前' in sqlerrm) > 0;
+    end;
+    if not v_rejected then raise exception 'Duplicate-only archived file deletion guard failed: %', coalesce(v_error, 'no exception'); end if;
+    drop table if exists _daf_delete_keys;
+    drop table if exists _daf_delete_pairs;
+
+    v_rejected := false;
+    begin
+        perform public.daf_start_log_import(
+            '00000000-0000-4000-8000-000000000023'::uuid, 'archive-test.xlsx',
+            jsonb_build_array(jsonb_build_object('id', 'archive-overwrite-daf', 'line', 'DAF',
+                'file_name', 'archive-test.xlsx', 'date_start', to_char(v_today - 2, 'YYYY-MM-DD'),
+                'date_end', to_char(v_today - 2, 'YYYY-MM-DD'), 'raw_column_count', 10)), 0
+        );
+    exception when others then
+        v_rejected := position('14 天前已封存' in sqlerrm) > 0;
+    end;
+    if not v_rejected then raise exception 'An archived file could be overwritten under a recent date range'; end if;
+
+    select jsonb_object_agg(line, dashboard_digest)
+      into v_digest_after
+      from public.daf_preview_log_compaction('9999-12-31'::date);
+    if v_digest_before is distinct from v_digest_after then
+        raise exception 'All-date five-process digest changed after 14-day compaction';
+    end if;
+    select coalesce(jsonb_agg(
+               (to_jsonb(d) - 'records') || jsonb_build_object(
+                   'records', coalesce((select jsonb_agg(item.value - 'raw' - 'compacted'
+                       order by item.value->>'dedupKey', item.value->>'dedupTime')
+                       from jsonb_array_elements(d.records) item(value)), '[]'::jsonb)
+               ) order by process.line, d.file_name
+           ), '[]'::jsonb)
+      into v_dashboard_after
+      from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
+      cross join lateral public.daf_get_log_process_details(process.line, '', '') d;
+    if v_dashboard_before is distinct from v_dashboard_after then
+        raise exception 'First/second-level file summary or detail data changed after 14-day compaction';
+    end if;
 end;
 $$;
 

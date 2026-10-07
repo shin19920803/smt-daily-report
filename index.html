@@ -411,7 +411,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="font-bold text-lg text-purple-800"><i class="fas fa-file-import mr-2"></i>檔案上傳</h3>
-                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 與功能一測試會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。熱壓投入僅作跨日比對，不列入統計；未匹配資料保留 30 天。</p>
+                            <p class="text-xs text-gray-400 mt-1">A 欄為製程辨識欄，只抓五個製程；DAF 與功能一測試會以「DAF熱壓投入」的 G 欄操作人員（Y0176／Y0137）對照 E 欄，標記 1 號機／2 號機。熱壓投入僅作跨日比對，不列入統計；未匹配機台參照保留 30 天、原始比對候選保留 14 天，歷史報表摘要持續保留。</p>
                         </div>
                         <span v-if="dafRemoteReady" class="badge-hint text-green-700" :title="dafRemoteError"><i class="fas fa-cloud"></i>共用資料庫同步</span>
                         <span v-else-if="dafRemoteChecking" class="badge-hint text-blue-700"><i class="fas fa-spinner fa-spin"></i>正在確認共用資料庫</span>

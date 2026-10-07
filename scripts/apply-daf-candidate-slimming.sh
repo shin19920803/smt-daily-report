@@ -118,7 +118,11 @@ fi
 candidate_snapshot() {
   psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
 select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '') || '|' ||
-       coalesce(bit_xor(hashtextextended((to_jsonb(c) - array['record_json','record_storage_version'])::text, 0)), 0)
+       coalesce(bit_xor(hashtextextended(jsonb_build_array(
+           c.id, c.job_id, c.line, c.file_name, c.dedup_key, c.dedup_time,
+           c.report_date, c.work_order, c.product_code, c.model_name, c.status,
+           c.defect, c.machine, c.input_included, c.is_defect, c.source_format, c.created_at
+       )::text, 0)), 0)
 from public.daf_log_candidates c
 where c.created_at < :'snapshot_cutoff'::timestamptz
 group by line order by line;
@@ -128,7 +132,9 @@ SQL
 winner_snapshot() {
   psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
 select w.line || '|' || count(*) || '|' || coalesce(min(w.candidate_id), '') || '|' ||
-       coalesce(max(w.candidate_id), '') || '|' || coalesce(bit_xor(hashtextextended(to_jsonb(w)::text, 0)), 0)
+       coalesce(max(w.candidate_id), '') || '|' || coalesce(bit_xor(hashtextextended(jsonb_build_array(
+           w.candidate_id, w.line, w.dedup_key, w.file_name, w.job_id
+       )::text, 0)), 0)
 from public.daf_log_winners w
 join public.daf_log_candidates c on c.id=w.candidate_id
 where c.created_at < :'snapshot_cutoff'::timestamptz

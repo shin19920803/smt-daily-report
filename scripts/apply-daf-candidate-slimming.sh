@@ -98,12 +98,18 @@ if [[ "$base_schema" != 't' ]]; then
   exit 3
 fi
 
-snapshot_cutoff=$(psql_exec -At -c "select clock_timestamp()::text")
-receiving_jobs=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
+if ! snapshot_cutoff=$(psql_exec -At -c "select clock_timestamp()::text") || [[ -z "$snapshot_cutoff" ]]; then
+  printf '無法取得線上快照時間；停止，不修改資料。\n' >&2
+  exit 3
+fi
+if ! receiving_jobs=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
 select count(*) from public.daf_log_import_jobs
 where status='receiving' and created_at < :'snapshot_cutoff'::timestamptz;
 SQL
-)
+) ; then
+  printf '檢查進行中的上傳工作失敗；停止，不修改資料。\n' >&2
+  exit 3
+fi
 if [[ "$receiving_jobs" != '0' ]]; then
   printf '目前有 %s 個上傳工作進行中；請等其完成後再套用，以免部署快照混入上傳變更。\n' "$receiving_jobs" >&2
   exit 3
@@ -112,7 +118,7 @@ fi
 candidate_snapshot() {
   psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
 select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '') || '|' ||
-       md5(coalesce(string_agg(md5((to_jsonb(c) - array['record_json','record_storage_version'])::text), '' order by id), ''))
+       coalesce(bit_xor(hashtextextended((to_jsonb(c) - array['record_json','record_storage_version'])::text, 0)), 0)
 from public.daf_log_candidates c
 where c.created_at < :'snapshot_cutoff'::timestamptz
 group by line order by line;
@@ -121,7 +127,8 @@ SQL
 
 winner_snapshot() {
   psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
-select w.line || '|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(w)::text), '' order by w.candidate_id), ''))
+select w.line || '|' || count(*) || '|' || coalesce(min(w.candidate_id), '') || '|' ||
+       coalesce(max(w.candidate_id), '') || '|' || coalesce(bit_xor(hashtextextended(to_jsonb(w)::text, 0)), 0)
 from public.daf_log_winners w
 join public.daf_log_candidates c on c.id=w.candidate_id
 where c.created_at < :'snapshot_cutoff'::timestamptz
@@ -129,8 +136,14 @@ group by w.line order by w.line;
 SQL
 }
 
-candidate_before=$(candidate_snapshot)
-winner_before=$(winner_snapshot)
+if ! candidate_before=$(candidate_snapshot); then
+  printf '候選資料完整性快照逾時或失敗；停止，不修改候選資料。\n' >&2
+  exit 3
+fi
+if ! winner_before=$(winner_snapshot); then
+  printf 'winner 完整性快照逾時或失敗；停止，不修改候選資料。\n' >&2
+  exit 3
+fi
 size_before=$(psql_exec -At -c "select pg_total_relation_size('public.daf_log_candidates'::regclass)")
 
 compatible=$(psql_exec -At -c "select
@@ -196,8 +209,14 @@ fi
 # after confirming its supported extension version and free-disk headroom.
 psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_candidates'
 
-candidate_after=$(candidate_snapshot)
-winner_after=$(winner_snapshot)
+if ! candidate_after=$(candidate_snapshot); then
+  printf '候選資料完成後快照逾時或失敗；停止宣告完成。\n' >&2
+  exit 6
+fi
+if ! winner_after=$(winner_snapshot); then
+  printf 'winner 完成後快照逾時或失敗；停止宣告完成。\n' >&2
+  exit 6
+fi
 if [[ "$candidate_before" != "$candidate_after" ]]; then
   printf '候選列 ID／統計欄位快照不一致；停止宣告完成。\n' >&2
   diff -u <(printf '%s\n' "$candidate_before") <(printf '%s\n' "$candidate_after") >&2 || true

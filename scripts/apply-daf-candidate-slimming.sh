@@ -24,10 +24,11 @@ backup_path=$3
 pg_port=5432
 pg_database=postgres
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+compatibility_path="$repo_root/supabase/daf_historical_compaction.sql"
 migration_path="$repo_root/supabase/daf_candidate_payload_slimming.sql"
 
 [[ -f "$backup_path" && -s "$backup_path" ]] || { printf '既有完整備份不存在或為空；拒絕修改線上資料。\n' >&2; exit 2; }
-[[ -f "$migration_path" ]] || { printf '找不到精簡 SQL。\n' >&2; exit 2; }
+[[ -f "$compatibility_path" && -f "$migration_path" ]] || { printf '找不到相容層或精簡 SQL。\n' >&2; exit 2; }
 pg_restore --list "$backup_path" >/dev/null || { printf '備份封存目錄無法讀取；拒絕修改線上資料。\n' >&2; exit 2; }
 pg_restore --exit-on-error --file=/dev/null "$backup_path" || { printf '備份內容驗證失敗；拒絕修改線上資料。\n' >&2; exit 2; }
 
@@ -85,13 +86,15 @@ if [[ "$connected_database" != "$pg_database" ]]; then
   exit 3
 fi
 
-compatible=$(psql_exec -At -c "select
-  exists(select 1 from information_schema.columns where table_schema='public' and table_name='daf_log_candidates' and column_name='record_storage_version')
-  and to_regprocedure('public.daf_candidate_canonical_json(public.daf_log_candidates)') is not null
-  and to_regprocedure('public.daf_candidate_to_record(public.daf_log_candidates)') is not null
-  and to_regprocedure('public.daf_candidate_payload_mismatch(public.daf_log_candidates)') is not null")
-if [[ "$compatible" != 't' ]]; then
-  printf '線上資料庫尚未安裝候選資料雙格式相容層；拒絕套用精簡寫入。\n' >&2
+base_schema=$(psql_exec -At -c "select
+  to_regclass('public.daf_log_candidates') is not null
+  and to_regclass('public.daf_log_import_jobs') is not null
+  and to_regclass('public.daf_log_import_chunks') is not null
+  and to_regclass('public.daf_log_winners') is not null
+  and to_regclass('public.daf_log_active_file_processes') is not null
+  and to_regclass('public.daf_log_batches') is not null")
+if [[ "$base_schema" != 't' ]]; then
+  printf '五大製程資料表不完整；拒絕修改線上資料。\n' >&2
   exit 3
 fi
 
@@ -107,6 +110,25 @@ winner_snapshot_sql="select w.line || '|' || count(*) || '|' || md5(coalesce(str
 candidate_before=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "$candidate_snapshot_sql")
 winner_before=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -c "$winner_snapshot_sql")
 size_before=$(psql_exec -At -c "select pg_total_relation_size('public.daf_log_candidates'::regclass)")
+
+compatible=$(psql_exec -At -c "select
+  exists(select 1 from information_schema.columns where table_schema='public' and table_name='daf_log_candidates' and column_name='record_storage_version')
+  and to_regprocedure('public.daf_candidate_canonical_json(public.daf_log_candidates)') is not null
+  and to_regprocedure('public.daf_candidate_to_record(public.daf_log_candidates)') is not null
+  and to_regprocedure('public.daf_candidate_payload_mismatch(public.daf_log_candidates)') is not null")
+if [[ "$compatible" != 't' ]]; then
+  printf '安裝缺少的雙格式相容讀取層（只建立／更新結構與函式，不執行封存刪除）…\n'
+  psql_exec -v ON_ERROR_STOP=1 --file="$compatibility_path"
+  compatible=$(psql_exec -At -c "select
+    exists(select 1 from information_schema.columns where table_schema='public' and table_name='daf_log_candidates' and column_name='record_storage_version')
+    and to_regprocedure('public.daf_candidate_canonical_json(public.daf_log_candidates)') is not null
+    and to_regprocedure('public.daf_candidate_to_record(public.daf_log_candidates)') is not null
+    and to_regprocedure('public.daf_candidate_payload_mismatch(public.daf_log_candidates)') is not null")
+  if [[ "$compatible" != 't' ]]; then
+    printf '相容層安裝後檢查仍未通過；停止，尚未啟用精簡寫入。\n' >&2
+    exit 3
+  fi
+fi
 
 printf '連線成功：資料庫 %s，候選表目前 %s bytes。套用精簡相容寫入與批次轉換…\n' "$connected_database" "$size_before"
 psql_exec -v ON_ERROR_STOP=1 --file="$migration_path"

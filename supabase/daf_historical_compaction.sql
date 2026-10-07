@@ -96,7 +96,21 @@ begin
     elsif p_candidate.record_storage_version = 2 then
         return coalesce(p_candidate.record_json ?| v_known_keys, true)
             or (p_candidate.record_json ? 'raw'
-                and jsonb_typeof(p_candidate.record_json->'raw') is distinct from 'array');
+                and (
+                    jsonb_typeof(p_candidate.record_json->'raw') is distinct from 'array'
+                    or (
+                        nullif(btrim(coalesce(p_candidate.record_json->>'productCode', p_candidate.product_code)), '') is null
+                        and coalesce(p_candidate.record_json->'raw'->>(case when p_candidate.source_format = 'current-v2' or p_candidate.line = 'FT1' then 3 else 4 end), '') <> ''
+                    )
+                    or (
+                        nullif(btrim(coalesce(p_candidate.record_json->>'dedupKey', p_candidate.dedup_key)), '') is null
+                        and coalesce(p_candidate.record_json->'raw'->>(case when p_candidate.source_format = 'current-v2' or p_candidate.line = 'FT1' then 4 else 5 end), '') <> ''
+                    )
+                    or (
+                        nullif(btrim(coalesce(p_candidate.record_json->>'dedupTime', p_candidate.dedup_time::text)), '') is null
+                        and coalesce(p_candidate.record_json->'raw'->>(case when p_candidate.source_format = 'current-v2' or p_candidate.line = 'FT1' then 5 else 6 end), '') <> ''
+                    )
+                ));
     end if;
     return true;
 end;
@@ -141,8 +155,10 @@ revoke all on public.daf_log_compact_facts from public, anon, authenticated;
 create table if not exists public.daf_log_compaction_state (
     id text primary key check (id = 'current'),
     cutoff_date date not null,
+    raw_cutoff_date date,
     updated_at timestamptz not null default now()
 );
+alter table public.daf_log_compaction_state add column if not exists raw_cutoff_date date;
 alter table public.daf_log_compaction_state enable row level security;
 revoke all on public.daf_log_compaction_state from public, anon, authenticated;
 
@@ -254,6 +270,252 @@ as $$
     left join dashboard_digests dd on dd.line = l.line
     group by l.line, i.n, r.n, pm.n, cp.n, dd.digest
     order by l.line;
+$$;
+
+create or replace function public.daf_preview_log_raw_retention(p_cutoff date)
+returns table (
+    line text,
+    candidate_raw_rows bigint,
+    safe_candidate_rows bigint,
+    blocked_candidate_rows bigint,
+    candidate_raw_bytes bigint,
+    batch_raw_rows bigint,
+    safe_batch_rows bigint,
+    batch_raw_bytes bigint
+)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+    with bounds as (
+        select greatest(coalesce(s.cutoff_date, (now() at time zone 'Asia/Taipei')::date - 30),
+                        (now() at time zone 'Asia/Taipei')::date - 30)::date as archive_cutoff,
+               greatest(coalesce(s.raw_cutoff_date, p_cutoff), p_cutoff)::date as raw_cutoff
+        from (select 1) seed
+        left join public.daf_log_compaction_state s on s.id = 'current'
+    ), candidate_rows as (
+        select c.line, c.id, c.record_json, c.record_storage_version,
+               public.daf_candidate_payload_mismatch(c) as unsafe
+        from public.daf_log_candidates c
+        cross join bounds b
+        left join public.daf_log_import_jobs j on j.id = c.job_id
+        where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+          and c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+          and c.report_date < b.raw_cutoff::text
+          and c.report_date >= b.archive_cutoff::text
+          and c.record_json ? 'raw'
+          and coalesce(j.status, '') <> 'receiving'
+    ), batch_items as (
+        select b.line, b.id, item.value,
+               case
+                   when jsonb_typeof(item.value) <> 'object'
+                     or jsonb_typeof(item.value->'raw') is distinct from 'array'
+                     or not (item.value ?& array['date', 'productCode', 'dedupKey', 'dedupTime'])
+                     or item.value->>'date' !~ '^\d{4}-\d{2}-\d{2}$'
+                   then false
+                   else
+                       item.value->>'date' < bounds.raw_cutoff::text
+                       and (
+                           nullif(btrim(coalesce(item.value->>'productCode', '')), '') is not null
+                           or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 3 else 4 end), '') = ''
+                       )
+                       and (
+                           nullif(btrim(coalesce(item.value->>'dedupKey', '')), '') is not null
+                           or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 4 else 5 end), '') = ''
+                       )
+                       and (
+                           nullif(btrim(coalesce(item.value->>'dedupTime', '')), '') is not null
+                           or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 5 else 6 end), '') = ''
+                       )
+               end as safe_to_strip
+        from public.daf_log_batches b
+        cross join bounds
+        cross join lateral jsonb_array_elements(
+            case when jsonb_typeof(b.records) = 'array' then b.records else '[]'::jsonb end
+        ) item(value)
+        where b.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+          and item.value ? 'raw'
+    ), candidate_summary as (
+        select c.line,
+               count(*)::bigint as raw_rows,
+               count(*) filter (where c.record_storage_version = 2 and not c.unsafe)::bigint as safe_rows,
+               count(*) filter (where c.record_storage_version <> 2 or c.unsafe)::bigint as blocked_rows,
+               coalesce(sum(pg_column_size(c.record_json->'raw')), 0)::bigint as raw_bytes
+        from candidate_rows c
+        group by c.line
+    ), batch_summary as (
+        select i.line,
+               count(*)::bigint as raw_rows,
+               count(*) filter (where i.safe_to_strip)::bigint as safe_rows,
+               coalesce(sum(pg_column_size(i.value->'raw')), 0)::bigint as raw_bytes
+        from batch_items i
+        group by i.line
+    ), lines(line) as (
+        values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')
+    )
+    select l.line,
+           coalesce(c.raw_rows, 0), coalesce(c.safe_rows, 0), coalesce(c.blocked_rows, 0), coalesce(c.raw_bytes, 0),
+           coalesce(b.raw_rows, 0), coalesce(b.safe_rows, 0), coalesce(b.raw_bytes, 0)
+    from lines l
+    left join candidate_summary c on c.line = l.line
+    left join batch_summary b on b.line = l.line
+    order by l.line;
+$$;
+
+create or replace function public.daf_strip_expired_log_raw_batch(
+    p_cutoff date,
+    p_batch_size integer default 1000
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '55s'
+as $$
+declare
+    v_allowed_cutoff date := (now() at time zone 'Asia/Taipei')::date - 14;
+    v_archive_cutoff date;
+    v_cutoff date;
+    v_candidate_count integer := 0;
+    v_batch_count integer := 0;
+    v_payload_bytes_saved bigint := 0;
+    v_lock_line text;
+begin
+    if p_cutoff is null then raise exception '原始欄位清理日期不可空白'; end if;
+    if p_cutoff > v_allowed_cutoff then
+        raise exception '原始欄位只能清理嚴格早於 14 天界線的日期（最晚可選 %）', v_allowed_cutoff;
+    end if;
+    if p_batch_size is null or p_batch_size < 1 or p_batch_size > 5000 then
+        raise exception '每批筆數須介於 1 至 5000';
+    end if;
+
+    v_archive_cutoff := greatest(
+        coalesce((select cutoff_date from public.daf_log_compaction_state where id = 'current'), v_allowed_cutoff - 16),
+        (now() at time zone 'Asia/Taipei')::date - 30
+    );
+    insert into public.daf_log_compaction_state(id, cutoff_date, raw_cutoff_date)
+    values ('current', v_archive_cutoff, p_cutoff)
+    on conflict (id) do update
+       set raw_cutoff_date = greatest(coalesce(public.daf_log_compaction_state.raw_cutoff_date, excluded.raw_cutoff_date), excluded.raw_cutoff_date),
+           updated_at = now();
+    select greatest(coalesce(raw_cutoff_date, p_cutoff), p_cutoff)
+      into v_cutoff
+      from public.daf_log_compaction_state where id = 'current';
+    v_cutoff := least(v_cutoff, v_allowed_cutoff);
+
+    -- Use the same ordered process locks as publication, file deletion and compaction.
+    for v_lock_line in
+        select line from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
+        order by line
+    loop
+        perform pg_advisory_xact_lock(hashtextextended(v_lock_line, 92742));
+    end loop;
+
+    with picked as materialized (
+        select c.id, pg_column_size(c.record_json) - pg_column_size(c.record_json - 'raw') as saved_bytes
+        from public.daf_log_candidates c
+        join public.daf_log_import_jobs j on j.id = c.job_id and j.status <> 'receiving'
+        where c.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+          and c.report_date ~ '^\d{4}-\d{2}-\d{2}$'
+          and c.report_date < v_cutoff::text
+          and c.report_date >= v_archive_cutoff::text
+          and c.record_storage_version = 2
+          and c.record_json ? 'raw'
+          and not public.daf_candidate_payload_mismatch(c)
+        order by c.report_date, c.line, c.id
+        limit p_batch_size
+        for update of c skip locked
+    ), updated as (
+        update public.daf_log_candidates c
+           set record_json = c.record_json - 'raw'
+          from picked p
+         where c.id = p.id and c.record_storage_version = 2 and c.record_json ? 'raw'
+        returning p.saved_bytes
+    )
+    select count(*)::integer, coalesce(sum(saved_bytes), 0)::bigint
+      into v_candidate_count, v_payload_bytes_saved
+      from updated;
+
+    perform set_config('koya.allow_daf_summary_write', 'on', true);
+    with picked as materialized (
+        select b.id
+        from public.daf_log_batches b
+        where b.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
+          and jsonb_typeof(b.records) = 'array'
+          and exists (
+              select 1
+              from jsonb_array_elements(
+                  case when jsonb_typeof(b.records) = 'array' then b.records else '[]'::jsonb end
+              ) item(value)
+              where item.value ? 'raw'
+                and jsonb_typeof(item.value) = 'object'
+                and jsonb_typeof(item.value->'raw') = 'array'
+                and item.value->>'date' ~ '^\d{4}-\d{2}-\d{2}$'
+                and item.value->>'date' < v_cutoff::text
+                and item.value ?& array['productCode', 'dedupKey', 'dedupTime']
+                and (
+                    nullif(btrim(coalesce(item.value->>'productCode', '')), '') is not null
+                    or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 3 else 4 end), '') = ''
+                )
+                and (
+                    nullif(btrim(coalesce(item.value->>'dedupKey', '')), '') is not null
+                    or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 4 else 5 end), '') = ''
+                )
+                and (
+                    nullif(btrim(coalesce(item.value->>'dedupTime', '')), '') is not null
+                    or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 5 else 6 end), '') = ''
+                )
+          )
+        order by b.line, b.id
+        limit p_batch_size
+        for update of b skip locked
+    ), rebuilt as (
+        select b.id,
+               coalesce(jsonb_agg(
+                   case when
+                       jsonb_typeof(item.value) = 'object'
+                       and jsonb_typeof(item.value->'raw') = 'array'
+                       and item.value->>'date' ~ '^\d{4}-\d{2}-\d{2}$'
+                       and item.value->>'date' < v_cutoff::text
+                       and item.value ?& array['productCode', 'dedupKey', 'dedupTime']
+                       and (
+                           nullif(btrim(coalesce(item.value->>'productCode', '')), '') is not null
+                           or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 3 else 4 end), '') = ''
+                       )
+                       and (
+                           nullif(btrim(coalesce(item.value->>'dedupKey', '')), '') is not null
+                           or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 4 else 5 end), '') = ''
+                       )
+                       and (
+                           nullif(btrim(coalesce(item.value->>'dedupTime', '')), '') is not null
+                           or coalesce(item.value->'raw'->>(case when item.value->>'sourceFormat' = 'current-v2' or b.line = 'FT1' then 5 else 6 end), '') = ''
+                       )
+                   then item.value - 'raw' else item.value end
+                   order by item.ordinality
+               ), '[]'::jsonb) as records
+        from public.daf_log_batches b
+        join picked p on p.id = b.id
+        cross join lateral jsonb_array_elements(b.records) with ordinality item(value, ordinality)
+        group by b.id
+    ), updated as (
+        update public.daf_log_batches b
+           set records = r.records
+          from rebuilt r
+         where b.id = r.id and b.records is distinct from r.records
+        returning b.id
+    )
+    select count(*)::integer into v_batch_count from updated;
+
+    return jsonb_build_object(
+        'raw_cutoff_date', v_cutoff,
+        'archive_cutoff_date', v_archive_cutoff,
+        'stripped_candidates', v_candidate_count,
+        'stripped_batch_summaries', v_batch_count,
+        'payload_bytes_saved', v_payload_bytes_saved,
+        'done', v_candidate_count < p_batch_size and v_batch_count < p_batch_size
+    );
+end;
 $$;
 
 create or replace function public.daf_compact_expired_log_batch(
@@ -437,14 +699,19 @@ as $$
 declare
     v_reference_rows integer;
     v_compaction jsonb;
+    v_raw_retention jsonb;
 begin
     v_reference_rows := public.daf_prune_expired_machine_references(now());
     v_compaction := public.daf_compact_expired_log_batch(
         (now() at time zone 'Asia/Taipei')::date - 30, 5000
     );
+    v_raw_retention := public.daf_strip_expired_log_raw_batch(
+        (now() at time zone 'Asia/Taipei')::date - 14, 1000
+    );
     return jsonb_build_object(
         'deleted_machine_reference_rows', v_reference_rows,
-        'compaction', v_compaction
+        'compaction', v_compaction,
+        'raw_retention', v_raw_retention
     );
 end;
 $$;
@@ -877,6 +1144,8 @@ end;
 $$;
 
 revoke all on function public.daf_preview_log_compaction(date),
+    public.daf_preview_log_raw_retention(date),
+    public.daf_strip_expired_log_raw_batch(date, integer),
     public.daf_compact_expired_log_batch(date, integer),
     public.daf_prune_expired_machine_references(timestamptz),
     public.daf_run_log_maintenance_batch(),

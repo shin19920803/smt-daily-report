@@ -393,4 +393,196 @@ begin
 end;
 $$;
 
+-- Expire only raw spreadsheet arrays after 14 days while preserving the typed
+-- candidates needed for file deletion/reselection through the 30-day boundary.
+do $$
+declare
+    v_today date := (now() at time zone 'Asia/Taipei')::date;
+    v_day_20 text := to_char(v_today - 20, 'YYYY-MM-DD');
+    v_day_15 text := to_char(v_today - 15, 'YYYY-MM-DD');
+    v_boundary text := to_char(v_today - 14, 'YYYY-MM-DD');
+    v_preview record;
+    v_result jsonb;
+    v_before jsonb;
+    v_after jsonb;
+    v_digest_before jsonb;
+    v_digest_after jsonb;
+begin
+    perform public.daf_start_log_import(
+        '00000000-0000-4000-8000-000000000020'::uuid, 'retention-first.xlsx',
+        jsonb_build_array(jsonb_build_object('id', 'retention-first-daf', 'line', 'DAF',
+            'file_name', 'retention-first.xlsx', 'date_start', v_day_20,
+            'date_end', v_boundary, 'raw_column_count', 10)), 1
+    );
+    perform public.daf_stage_log_import_chunk(
+        '00000000-0000-4000-8000-000000000020'::uuid, 'DAF', 0, 'retention-first-chunk',
+        jsonb_build_array(
+            jsonb_build_object('dedupKey', 'E-RET-DELETE', 'dedupTime', 1000, 'date', v_day_20,
+                'workOrder', 'WO-RET', 'productCode', 'P-RET', 'model', 'Model-RET',
+                'status', 'GOOD', 'defect', '', 'machine', '1號機', 'inputIncluded', true,
+                'isDefect', false, 'sourceFormat', 'current-v2',
+                'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RET', 'E-RET-DELETE',
+                    '2026-09-17 08:00:00', 'Y0176', '', 'GOOD')),
+            jsonb_build_object('dedupKey', 'E-RET-BOUNDARY', 'dedupTime', 2000, 'date', v_boundary,
+                'workOrder', 'WO-RET', 'productCode', 'P-RET', 'model', 'Model-RET',
+                'status', 'FAIL', 'defect', '邊界不良', 'machine', '2號機', 'inputIncluded', true,
+                'isDefect', true, 'sourceFormat', 'current-v2',
+                'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RET', 'E-RET-BOUNDARY',
+                    '2026-09-23 09:00:00', 'Y0137', '邊界不良', 'FAIL')),
+            jsonb_build_object('dedupKey', 'E-RET-BLOCKED', 'dedupTime', 3000, 'date', v_day_15,
+                'workOrder', 'WO-RET', 'productCode', '', 'model', 'Model-RET',
+                'status', 'GOOD', 'defect', '', 'machine', '未知機台', 'inputIncluded', true,
+                'isDefect', false, 'sourceFormat', 'current-v2',
+                'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RAW-FALLBACK', 'E-RET-BLOCKED',
+                    '2026-09-22 10:00:00', '', '', 'GOOD'))
+        )
+    );
+    perform public.daf_finalize_log_import('00000000-0000-4000-8000-000000000020'::uuid);
+    drop table if exists _daf_import_keys;
+    drop table if exists _daf_import_pairs;
+    drop table if exists _daf_import_old_jobs;
+
+    perform public.daf_start_log_import(
+        '00000000-0000-4000-8000-000000000021'::uuid, 'retention-second.xlsx',
+        jsonb_build_array(jsonb_build_object('id', 'retention-second-daf', 'line', 'DAF',
+            'file_name', 'retention-second.xlsx', 'date_start', v_day_20,
+            'date_end', v_day_20, 'raw_column_count', 10)), 1
+    );
+    perform public.daf_stage_log_import_chunk(
+        '00000000-0000-4000-8000-000000000021'::uuid, 'DAF', 0, 'retention-second-chunk',
+        jsonb_build_array(jsonb_build_object(
+            'dedupKey', 'E-RET-DELETE', 'dedupTime', 2000, 'date', v_day_20,
+            'workOrder', 'WO-RET', 'productCode', 'P-RET', 'model', 'Model-RET',
+            'status', 'FAIL', 'defect', '較晚重複列', 'machine', '1號機', 'inputIncluded', true,
+            'isDefect', true, 'sourceFormat', 'current-v2',
+            'raw', jsonb_build_array('DAF', 'WO-RET', '', 'P-RET', 'E-RET-DELETE',
+                '2026-09-17 09:00:00', 'Y0176', '較晚重複列', 'FAIL'))
+        )
+    );
+    perform public.daf_finalize_log_import('00000000-0000-4000-8000-000000000021'::uuid);
+    drop table if exists _daf_import_keys;
+    drop table if exists _daf_import_pairs;
+    drop table if exists _daf_import_old_jobs;
+
+    perform set_config('koya.allow_daf_summary_write', 'on', true);
+    update public.daf_log_batches
+       set records = jsonb_build_array(jsonb_build_object(
+           'dedupKey', 'E-LEGACY-RAW', 'dedupTime', 4000, 'date', v_day_15,
+           'workOrder', 'WO-LEGACY', 'productCode', 'P-LEGACY', 'model', 'Model-LEGACY',
+           'status', 'GOOD', 'defect', '', 'machine', '未知機台', 'inputIncluded', true,
+           'isDefect', false, 'sourceFormat', 'current-v2',
+           'raw', jsonb_build_array('DAF', 'WO-LEGACY', '', 'P-LEGACY', 'E-LEGACY-RAW',
+               '2026-09-22 11:00:00', '', '', 'GOOD')
+       ))
+     where line = 'DAF' and file_name = 'retention-first.xlsx';
+
+    if not exists (
+        select 1 from public.daf_log_winners w
+        join public.daf_log_candidates c on c.id = w.candidate_id
+        where w.line = 'DAF' and w.dedup_key = 'E-RET-DELETE'
+          and w.file_name = 'retention-first.xlsx' and c.dedup_time = 1000
+    ) then raise exception 'Expected the earliest cross-file candidate to be the winner'; end if;
+
+    select coalesce(jsonb_agg(jsonb_build_object(
+               'id', c.id, 'record', public.daf_candidate_to_record(c) - 'raw'
+           ) order by c.id), '[]'::jsonb)
+      into v_before
+      from public.daf_log_candidates c
+     where c.job_id in (
+        '00000000-0000-4000-8000-000000000020'::uuid,
+        '00000000-0000-4000-8000-000000000021'::uuid
+     );
+    select jsonb_object_agg(line, dashboard_digest)
+      into v_digest_before
+      from public.daf_preview_log_compaction(v_today - 14);
+
+    select * into v_preview
+    from public.daf_preview_log_raw_retention(v_today - 14)
+    where line = 'DAF';
+    if v_preview.safe_candidate_rows <> 2 or v_preview.blocked_candidate_rows <> 1
+       or v_preview.safe_batch_rows < 1 then
+        raise exception 'Raw-retention preview safety counts are wrong: %', row_to_json(v_preview);
+    end if;
+
+    v_result := public.daf_strip_expired_log_raw_batch(v_today - 14, 1000);
+    if (v_result->>'stripped_candidates')::integer <> 2
+       or (v_result->>'stripped_batch_summaries')::integer < 1 then
+        raise exception '14-day raw-retention batch did not process the expected rows: %', v_result;
+    end if;
+    if not exists (
+        select 1 from public.daf_log_candidates c
+        where c.line = 'DAF' and c.dedup_key = 'E-RET-BOUNDARY'
+          and c.report_date = v_boundary and c.record_json ? 'raw'
+    ) then raise exception 'The exact 14-day boundary row was incorrectly stripped'; end if;
+    if exists (
+        select 1 from public.daf_log_candidates c
+        where c.line = 'DAF' and c.dedup_key = 'E-RET-DELETE'
+          and c.report_date < v_boundary and c.record_json ? 'raw'
+    ) then raise exception 'A safe expired raw array was not stripped'; end if;
+    if not exists (
+        select 1 from public.daf_log_candidates c
+        where c.line = 'DAF' and c.dedup_key = 'E-RET-BLOCKED'
+          and c.record_json ? 'raw' and c.product_code = ''
+    ) then raise exception 'Unsafe raw fallback was removed'; end if;
+
+    select coalesce(jsonb_agg(jsonb_build_object(
+               'id', c.id, 'record', public.daf_candidate_to_record(c) - 'raw'
+           ) order by c.id), '[]'::jsonb)
+      into v_after
+      from public.daf_log_candidates c
+     where c.job_id in (
+        '00000000-0000-4000-8000-000000000020'::uuid,
+        '00000000-0000-4000-8000-000000000021'::uuid
+     );
+    if v_before is distinct from v_after then
+        raise exception 'Dashboard fields changed when raw arrays were stripped';
+    end if;
+    select jsonb_object_agg(line, dashboard_digest)
+      into v_digest_after
+      from public.daf_preview_log_compaction(v_today - 14);
+    if v_digest_before is distinct from v_digest_after then
+        raise exception 'Five-process Dashboard digest changed when raw arrays were stripped';
+    end if;
+    if exists (
+        select 1
+        from public.daf_get_log_process_details('DAF', v_day_20, v_boundary) d,
+             lateral jsonb_array_elements(d.records) item(value)
+        where item.value->>'dedupKey' = 'E-RET-DELETE' and item.value ? 'raw'
+    ) then raise exception 'Second-level report still exposes a safely-expired raw array'; end if;
+    if not exists (
+        select 1 from public.daf_log_batches b
+        where b.line = 'DAF' and b.file_name = 'retention-first.xlsx'
+          and not ((b.records->0) ? 'raw') and b.records->0->>'dedupKey' = 'E-LEGACY-RAW'
+    ) then raise exception 'Legacy summary raw array was not safely removed'; end if;
+
+    v_result := public.daf_strip_expired_log_raw_batch(v_today - 14, 1000);
+    if (v_result->>'stripped_candidates')::integer <> 0
+       or (v_result->>'stripped_batch_summaries')::integer <> 0 then
+        raise exception 'Repeated raw-retention batch was not idempotent: %', v_result;
+    end if;
+
+    if not public.daf_delete_log_file_process('DAF', 'retention-first.xlsx') then
+        raise exception 'Could not delete the old winning file after raw stripping';
+    end if;
+    if not exists (
+        select 1 from public.daf_log_winners w
+        join public.daf_log_candidates c on c.id = w.candidate_id
+        where w.line = 'DAF' and w.dedup_key = 'E-RET-DELETE'
+          and w.file_name = 'retention-second.xlsx'
+          and not (c.record_json ? 'raw')
+    ) then raise exception 'Deleting the earliest file did not promote the next structured candidate'; end if;
+end;
+$$;
+
+do $$
+declare
+    v_result jsonb;
+begin
+    v_result := public.daf_run_log_maintenance_batch();
+    if not (v_result ?& array['compaction', 'raw_retention', 'deleted_machine_reference_rows']) then
+        raise exception 'Scheduled maintenance did not run both retention paths: %', v_result;
+    end if;
+end;
+$$;
+
 select 'daf historical compaction checks passed' as result;

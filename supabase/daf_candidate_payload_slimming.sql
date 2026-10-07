@@ -146,24 +146,41 @@ begin
     from (values ('ASSEMBLY'), ('DAF'), ('FT1'), ('FT2'), ('LIGHTING')) as lines(v_line)
     order by v_line;
 
-    with picked as materialized (
-        select c.id, c.record_json, c.created_at,
-               case when c.record_storage_version = 1 then
+    if p_after_id is null then
+        with picked as materialized (
+            select c.id, c.record_json, c.created_at,
                    public.daf_try_slim_candidate_json(
                        c.record_json, public.daf_candidate_canonical_json(c)
-                   )
-               end as slim_json,
-               c.record_storage_version as candidate_version
-        from public.daf_log_candidates c
-        join public.daf_log_import_jobs j on j.id = c.job_id
-        where j.status <> 'receiving'
-          and (p_after_id is null or c.id > p_after_id)
-        order by c.id
-        limit p_batch_size
-        for update of c
-    )
-    insert into _daf_candidate_slim_batch(id, original_json, slim_json, candidate_version, created_at)
-    select id, record_json, slim_json, candidate_version, created_at from picked;
+                   ) as slim_json,
+                   c.record_storage_version as candidate_version
+            from public.daf_log_candidates c
+            join public.daf_log_import_jobs j on j.id = c.job_id
+            where j.status <> 'receiving' and c.record_storage_version = 1
+            order by c.id
+            limit p_batch_size
+            for update of c
+        )
+        insert into _daf_candidate_slim_batch(id, original_json, slim_json, candidate_version, created_at)
+        select id, record_json, slim_json, candidate_version, created_at from picked;
+    else
+        with picked as materialized (
+            select c.id, c.record_json, c.created_at,
+                   public.daf_try_slim_candidate_json(
+                       c.record_json, public.daf_candidate_canonical_json(c)
+                   ) as slim_json,
+                   c.record_storage_version as candidate_version
+            from public.daf_log_candidates c
+            join public.daf_log_import_jobs j on j.id = c.job_id
+            where j.status <> 'receiving'
+              and c.record_storage_version = 1
+              and c.id > p_after_id
+            order by c.id
+            limit p_batch_size
+            for update of c
+        )
+        insert into _daf_candidate_slim_batch(id, original_json, slim_json, candidate_version, created_at)
+        select id, record_json, slim_json, candidate_version, created_at from picked;
+    end if;
 
     get diagnostics v_scanned = row_count;
     select max(id) into v_next_id from _daf_candidate_slim_batch;

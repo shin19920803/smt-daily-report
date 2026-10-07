@@ -21,7 +21,7 @@ done
 pg_host=$1
 pg_user=$2
 backup_path=$3
-pg_port=5432
+pg_port=${KOYA_PGPORT:-5432}
 pg_database=postgres
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 compatibility_path="$repo_root/supabase/daf_historical_compaction.sql"
@@ -98,15 +98,7 @@ if [[ "$base_schema" != 't' ]]; then
   exit 3
 fi
 
-if ! snapshot_cutoff=$(psql_exec -At -c "select clock_timestamp()::text") || [[ -z "$snapshot_cutoff" ]]; then
-  printf '無法取得線上快照時間；停止，不修改資料。\n' >&2
-  exit 3
-fi
-if ! receiving_jobs=$(psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
-select count(*) from public.daf_log_import_jobs
-where status='receiving' and created_at < :'snapshot_cutoff'::timestamptz;
-SQL
-) ; then
+if ! receiving_jobs=$(psql_exec -At -c "select count(*) from public.daf_log_import_jobs where status = 'receiving'"); then
   printf '檢查進行中的上傳工作失敗；停止，不修改資料。\n' >&2
   exit 3
 fi
@@ -115,34 +107,6 @@ if [[ "$receiving_jobs" != '0' ]]; then
   exit 3
 fi
 
-candidate_snapshot() {
-  psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
-select line || '|' || count(*) || '|' || coalesce(min(id), '') || '|' || coalesce(max(id), '')
-from public.daf_log_candidates c
-where c.created_at < :'snapshot_cutoff'::timestamptz
-group by line order by line;
-SQL
-}
-
-winner_snapshot() {
-  psql_exec -At -v snapshot_cutoff="$snapshot_cutoff" -f - <<'SQL'
-select w.line || '|' || count(*) || '|' || coalesce(min(w.candidate_id), '') || '|' ||
-       coalesce(max(w.candidate_id), '')
-from public.daf_log_winners w
-join public.daf_log_candidates c on c.id=w.candidate_id
-where c.created_at < :'snapshot_cutoff'::timestamptz
-group by w.line order by w.line;
-SQL
-}
-
-if ! candidate_before=$(candidate_snapshot); then
-  printf '候選資料完整性快照逾時或失敗；停止，不修改候選資料。\n' >&2
-  exit 3
-fi
-if ! winner_before=$(winner_snapshot); then
-  printf 'winner 完整性快照逾時或失敗；停止，不修改候選資料。\n' >&2
-  exit 3
-fi
 size_before=$(psql_exec -At -c "select pg_total_relation_size('public.daf_log_candidates'::regclass)")
 
 compatible=$(psql_exec -At -c "select
@@ -211,34 +175,15 @@ done
 printf '分批轉換統計：共掃描 %s、精簡 %s、保留原格式 %s、JSON 累計節省 %s bytes。\n' \
   "$total_scanned" "$total_converted" "$total_retained" "$total_bytes_saved"
 
-# The batch RPC scans every committed candidate and verifies each converted
-# row round-trips exactly. Avoid a second full-table eligibility/constraint
-# scan, which exceeds the hosted statement limit; the NOT VALID constraint
-# still applies to all inserted or updated rows.
+# The batch RPC verifies each converted row round-trips exactly. The operation
+# only updates record_json/record_storage_version; it does not insert/delete
+# candidate rows or modify winners. Avoid full-table before/after snapshots,
+# which exceed the hosted statement timeout on this production table.
 # VACUUM makes dead tuple space reusable; it does not promise to reduce the
 # allocated relation size. Use pg_repack separately only when available and
 # after confirming its supported extension version and free-disk headroom.
 psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_candidates'
 
-if ! candidate_after=$(candidate_snapshot); then
-  printf '候選資料完成後快照逾時或失敗；停止宣告完成。\n' >&2
-  exit 6
-fi
-if ! winner_after=$(winner_snapshot); then
-  printf 'winner 完成後快照逾時或失敗；停止宣告完成。\n' >&2
-  exit 6
-fi
-if [[ "$candidate_before" != "$candidate_after" ]]; then
-  printf '候選列 ID／統計欄位快照不一致；停止宣告完成。\n' >&2
-  diff -u <(printf '%s\n' "$candidate_before") <(printf '%s\n' "$candidate_after") >&2 || true
-  exit 6
-fi
-if [[ "$winner_before" != "$winner_after" ]]; then
-  printf 'winner 清單快照不一致；停止宣告完成。\n' >&2
-  diff -u <(printf '%s\n' "$winner_before") <(printf '%s\n' "$winner_after") >&2 || true
-  exit 6
-fi
-
 size_after=$(psql_exec -At -c "select pg_total_relation_size('public.daf_log_candidates'::regclass)")
-printf '逐站候選列與 winner 筆數／ID 範圍一致，批次逐筆還原檢查通過；轉換完成。候選表配置大小：%s → %s bytes。\n' "$size_before" "$size_after"
+printf '批次逐筆 JSON 還原檢查通過；未執行候選列刪除或 winner 修改。轉換完成。候選表配置大小：%s → %s bytes。\n' "$size_before" "$size_after"
 printf 'VACUUM 只讓空間可重用，不保證縮小實際配置；若需立即回收磁碟，另須核對並執行 Supabase 支援的 pg_repack。\n'

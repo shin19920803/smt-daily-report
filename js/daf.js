@@ -3246,60 +3246,6 @@ SMT.daf = function (ctx) {
         toast(`${batch.fileName} 的五大製程批次已刪除`, 'info');
     };
 
-    const exportDafStats = async () => {
-        // 導出前重新從 Supabase 載入目前製程明細，避免沿用其他電腦的舊統計結果。
-        const completed = await calculateDafStats(false, { refreshRemote: true });
-        if (!completed || !dafStatsResult.value || dafStatsResult.value.summaryOnly || dafStatsResult.value.sharedSnapshot) return toast('完整明細尚未完成，未導出報表', 'warning');
-        const result = dafStatsResult.value;
-        const range = `${dafStatsFilter.value.start || '不限'} ~ ${dafStatsFilter.value.end || '不限'}`;
-        const summary = [
-            ['統計區間', range], ['來源檔案數', result.sourceFiles.length], ['來源檔案', result.sourceFiles.join('、') || '無'],
-            ['機種篩選', dafStatsFilter.value.model === 'all' ? '全部' : dafStatsFilter.value.model],
-            ['工單篩選', dafStatsFilter.value.workOrder === 'all' ? '全部' : dafStatsFilter.value.workOrder],
-            ['投入數', result.totalInput], ['良品數', result.totalGood], ['不良數', result.totalDefects],
-            ['良率', result.yieldRate + '%'], ['不良率', result.defectRate + '%'], ['其他狀態數', result.unknownStatusCount], ['其他狀態內容', result.unknownStatusText]
-        ];
-        const defects = [['不良原因', '不良數量', '占投入比例', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.inputRatio + '%', row.ratio + '%'])];
-        const defectModels = [['不良原因', '機種', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byModel || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
-        const defectWorkOrders = [['不良原因', '工單', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byWorkOrder || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
-        const modelDefects = [['機種', 'NG項目', '數量', '占該機種NG比例'], ...result.byModel.flatMap(row => (row.byType || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
-        const models = [['機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byModel.map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
-        const workOrders = [['工單', '機種', '投入數', '良品數', '不良數', '良率', '不良率', '占總不良比例'], ...result.byWorkOrder.map(row => [row.workOrder, row.model, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%', row.ratio + '%'])];
-        const workOrderDefects = [['工單', '機種', 'NG項目', '數量', '占該工單NG比例'], ...result.byWorkOrder.flatMap(row => (row.byType || []).map(item => [row.workOrder, row.model, item.name, item.qty, item.ratio + '%']))];
-        const machines = [['機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...(result.byMachine || []).map(row => [row.name, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
-        const defectMachines = [['不良原因', '機台', '數量', '占該不良比例'], ...result.byType.flatMap(row => (row.byMachine || []).map(item => [row.name, item.name, item.qty, item.ratio + '%']))];
-        const modelMachines = [['機種', '機台', '投入數', '良品數', '不良數', '良率'], ...result.byModel.flatMap(row => (row.byMachine || []).map(item => [row.name, item.name, item.input, item.good, item.defects, item.yieldRate + '%']))];
-        const workOrderMachines = [['工單', '機台', '投入數', '良品數', '不良數', '良率'], ...result.byWorkOrder.flatMap(row => (row.byMachine || []).map(item => [row.workOrder, item.name, item.input, item.good, item.defects, item.yieldRate + '%']))];
-        const daily = [['日期', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%', row.defectRate + '%'])];
-        const dailyMachines = [['日期', '機台', '投入數', '良品數', '不良數', '良率', '不良率'], ...result.daily.flatMap(day => (day.byMachine || []).map(item => [day.date, item.name, item.input, item.good, item.defects, item.yieldRate + '%', item.defectRate + '%']))];
-        const pareto = [['不良現象', '不良數量', '占不良比例'], ...result.byType.map(row => [row.name, row.qty, row.ratio + '%'])];
-        const yieldTrend = [['日期', '投入數', '良品數', '不良數', '良率'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects, row.yieldRate + '%'])];
-        const outputTrend = [['日期', '投入數', '良品數', '不良數'], ...result.daily.map(row => [row.date, row.input, row.good, row.defects])];
-        const hasCompactedRows = result.rows.some(row => row.compacted === true);
-        const hasRawColumns = result.rows.some(row => Array.isArray(row.raw) && row.raw.length > 0);
-        const rawHeader = ['系統識別機種', '系統識別產品代碼', '系統識別狀態', '是否列入投入數', '是否為不良', '系統解析日期', '機台', '原始欄位格式'];
-        if (hasCompactedRows) rawHeader.push('資料保留狀態');
-        const rawRows = result.rows.map(row => [
-            row.model, row.productCode, row.status, row.inputIncluded ? '是' : '否',
-            row.isDefect ? '是' : '否', row.date, row.machine || DAF_MACHINE_UNKNOWN,
-            row.sourceFormat === CURRENT_SOURCE_FORMAT ? '新格式 B／D／E／F／H／I' : '舊格式 C／E／F／G／I／J',
-            ...(hasCompactedRows ? [row.compacted ? '精簡歷史資料（原始欄位已移除）' : (row.raw?.length ? '完整原始欄位' : '來源未包含原始欄位')] : []),
-            ...(row.raw || [])
-        ]);
-        const rawColumns = hasRawColumns
-            ? result.rows.reduce((max, row) => Math.max(max, (row.raw || []).length), Math.max(LEGACY_COLUMNS.minColumns, CURRENT_COLUMNS.minColumns))
-            : 0;
-        for (let index = 0; index < rawColumns; index++) rawHeader.push(`${String.fromCharCode(65 + index)}欄`);
-        const wb = XLSX.utils.book_new();
-        const sheets = [['生產統計', summary], ['良率趨勢', yieldTrend], ['Pareto分析', pareto], ['不良原因統計', defects], ['不良×機種', defectModels], ['不良×工單', defectWorkOrders], ['機種統計', models], ['機種×NG細項', modelDefects], ['工單統計', workOrders], ['工單×NG細項', workOrderDefects], ['機台統計', machines], ['不良×機台', defectMachines], ['機種×機台', modelMachines], ['工單×機台', workOrderMachines], ['每日統計', daily], ['每日×機台', dailyMachines], ['原始資料', [rawHeader, ...rawRows]]];
-        sheets.forEach(([name, sheetData]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), name));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(outputTrend), '產出趨勢');
-        const modelPart = dafStatsFilter.value.model === 'all' ? '全部機種' : safeFilename(dafStatsFilter.value.model);
-        const woPart = dafStatsFilter.value.workOrder === 'all' ? '全部工單' : safeFilename(dafStatsFilter.value.workOrder);
-        XLSX.writeFile(wb, `${currentDafLabel()}_${modelPart}_${woPart}_${safeFilename(range, '不限日期')}_統計結果.xlsx`);
-        toast(`${currentDafLabel()} 完整統計報表已導出`);
-    };
-
     let reasonChart = null;
     let trendChart = null;
     let defectTrendChart = null;
@@ -3412,7 +3358,7 @@ SMT.daf = function (ctx) {
         dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
-        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, exportDafStats, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, openDafUploadErrorDetail, closeDafUploadErrorDetail,
+        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, openDafUploadErrorDetail, closeDafUploadErrorDetail,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, openDafTrendDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate, isDafDashboardDetailsLoaded, ensureDafDashboardDetails,
         renderDafCharts

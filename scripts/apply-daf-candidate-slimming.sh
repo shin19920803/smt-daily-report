@@ -155,23 +155,34 @@ fi
 printf '連線成功：資料庫 %s，候選表目前 %s bytes。套用精簡相容寫入與批次轉換…\n' "$connected_database" "$size_before"
 psql_exec -v ON_ERROR_STOP=1 --file="$migration_path"
 
-preview=$(psql_exec -At -F '|' -c "select line, candidate_rows, eligible_rows, retained_full_rows, json_payload_bytes, estimated_slim_payload_bytes, estimated_payload_savings_bytes, raw_payload_bytes from public.daf_preview_candidate_slimming() order by line")
-printf '上線前精簡預覽（站別|列數|可精簡|保留原格式|JSON bytes|精簡估計 bytes|估計節省 bytes|保留 raw bytes）：\n%s\n' "$preview"
+printf '開始分批檢查並精簡；略過耗時的全表預掃描，每批完成後回報筆數與實際 JSON 節省量。\n'
 
 after_id=''
 batch_no=0
+total_scanned=0
+total_converted=0
+total_retained=0
+total_bytes_saved=0
 while :; do
   batch_no=$((batch_no + 1))
   result=$(psql_exec -At -F '|' -v cursor="$after_id" -f - <<'SQL'
-select r->>'scanned', r->>'converted', r->>'retained_original', coalesce(r->>'next_id',''), r->>'has_more'
+select r->>'scanned', r->>'converted', r->>'retained_original', r->>'json_bytes_saved',
+       coalesce(r->>'next_id',''), r->>'has_more'
 from (select public.daf_slim_log_candidates_batch(5000, nullif(:'cursor','')) as r) q;
 SQL
 )
-  IFS='|' read -r scanned converted retained after_id has_more <<< "$result"
-  printf '批次 %s：掃描 %s、精簡 %s、保留原格式 %s、仍有後續=%s\n' "$batch_no" "$scanned" "$converted" "$retained" "$has_more"
+  IFS='|' read -r scanned converted retained bytes_saved after_id has_more <<< "$result"
+  total_scanned=$((total_scanned + scanned))
+  total_converted=$((total_converted + converted))
+  total_retained=$((total_retained + retained))
+  total_bytes_saved=$((total_bytes_saved + bytes_saved))
+  printf '批次 %s：掃描 %s、精簡 %s、保留原格式 %s、累計節省 %s bytes、仍有後續=%s\n' \
+    "$batch_no" "$scanned" "$converted" "$retained" "$total_bytes_saved" "$has_more"
   [[ "$has_more" == 'true' ]] || break
   [[ "$scanned" -gt 0 && -n "$after_id" ]] || { printf '批次游標未前進，停止以避免無限重試。\n' >&2; exit 4; }
 done
+printf '分批轉換統計：共掃描 %s、精簡 %s、保留原格式 %s、JSON 累計節省 %s bytes。\n' \
+  "$total_scanned" "$total_converted" "$total_retained" "$total_bytes_saved"
 
 psql_exec -v ON_ERROR_STOP=1 -c 'alter table public.daf_log_candidates validate constraint daf_log_candidates_slim_payload_check'
 remaining_eligible=$(psql_exec -At -c "select count(*) from public.daf_log_candidates c join public.daf_log_import_jobs j on j.id=c.job_id where c.record_storage_version=1 and j.status <> 'receiving' and public.daf_try_slim_candidate_json(c.record_json, public.daf_candidate_canonical_json(c)) is not null")

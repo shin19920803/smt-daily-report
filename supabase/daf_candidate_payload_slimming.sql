@@ -123,6 +123,8 @@ declare
     v_unmodified integer := 0;
     v_next_id text;
     v_has_more boolean;
+    v_json_bytes_before bigint := 0;
+    v_json_bytes_after bigint := 0;
 begin
     if p_batch_size is null or p_batch_size < 1 or p_batch_size > 5000 then
         raise exception '每批筆數須介於 1 至 5000';
@@ -165,6 +167,10 @@ begin
 
     get diagnostics v_scanned = row_count;
     select max(id) into v_next_id from _daf_candidate_slim_batch;
+    select coalesce(sum(pg_column_size(original_json)), 0),
+           coalesce(sum(pg_column_size(coalesce(slim_json, original_json))), 0)
+      into v_json_bytes_before, v_json_bytes_after
+      from _daf_candidate_slim_batch;
 
     update public.daf_log_candidates c
        set record_json = b.slim_json,
@@ -193,6 +199,9 @@ begin
         'scanned', v_scanned,
         'converted', v_converted,
         'retained_original', v_unmodified,
+        'json_bytes_before', v_json_bytes_before,
+        'json_bytes_after', v_json_bytes_after,
+        'json_bytes_saved', v_json_bytes_before - v_json_bytes_after,
         'next_id', v_next_id,
         'has_more', v_has_more
     );

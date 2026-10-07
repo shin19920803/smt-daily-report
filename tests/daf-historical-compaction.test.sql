@@ -127,6 +127,11 @@ begin
     if (v_batch->>'converted')::integer <> 1 then
         raise exception 'Backfill did not convert exactly one compatible legacy row: %', v_batch;
     end if;
+    if (v_batch->>'json_bytes_saved')::bigint <= 0
+       or (v_batch->>'json_bytes_before')::bigint - (v_batch->>'json_bytes_after')::bigint
+          <> (v_batch->>'json_bytes_saved')::bigint then
+        raise exception 'Batch JSON byte-savings report is inconsistent: %', v_batch;
+    end if;
     select c.* into v_candidate
     from public.daf_log_candidates c where c.id = '00000000-0000-0000-0000-000000000000';
     if v_candidate.record_storage_version <> 2

@@ -9,11 +9,12 @@ returns trigger language plpgsql security definer set search_path=public as $$
 declare v_status text;
 begin
     select status into v_status from public.daf_log_import_jobs
-    where id=NEW.job_id for update;
+    -- Parallel chunks from this job may proceed together. SHARE conflicts with
+    -- abort/finalize updates while remaining compatible with other chunks.
+    where id=NEW.job_id for share;
     if not found or v_status <> 'receiving' then
         raise exception 'upload job is not receiving';
     end if;
-    update public.daf_log_import_jobs set last_activity_at=now() where id=NEW.job_id;
     return NEW;
 end;
 $$;
@@ -66,7 +67,9 @@ begin
     -- Only inactive jobs; never remove a job currently writing/publishing.
     for v_job in
         select j.id from public.daf_log_import_jobs j
-        where (j.status='receiving' and j.last_activity_at < now()-interval '24 hours')
+        where (j.status='receiving' and j.last_activity_at < now()-interval '24 hours'
+            and not exists(select 1 from public.daf_log_import_chunks c
+                where c.job_id=j.id and c.created_at >= now()-interval '24 hours'))
            or (j.status='failed' and (j.metadata <> '[]'::jsonb
                or exists(select 1 from public.daf_log_candidates c where c.job_id=j.id)
                or exists(select 1 from public.daf_log_import_chunks c where c.job_id=j.id)))

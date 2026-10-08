@@ -36,7 +36,7 @@
         const code = String(error?.code || '');
         if (code === '57014') return false;
         if (/^[0-9A-Z]{5}$/.test(code)) {
-            return ['40001', '40P01', '53300', '57P01', '57P03'].includes(code);
+            return ['40001', '40P01', '53300', '55P03', '57P01', '57P03'].includes(code);
         }
         const status = Number(error?.status || error?.statusCode || 0);
         if (status) return status === 408 || status === 425 || status === 429 || status >= 500;

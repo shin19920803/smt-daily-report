@@ -12,6 +12,7 @@ $$ delete from cron.job where jobid=$1 returning true $$;
 create function cron.schedule(text,text,text) returns bigint language sql as
 $$ insert into cron.job(jobname,schedule,command) values($1,$2,$3) returning jobid $$;
 \ir ../supabase/daf_failed_import_cleanup.sql
+\ir ../supabase/daf_upload_lock_contention_fix.sql
 \ir ../supabase/daf_failed_import_cleanup.sql
 
 do $$

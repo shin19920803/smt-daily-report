@@ -10,6 +10,7 @@ SMT.daf = function (ctx) {
     const REMOTE_DETAIL_COLUMNS = `${REMOTE_SUMMARY_COLUMNS},records`;
     const REMOTE_VERSION_COLUMNS = 'id,line,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,row_count,raw_column_count,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text';
     const DAF_REMOTE_REQUEST_TIMEOUT_MS = 20000;
+    const DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS = 60000;
     const DAF_FINALIZE_REQUEST_TIMEOUT_MS = 58000;
     const DAF_CACHE_REQUEST_TIMEOUT_MS = 25000;
     const DAF_ATOMIC_REPLACE_MAX_ROWS = 3000;
@@ -801,7 +802,7 @@ SMT.daf = function (ctx) {
                     await dafImportRetry(signal => _supabase.rpc('daf_stage_log_import_chunk', {
                         p_job_id: jobId, p_line: chunk.line, p_chunk_index: chunk.chunkIndex,
                         p_content_hash: contentHash, p_records: chunk.records
-                    }).abortSignal(signal), `${processLabel(chunk.line)} 第 ${chunk.chunkIndex + 1} 批`);
+                    }).abortSignal(signal), `${processLabel(chunk.line)} 第 ${chunk.chunkIndex + 1} 批`, 3, DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS);
                     completed++;
                     setDafUploadProgress(file.name, `分批寫入 Supabase（${completed}/${chunkPlan.length}）`, completed, chunkPlan.length);
                 } catch (error) {

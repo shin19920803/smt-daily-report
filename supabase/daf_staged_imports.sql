@@ -318,6 +318,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
+set statement_timeout = '55s'
 as $$
 declare
     v_job public.daf_log_import_jobs%rowtype;

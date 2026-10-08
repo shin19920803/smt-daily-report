@@ -26,9 +26,10 @@ pg_database=postgres
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 migration_path="$repo_root/supabase/daf_historical_compaction.sql"
 payload_path="$repo_root/supabase/daf_candidate_payload_slimming.sql"
+aggregate_path="$repo_root/supabase/daf_aggregate_history.sql"
 schedule_path="$repo_root/supabase/daf_historical_compaction_schedule.sql"
 
-[[ -f "$migration_path" && -f "$payload_path" && -f "$schedule_path" ]] || { printf '找不到封存 SQL 檔案。\n' >&2; exit 2; }
+[[ -f "$migration_path" && -f "$payload_path" && -f "$aggregate_path" && -f "$schedule_path" ]] || { printf '找不到封存 SQL 檔案。\n' >&2; exit 2; }
 backup_dir=$(dirname "$backup_hint")
 backup_stem=$(basename "$backup_hint")
 backup_stem=${backup_stem%.dump}
@@ -110,7 +111,7 @@ if (( backup_age < 0 || backup_age > 300 )); then
 fi
 printf '即時完整備份驗證通過（%s bytes）。\n' "$(stat -f '%z' "$backup_path")"
 
-size_report_sql="select 'database|' || pg_database_size(current_database()) || '|0|0|' || pg_database_size(current_database()) union all select c.relname || '|' || pg_relation_size(c.oid) || '|' || coalesce(pg_total_relation_size(c.reltoastrelid), 0) || '|' || pg_indexes_size(c.oid) || '|' || pg_total_relation_size(c.oid) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and c.relname in ('daf_log_candidates','daf_log_winners','daf_log_compact_facts','daf_log_batches','daf_log_import_jobs','daf_log_import_chunks','daf_log_active_file_processes','daf_log_compacted_files','daf_log_compaction_state') order by 1"
+size_report_sql="select 'database|' || pg_database_size(current_database()) || '|0|0|' || pg_database_size(current_database()) union all select c.relname || '|' || pg_relation_size(c.oid) || '|' || coalesce(pg_total_relation_size(c.reltoastrelid), 0) || '|' || pg_indexes_size(c.oid) || '|' || pg_total_relation_size(c.oid) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and c.relname in ('daf_log_candidates','daf_log_winners','daf_log_compact_facts','daf_log_compact_groups','daf_log_compact_e_keys','daf_log_batches','daf_log_import_jobs','daf_log_import_chunks','daf_log_active_file_processes','daf_log_compacted_files','daf_log_compaction_state') order by 1"
 size_before=$(psql_exec -At -F '|' -c "$size_report_sql")
 printf '線上資料庫／相關資料表精簡前空間（bytes；database 為整庫，資料表欄位為 heap|TOAST|indexes|total）：\n%s\n' "$size_before"
 
@@ -127,12 +128,15 @@ fi
 
 printf '套用資料表與 RPC 相容層（此階段不刪除資料）…\n'
 psql_exec -v ON_ERROR_STOP=1 --file="$migration_path"
+printf '套用加權歷史摘要相容層（逐批搬移前仍同時讀取舊表）…\n'
+psql_exec -v ON_ERROR_STOP=1 --file="$payload_path"
+psql_exec -v ON_ERROR_STOP=1 --file="$aggregate_path"
 
 cutoff=$(psql_exec -At -c "select greatest(coalesce((select cutoff_date from public.daf_log_compaction_state where id = 'current'), (now() at time zone 'Asia/Taipei')::date - 14), (now() at time zone 'Asia/Taipei')::date - 14)::text")
 raw_cutoff=$(psql_exec -At -c "select (now() at time zone 'Asia/Taipei')::date + 1")
 printf '14 天候選封存界線：%s；結構化資料可去除 raw 的界線：%s（台灣日期、嚴格早於界線）\n' "$cutoff" "$raw_cutoff"
 
-dashboard_preview_sql="select line || '|' || dashboard_digest from public.daf_preview_log_compaction('9999-12-31'::date) order by line"
+dashboard_preview_sql="select line || '|' || dashboard_digest from public.daf_compact_dashboard_digest(null) order by line"
 baseline_digests=$(psql_exec -At -c "$dashboard_preview_sql")
 dashboard_digest_lines=$(printf '%s\n' "$baseline_digests" | awk 'NF { n++ } END { print n+0 }')
 if [[ "$dashboard_digest_lines" != "5" ]]; then
@@ -141,9 +145,6 @@ if [[ "$dashboard_digest_lines" != "5" ]]; then
 fi
 summary_digest_sql="with processes(line) as (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) select p.line || '|' || md5(coalesce(string_agg(md5((to_jsonb(b) - 'records')::text), '' order by b.id), '')) from processes p left join public.daf_log_batches b on b.line = p.line group by p.line order by p.line"
 baseline_summary_digests=$(psql_exec -At -c "$summary_digest_sql")
-
-printf '安裝精簡寫入與舊資料逐筆還原檢查…\n'
-psql_exec -v ON_ERROR_STOP=1 --file="$payload_path"
 
 printf '將可安全還原的舊候選 JSON 分批轉成結構化格式…\n'
 slim_after_id=''
@@ -174,6 +175,29 @@ slimmed_digests=$(psql_exec -At -c "$dashboard_preview_sql")
 slimmed_summary_digests=$(psql_exec -At -c "$summary_digest_sql")
 if [[ "$baseline_digests" != "$slimmed_digests" || "$baseline_summary_digests" != "$slimmed_summary_digests" ]]; then
   printf '結構化轉換前後的 Dashboard 或每日報工摘要指紋不同；尚未啟用 14 天政策，停止。\n' >&2
+  exit 5
+fi
+
+printf '逐批把歷史逐筆事實轉成加權摘要與最小 E 欄索引（每批核對成功才刪舊列）…\n'
+aggregate_batch_number=0
+while :; do
+  aggregate_batch_number=$((aggregate_batch_number + 1))
+  aggregate_result=$(psql_exec -At -F '|' -c "select r->>'scanned',r->>'moved',r->>'keys',r->>'done' from (select public.daf_migrate_compact_fact_batch(5000) r) q")
+  IFS='|' read -r aggregate_scanned aggregate_moved aggregate_keys aggregate_done <<< "$aggregate_result"
+  if [[ ! "$aggregate_scanned" =~ ^[0-9]+$ || ! "$aggregate_moved" =~ ^[0-9]+$ || ! "$aggregate_keys" =~ ^[0-9]+$ || ! "$aggregate_done" =~ ^(true|false)$ ]]; then
+    printf '歷史加權搬移批次回傳資料不完整；停止，不宣告成功。\n' >&2
+    exit 4
+  fi
+  printf '歷史批次 %s：搬移 %s 列、E 欄鍵 %s、完成=%s\n' "$aggregate_batch_number" "$aggregate_moved" "$aggregate_keys" "$aggregate_done"
+  [[ "$aggregate_done" == true ]] && break
+  [[ "$aggregate_scanned" -gt 0 ]] || { printf '歷史批次未前進，停止以避免無限重試。\n' >&2; exit 4; }
+  (( aggregate_batch_number < 1000 )) || { printf '歷史批次超過安全上限，停止。\n' >&2; exit 4; }
+done
+aggregate_digests=$(psql_exec -At -c "$dashboard_preview_sql")
+aggregate_summary_digests=$(psql_exec -At -c "$summary_digest_sql")
+if [[ "$baseline_digests" != "$aggregate_digests" || "$baseline_summary_digests" != "$aggregate_summary_digests" ]]; then
+  printf '歷史逐筆轉加權摘要前後 Dashboard 或每日報工指紋不同；停止所有後續清理。\n' >&2
+  printf '搬移前：\n%s\n搬移後：\n%s\n' "$baseline_digests" "$aggregate_digests" >&2
   exit 5
 fi
 
@@ -273,6 +297,8 @@ printf '更新精簡相關資料表統計並回收可重用頁面（不保證縮
 psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_candidates'
 psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_batches'
 psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_compact_facts'
+psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_compact_groups'
+psql_exec -v ON_ERROR_STOP=1 -c 'vacuum (analyze) public.daf_log_compact_e_keys'
 size_after=$(psql_exec -At -F '|' -c "$size_report_sql")
 printf '線上資料庫／相關資料表精簡後空間（bytes；database 為整庫，資料表欄位為 heap|TOAST|indexes|total）：\n%s\n' "$size_after"
 

@@ -27,7 +27,8 @@ declare v_table text;
 begin
     foreach v_table in array array[
         'daf_log_import_jobs','daf_log_import_chunks','daf_log_candidates',
-        'daf_log_winners','daf_log_compact_facts','daf_log_batches',
+        'daf_log_winners','daf_log_compact_facts','daf_log_compact_groups',
+        'daf_log_compact_e_keys','daf_log_batches',
         'daf_log_active_file_processes','daf_log_compacted_files','daf_log_compaction_state'
     ] loop
         execute format('drop trigger if exists guard_daf_space_reclamation on public.%I',v_table);
@@ -42,6 +43,7 @@ begin
     -- Drain writers before exposing the barrier, rather than checking receiving once.
     lock table public.daf_log_import_jobs, public.daf_log_import_chunks,
         public.daf_log_candidates, public.daf_log_winners, public.daf_log_compact_facts,
+        public.daf_log_compact_groups, public.daf_log_compact_e_keys,
         public.daf_log_batches, public.daf_log_active_file_processes,
         public.daf_log_compacted_files, public.daf_log_compaction_state
         in share row exclusive mode;

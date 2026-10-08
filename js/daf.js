@@ -51,7 +51,7 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_REFERENCE_LINE = '__DAF_MACHINE_REFERENCE__';
     const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
     const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-    const DAF_MACHINE_CLASSIFICATION_VERSION = 'ft1-machine-v3';
+    const DAF_MACHINE_CLASSIFICATION_VERSION = 'aggregate-history-v1-ft1-machine-v3';
     const MODEL_MAPPING_REMOTE_LINE = '__KOYA_MODEL_MAPPING__';
     const MODEL_MAPPING_REMOTE_PREFIX = '__KOYA_MODEL_MAPPING__';
     const CURRENT_SOURCE_FORMAT = 'current-v2';
@@ -459,9 +459,13 @@ SMT.daf = function (ctx) {
             model: mappedModel !== '未識別機種' ? mappedModel : normalizeModelName(record.model),
             machine: cleanText(record.machine),
             dedupKey: normalizeText(record.dedupKey || raw[columns.dedupKey] || ''),
-            dedupTime: parsedTime
+            dedupTime: parsedTime,
+            quantity: Number.isFinite(Number(record.quantity)) && Number(record.quantity) > 0
+                ? Math.max(1, Math.trunc(Number(record.quantity))) : 1
         };
     };
+    const dafRecordQuantity = record => Number.isFinite(Number(record?.quantity)) && Number(record.quantity) > 0
+        ? Math.max(1, Math.trunc(Number(record.quantity))) : 1;
     const normalizeBatchModels = batch => {
         const sourceFormat = batch.sourceFormat || (batch.line === 'FT1' ? CURRENT_SOURCE_FORMAT : LEGACY_SOURCE_FORMAT);
         const records = (batch.records || []).map(record => normalizeDafRecord({ ...record, sourceFormat: record.sourceFormat || sourceFormat }));
@@ -756,7 +760,16 @@ SMT.daf = function (ctx) {
             });
             if (error) return error;
         }
-        if (unique.length) await window.koyaInvalidateCache?.();
+        if (unique.length) {
+            await window.koyaInvalidateCache?.();
+            for (const line of ['DAF', 'FT1']) {
+                for (const key of [...dafDetailLoadedLines]) if (key.startsWith(`${line}|`)) dafDetailLoadedLines.delete(key);
+                dafStatsRawRowsCache.delete(line);
+            }
+            dafDateIndexSource = null;
+            dafDashboardCache.clear();
+            dafStatsRangeCache.clear();
+        }
         return null;
     };
     const DAF_FAILED_IMPORTS_KEY = 'koya-daf-failed-import-cleanup-v1';
@@ -1356,7 +1369,7 @@ SMT.daf = function (ctx) {
                 }
             }
         });
-        return { kind: 'koya-daf-stats-snapshot-v1', machineClassificationVersion: DAF_MACHINE_CLASSIFICATION_VERSION, filter, versions: versions || null, results, days };
+        return { kind: 'koya-daf-stats-snapshot-v2-weighted', machineClassificationVersion: DAF_MACHINE_CLASSIFICATION_VERSION, filter, versions: versions || null, results, days };
     };
     const sharedDafSnapshotResult = (line, filter, snapshot = dafSharedStatsSnapshot) => {
         if (!snapshot?.filter) return null;
@@ -1387,7 +1400,8 @@ SMT.daf = function (ctx) {
             quickMode: ['day', 'week', 'month'].includes(state.quickMode) ? state.quickMode : null,
             quickOffset: Number.isFinite(Number(state.quickOffset)) ? Number(state.quickOffset) : 0,
             updatedAt: String(state.updatedAt || row.uploaded_at || ''),
-            snapshot: state.snapshot?.kind === 'koya-daf-stats-snapshot-v1' ? state.snapshot : null
+            snapshot: ['koya-daf-stats-snapshot-v1', 'koya-daf-stats-snapshot-v2-weighted'].includes(state.snapshot?.kind)
+                ? state.snapshot : null
         };
     };
     const saveSharedDafStatsStateInternal = async (versions, sourceFilter = dafStatsFilter.value, sourceResults = dafStatsResults.value, sourceQuickMode = dafQuickMode.value, sourceQuickOffset = dafQuickOffset.value) => {
@@ -1589,7 +1603,10 @@ SMT.daf = function (ctx) {
                 const snapshotVersionsChanged = Boolean(currentVersions && snapshotLines.some(line =>
                     !state.snapshot.versions || !sameDafLineVersion(state.snapshot.versions, currentVersions, [line])
                 ));
-                const snapshotNeedsRefresh = snapshotVersionsChanged || state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION || TEST_PROCESS_IDS.some(line => {
+                const snapshotNeedsRefresh = state.snapshot.kind !== 'koya-daf-stats-snapshot-v2-weighted'
+                    || snapshotVersionsChanged
+                    || state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION
+                    || TEST_PROCESS_IDS.some(line => {
                     const result = state.snapshot.results?.[line];
                     // 摘要快照本身可跨電腦直接顯示；完整 raw LOG 僅在使用者手動按下執行統計時載入。
                     return result && !result.summaryOnly && !result.sourceFiles?.length && dafSummaryHasDataForRange(line, state);
@@ -1713,8 +1730,9 @@ SMT.daf = function (ctx) {
         const workOrders = [...new Set(records.map(record => cleanText(record.workOrder)).filter(Boolean))];
         const products = [...new Set(records.map(record => cleanText(record.productCode)).filter(Boolean))];
         const models = [...new Set(records.map(record => normalizeModelName(record.model)).filter(model => model !== '未識別機種'))];
-        const goodCount = inputRecords.filter(record => record.status === 'GOOD').length;
-        const failCount = inputRecords.filter(record => record.status === 'FAIL').length;
+        const goodCount = inputRecords.filter(record => record.status === 'GOOD').reduce((sum, record) => sum + dafRecordQuantity(record), 0);
+        const failCount = inputRecords.filter(record => record.status === 'FAIL').reduce((sum, record) => sum + dafRecordQuantity(record), 0);
+        const inputCount = inputRecords.reduce((sum, record) => sum + dafRecordQuantity(record), 0);
         const unknownStatuses = [...new Set(statuses.filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
         const dateStart = dates[0] || batch.dateStart || '';
         const dateEnd = dates[dates.length - 1] || batch.dateEnd || dateStart;
@@ -1728,14 +1746,14 @@ SMT.daf = function (ctx) {
             reportDate: dateStart ? (dateStart === dateEnd ? dateStart : `${dateStart}～${dateEnd}`) : (batch.reportDate || '未識別日期'),
             dateStart,
             dateEnd,
-            inputCount: inputRecords.length,
+            inputCount,
             goodCount,
             failCount,
-            yieldRate: inputRecords.length ? (goodCount / inputRecords.length * 100).toFixed(2) : '0.00',
-            defectRate: inputRecords.length ? (failCount / inputRecords.length * 100).toFixed(2) : '0.00',
-            unknownStatusCount: statuses.filter(status => status && !['GOOD', 'FAIL'].includes(status)).length,
+            yieldRate: inputCount ? (goodCount / inputCount * 100).toFixed(2) : '0.00',
+            defectRate: inputCount ? (failCount / inputCount * 100).toFixed(2) : '0.00',
+            unknownStatusCount: records.filter(record => record.status && !['GOOD', 'FAIL'].includes(record.status)).reduce((sum, record) => sum + dafRecordQuantity(record), 0),
             unknownStatusText: unknownStatuses.join('、') || '無',
-            rowCount: records.length,
+            rowCount: records.reduce((sum, record) => sum + dafRecordQuantity(record), 0),
             records
         };
     };
@@ -1781,7 +1799,7 @@ SMT.daf = function (ctx) {
     }, null);
     const dafBatchSignature = batch => (batch.records || []).map(record => [
         record.dedupKey, record.dedupTime, record.date, record.status,
-        record.workOrder, record.productCode, record.defect, record.model, record.machine
+        record.workOrder, record.productCode, record.defect, record.model, record.machine, record.quantity
     ].join('|')).join('\n');
     const syncDafRemoteChanges = async (before, after) => {
         if (!dafRemoteReady.value) return false;
@@ -2336,16 +2354,17 @@ SMT.daf = function (ctx) {
         const unknownCount = Math.max(0, (Number(batch.rowCount) || 0) - inputCount);
         const date = batch.dateStart || '';
         const unknownStatus = String(batch.unknownStatusText || '未分類狀態').split('、')[0] || '未分類狀態';
-        return Array.from({ length: inputCount + unknownCount }, (_, index) => {
-            const status = index < goodCount ? 'GOOD' : index < goodCount + failCount ? 'FAIL' : unknownStatus;
-            return {
+        return [
+            { status: 'GOOD', quantity: goodCount },
+            { status: 'FAIL', quantity: failCount },
+            { status: unknownStatus, quantity: unknownCount }
+        ].filter(item => item.quantity > 0).map(({ status, quantity }, index) => ({
                 workOrder: batch.workOrder || '未識別工單', productCode: batch.productCode || '',
-                dedupKey: `${batch.id}::summary-${index}`, dedupTime: null, date,
+                dedupKey: '', dedupTime: null, date, quantity,
                 defect: status === 'FAIL' ? defaultDafDefect(batch.line || currentDafLine()) : '', status,
                 model: normalizeModelName(batch.modelName), sourceFormat: batch.sourceFormat || LEGACY_SOURCE_FORMAT,
                 machine: '', inputIncluded: ['GOOD', 'FAIL'].includes(status), isDefect: status === 'FAIL', raw: []
-            };
-        });
+            }));
     };
     const allRecords = () => {
         if (allRecordsCacheSource !== dafBatches.value) {
@@ -2371,7 +2390,7 @@ SMT.daf = function (ctx) {
             if (!row.date) return;
             if (!dafRowsByDate.has(row.date)) dafRowsByDate.set(row.date, []);
             dafRowsByDate.get(row.date).push(row);
-            if (row.inputIncluded) dafInputCountByDate.set(row.date, (dafInputCountByDate.get(row.date) || 0) + 1);
+            if (row.inputIncluded) dafInputCountByDate.set(row.date, (dafInputCountByDate.get(row.date) || 0) + dafRecordQuantity(row));
         });
     };
     const getDafRowsForDate = date => {
@@ -2410,17 +2429,20 @@ SMT.daf = function (ctx) {
                 const dateRecords = records.filter(record => record.date === date);
                 const inputRecords = dateRecords.filter(record => record.inputIncluded);
                 const group = groups[date] || (groups[date] = { date, files: [], input: 0, good: 0, defects: 0 });
-                group.input += inputRecords.length;
-                group.good += inputRecords.filter(record => record.status === 'GOOD').length;
-                group.defects += inputRecords.filter(record => record.status === 'FAIL').length;
+                const dateInput = inputRecords.reduce((sum, record) => sum + dafRecordQuantity(record), 0);
+                const dateGood = inputRecords.filter(record => record.status === 'GOOD').reduce((sum, record) => sum + dafRecordQuantity(record), 0);
+                const dateDefects = inputRecords.filter(record => record.status === 'FAIL').reduce((sum, record) => sum + dafRecordQuantity(record), 0);
+                group.input += dateInput;
+                group.good += dateGood;
+                group.defects += dateDefects;
                 group.files.push({
                     ...batch,
                     key: `${batch.id}_${date}`,
                     dateRecords,
                     machines: [...new Set(dateRecords.map(record => record.machine).filter(Boolean))],
-                    dateInput: inputRecords.length,
-                    dateGood: inputRecords.filter(record => record.status === 'GOOD').length,
-                    dateDefects: inputRecords.filter(record => record.status === 'FAIL').length
+                    dateInput,
+                    dateGood,
+                    dateDefects
                 });
             });
         });
@@ -2450,8 +2472,12 @@ SMT.daf = function (ctx) {
         const inputRows = (rows || []).filter(row => row.inputIncluded);
         const goodRows = inputRows.filter(row => row.status === 'GOOD');
         const failRows = inputRows.filter(row => row.status === 'FAIL');
-        const input = inputRows.length;
-        const defects = failRows.length;
+        const rowQty = dafRecordQuantity;
+        const totalQty = values => (values || []).reduce((sum, row) => sum + rowQty(row), 0);
+        const matchingQty = (values, predicate) => (values || []).reduce((sum, row) => sum + (predicate(row) ? rowQty(row) : 0), 0);
+        const input = totalQty(inputRows);
+        const good = totalQty(goodRows);
+        const defects = totalQty(failRows);
         const defectMap = {};
         const defectModelMap = {};
         const defectWorkOrderMap = {};
@@ -2470,33 +2496,35 @@ SMT.daf = function (ctx) {
             const defect = row.defect || defaultDafDefect(processLine);
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
-            defectMap[defect] = (defectMap[defect] || 0) + 1;
+            const quantity = rowQty(row);
+            defectMap[defect] = (defectMap[defect] || 0) + quantity;
             if (!defectModelMap[defect]) defectModelMap[defect] = {};
             if (!defectWorkOrderMap[defect]) defectWorkOrderMap[defect] = {};
             if (!modelDefectMap[model]) modelDefectMap[model] = {};
             if (!workOrderDefectMap[workOrder]) workOrderDefectMap[workOrder] = {};
-            defectModelMap[defect][model] = (defectModelMap[defect][model] || 0) + 1;
-            defectWorkOrderMap[defect][workOrder] = (defectWorkOrderMap[defect][workOrder] || 0) + 1;
-            modelDefectMap[model][defect] = (modelDefectMap[model][defect] || 0) + 1;
-            workOrderDefectMap[workOrder][defect] = (workOrderDefectMap[workOrder][defect] || 0) + 1;
+            defectModelMap[defect][model] = (defectModelMap[defect][model] || 0) + quantity;
+            defectWorkOrderMap[defect][workOrder] = (defectWorkOrderMap[defect][workOrder] || 0) + quantity;
+            modelDefectMap[model][defect] = (modelDefectMap[model][defect] || 0) + quantity;
+            workOrderDefectMap[workOrder][defect] = (workOrderDefectMap[workOrder][defect] || 0) + quantity;
         });
         inputRows.forEach(row => {
             const model = row.model || '未識別機種';
             const workOrder = row.workOrder || '未識別工單';
+            const quantity = rowQty(row);
             if (!modelMap[model]) modelMap[model] = { input: 0, good: 0, defects: 0, byWorkOrder: {} };
             if (!workOrderMap[workOrder]) workOrderMap[workOrder] = { models: new Set(), input: 0, good: 0, defects: 0, byModel: {} };
-            modelMap[model].input++;
-            workOrderMap[workOrder].input++;
+            modelMap[model].input += quantity;
+            workOrderMap[workOrder].input += quantity;
             workOrderMap[workOrder].models.add(model);
-            modelMap[model].byWorkOrder[workOrder] = (modelMap[model].byWorkOrder[workOrder] || 0) + 1;
-            workOrderMap[workOrder].byModel[model] = (workOrderMap[workOrder].byModel[model] || 0) + 1;
-            if (row.status === 'GOOD') { modelMap[model].good++; workOrderMap[workOrder].good++; }
-            if (row.status === 'FAIL') { modelMap[model].defects++; workOrderMap[workOrder].defects++; }
+            modelMap[model].byWorkOrder[workOrder] = (modelMap[model].byWorkOrder[workOrder] || 0) + quantity;
+            workOrderMap[workOrder].byModel[model] = (workOrderMap[workOrder].byModel[model] || 0) + quantity;
+            if (row.status === 'GOOD') { modelMap[model].good += quantity; workOrderMap[workOrder].good += quantity; }
+            if (row.status === 'FAIL') { modelMap[model].defects += quantity; workOrderMap[workOrder].defects += quantity; }
             if (row.date) {
                 if (!dayMap[row.date]) dayMap[row.date] = { date: row.date, input: 0, good: 0, defects: 0, byType: {} };
-                dayMap[row.date].input++;
-                if (row.status === 'GOOD') dayMap[row.date].good++;
-                if (row.status === 'FAIL') { dayMap[row.date].defects++; const defect = row.defect || defaultDafDefect(processLine); dayMap[row.date].byType[defect] = (dayMap[row.date].byType[defect] || 0) + 1; }
+                dayMap[row.date].input += quantity;
+                if (row.status === 'GOOD') dayMap[row.date].good += quantity;
+                if (row.status === 'FAIL') { dayMap[row.date].defects += quantity; const defect = row.defect || defaultDafDefect(processLine); dayMap[row.date].byType[defect] = (dayMap[row.date].byType[defect] || 0) + quantity; }
             }
         });
         const detailRows = map => Object.entries(map || {}).map(([name, qty]) => ({ name, qty, ratio: mapRate(qty, Object.values(map).reduce((sum, value) => sum + value, 0)) })).sort((a, b) => b.qty - a.qty);
@@ -2505,7 +2533,7 @@ SMT.daf = function (ctx) {
             byModel: detailRows(defectModelMap[name]),
             byWorkOrder: detailRows(defectWorkOrderMap[name]),
             byMachine: machineNames.map(machine => {
-                const machineQty = failRows.filter(row => dafMachineForRecord(row) === machine && (row.defect || defaultDafDefect(processLine)) === name).length;
+                const machineQty = matchingQty(failRows, row => dafMachineForRecord(row) === machine && (row.defect || defaultDafDefect(processLine)) === name);
                 return { name: machine, qty: machineQty, ratio: mapRate(machineQty, qty) };
             })
         })).sort((a, b) => b.qty - a.qty);
@@ -2515,9 +2543,9 @@ SMT.daf = function (ctx) {
             byType: detailRows(modelDefectMap[name]), byWorkOrder: detailRows(value.byWorkOrder),
             byMachine: machineNames.map(machine => {
                 const machineRows = inputRows.filter(row => dafMachineForRecord(row) === machine && (row.model || '未識別機種') === name);
-                const machineInput = machineRows.length;
-                const machineGood = machineRows.filter(row => row.status === 'GOOD').length;
-                const machineDefects = machineRows.filter(row => row.status === 'FAIL').length;
+                const machineInput = totalQty(machineRows);
+                const machineGood = matchingQty(machineRows, row => row.status === 'GOOD');
+                const machineDefects = matchingQty(machineRows, row => row.status === 'FAIL');
                 return { name: machine, input: machineInput, good: machineGood, defects: machineDefects, yieldRate: mapRate(machineGood, machineInput), defectRate: mapRate(machineDefects, machineInput), ratio: mapRate(machineDefects, value.defects) };
             })
         })).sort((a, b) => b.defects - a.defects || b.input - a.input);
@@ -2527,9 +2555,9 @@ SMT.daf = function (ctx) {
             byType: detailRows(workOrderDefectMap[workOrder]), byModel: detailRows(value.byModel),
             byMachine: machineNames.map(machine => {
                 const machineRows = inputRows.filter(row => dafMachineForRecord(row) === machine && (row.workOrder || '未識別工單') === workOrder);
-                const machineInput = machineRows.length;
-                const machineGood = machineRows.filter(row => row.status === 'GOOD').length;
-                const machineDefects = machineRows.filter(row => row.status === 'FAIL').length;
+                const machineInput = totalQty(machineRows);
+                const machineGood = matchingQty(machineRows, row => row.status === 'GOOD');
+                const machineDefects = matchingQty(machineRows, row => row.status === 'FAIL');
                 return { name: machine, workOrder, input: machineInput, good: machineGood, defects: machineDefects, yieldRate: mapRate(machineGood, machineInput), defectRate: mapRate(machineDefects, machineInput), ratio: mapRate(machineDefects, value.defects) };
             })
         })).sort((a, b) => b.defects - a.defects || b.input - a.input);
@@ -2540,9 +2568,9 @@ SMT.daf = function (ctx) {
             defectRate: mapRate(day.defects, day.input),
             byMachine: machineNames.map(machine => {
                 const machineRows = inputRows.filter(row => row.date === day.date && dafMachineForRecord(row) === machine);
-                const machineInput = machineRows.length;
-                const machineGood = machineRows.filter(row => row.status === 'GOOD').length;
-                const machineDefects = machineRows.filter(row => row.status === 'FAIL').length;
+                const machineInput = totalQty(machineRows);
+                const machineGood = matchingQty(machineRows, row => row.status === 'GOOD');
+                const machineDefects = matchingQty(machineRows, row => row.status === 'FAIL');
                 return { name: machine, input: machineInput, good: machineGood, defects: machineDefects, yieldRate: mapRate(machineGood, machineInput), defectRate: mapRate(machineDefects, machineInput) };
             })
         }));
@@ -2560,12 +2588,13 @@ SMT.daf = function (ctx) {
             };
         });
         const unknownStatuses = [...new Set((rows || []).map(row => row.status).filter(status => status && !['GOOD', 'FAIL'].includes(status)))];
+        const unknownStatusCount = matchingQty(sourceRows, row => row.status && !['GOOD', 'FAIL'].includes(row.status));
         const result = {
-            totalInput: input, totalGood: goodRows.length, totalDefects: defects,
-            yieldRate: mapRate(goodRows.length, input), defectRate: mapRate(defects, input),
-            unknownStatusCount: (rows || []).filter(row => row.status && !['GOOD', 'FAIL'].includes(row.status)).length,
+            totalInput: input, totalGood: good, totalDefects: defects,
+            yieldRate: mapRate(good, input), defectRate: mapRate(defects, input),
+            unknownStatusCount,
             unknownStatusText: unknownStatuses.join('、') || '無',
-            totalDays: daily.length, totalRows: (rows || []).length, sourceFiles: [...new Set((rows || []).map(row => row.fileName).filter(Boolean))],
+            totalDays: daily.length, totalRows: totalQty(sourceRows), sourceFiles: [...new Set((rows || []).map(row => row.fileName).filter(Boolean))],
             byType, byModel, byWorkOrder, byMachine, daily, rows: rows || []
         };
         return result;
@@ -2621,7 +2650,7 @@ SMT.daf = function (ctx) {
     );
     const sharedDafEntryNeedsRefresh = (entry, line, filter) => {
         if (!entry?.results?.[line] || entry.results[line].summaryOnly) return true;
-        if (entry?.snapshot?.kind !== 'koya-daf-stats-snapshot-v1') return false;
+        if (entry?.snapshot?.kind !== 'koya-daf-stats-snapshot-v2-weighted') return true;
         if (line === 'FT1' && entry.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION) return true;
         const result = entry.results?.[line];
         return Boolean(result && (result.summaryOnly || (!result.sourceFiles?.length && dafSummaryHasDataForRange(line, filter))));

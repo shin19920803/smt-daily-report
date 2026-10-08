@@ -48,7 +48,7 @@ pg_restore --exit-on-error -f /dev/null "$task_backup"
 printf '已驗證最新完整備份：%s\n' "$task_backup"
 
 task_digest_sql="select line || '|' || dashboard_digest from public.daf_preview_log_compaction('9999-12-31') order by line"
-task_rows_sql="select 'candidates|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(c)::text),'' order by id),'')) from public.daf_log_candidates c union all select 'winners|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(w)::text),'' order by candidate_id),'')) from public.daf_log_winners w union all select 'facts|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(f)::text),'' order by candidate_id),'')) from public.daf_log_compact_facts f union all select 'batches|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(b)::text),'' order by id),'')) from public.daf_log_batches b order by 1"
+task_rows_sql="select 'candidates|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(c)::text),'' order by id),'')) from public.daf_log_candidates c union all select 'winners|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(w)::text),'' order by candidate_id),'')) from public.daf_log_winners w union all select 'facts|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(f)::text),'' order by candidate_id),'')) from public.daf_log_compact_facts f union all select 'groups|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(g)::text),'' order by group_id),'')) from public.daf_log_compact_groups g union all select 'e_keys|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(k)::text),'' order by line,dedup_key),'')) from public.daf_log_compact_e_keys k union all select 'batches|' || count(*) || '|' || md5(coalesce(string_agg(md5(to_jsonb(b)::text),'' order by id),'')) from public.daf_log_batches b order by 1"
 task_before=$(task_psql -At -c "$task_digest_sql")
 task_rows_before=$(task_psql -At -c "$task_rows_sql")
 task_size_before=$(task_psql -At -c 'select pg_database_size(current_database())')
@@ -56,7 +56,7 @@ task_size_before=$(task_psql -At -c 'select pg_database_size(current_database())
 
 # Rewrite the smaller winner table first; its reclaimed pages fund the candidate rewrite.
 # The current table size is a conservative rewrite upper bound; add WAL/sort reserve.
-for task_table in daf_log_winners daf_log_candidates daf_log_compact_facts; do
+for task_table in daf_log_winners daf_log_candidates daf_log_compact_facts daf_log_compact_groups daf_log_compact_e_keys; do
   task_old=$(task_psql -At -c "select pg_total_relation_size('public.$task_table')")
   task_required=$((task_old + 134217728))
   if ((task_free < task_required)); then
@@ -78,5 +78,5 @@ task_size_after=$(task_psql -At -c 'select pg_database_size(current_database())'
 ((task_size_after < task_size_before)) || {
   printf '報表一致，但實體容量未減少：%s → %s bytes。\n' "$task_size_before" "$task_size_after" >&2; exit 6;
 }
-task_psql -At -c "select relname,pg_relation_size(oid),pg_indexes_size(oid),pg_total_relation_size(oid) from pg_class where relname in ('daf_log_winners','daf_log_candidates','daf_log_compact_facts') order by relname"
-printf '回收核對通過：全歷史 Dashboard 與四表逐列指紋一致；整庫 %s → %s bytes，減少 %s bytes。\n' "$task_size_before" "$task_size_after" "$((task_size_before-task_size_after))"
+task_psql -At -c "select relname,pg_relation_size(oid),pg_indexes_size(oid),pg_total_relation_size(oid) from pg_class where relname in ('daf_log_winners','daf_log_candidates','daf_log_compact_facts','daf_log_compact_groups','daf_log_compact_e_keys') order by relname"
+printf '回收核對通過：全歷史 Dashboard 與五大資料表逐列指紋一致；整庫 %s → %s bytes，減少 %s bytes。\n' "$task_size_before" "$task_size_after" "$((task_size_before-task_size_after))"

@@ -759,6 +759,21 @@ SMT.daf = function (ctx) {
         if (unique.length) await window.koyaInvalidateCache?.();
         return null;
     };
+    const DAF_FAILED_IMPORTS_KEY = 'koya-daf-failed-import-cleanup-v1';
+    const dafPendingAbortJobs = new Set();
+    try { JSON.parse(localStorage.getItem(DAF_FAILED_IMPORTS_KEY) || '[]').forEach(id => dafPendingAbortJobs.add(id)); } catch (error) {}
+    const saveDafPendingAbortJobs = () => {
+        try { localStorage.setItem(DAF_FAILED_IMPORTS_KEY, JSON.stringify([...dafPendingAbortJobs])); } catch (error) {}
+    };
+    const abortDafStagedImport = async jobId => {
+        const result = await dafImportRetry(signal => _supabase.rpc('daf_abort_log_import', {
+            p_job_id: jobId
+        }).abortSignal(signal), '清除失敗上傳暫存', 3, DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS);
+        if (!result?.cleared && !result?.published) throw new Error('資料庫尚未確認清除失敗上傳');
+        dafPendingAbortJobs.delete(jobId);
+        saveDafPendingAbortJobs();
+        return result;
+    };
     const uploadDafBatchesStaged = async (file, batches) => {
         const chunkPlan = [];
         for (const batch of batches) {
@@ -773,20 +788,28 @@ SMT.daf = function (ctx) {
             delete row.records;
             return row;
         });
-        const resumeKey = `koya-daf-import-v2:${file.name}:${file.size}:${file.lastModified}`;
-        let jobId = '';
-        try { jobId = localStorage.getItem(resumeKey) || ''; } catch (error) {}
-        if (!jobId) {
-            jobId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-            try { localStorage.setItem(resumeKey, jobId); } catch (error) {}
-        }
-        setDafUploadProgress(file.name, '建立可恢復的上傳工作');
+        const legacyKey = `koya-daf-import-v2:${file.name}:${file.size}:${file.lastModified}`;
+        try {
+            const legacyJob = localStorage.getItem(legacyKey);
+            if (legacyJob) { dafPendingAbortJobs.add(legacyJob); saveDafPendingAbortJobs(); }
+        } catch (error) {}
+        setDafUploadProgress(file.name, '確認前次失敗暫存已清除');
+        for (const pendingJobId of [...dafPendingAbortJobs]) await abortDafStagedImport(pendingJobId);
+        try { localStorage.removeItem(legacyKey); } catch (error) {}
+        const jobId = window.crypto.randomUUID();
+        // Keep only the job UUID, never LOG data: a closed/crashed tab can clean
+        // its unfinished upload before starting another attempt.
+        dafPendingAbortJobs.add(jobId);
+        saveDafPendingAbortJobs();
+        try {
+        setDafUploadProgress(file.name, '建立全新的上傳工作');
         const start = await dafImportRetry(signal => _supabase.rpc('daf_start_log_import', {
             p_job_id: jobId, p_file_name: file.name, p_metadata: metadata, p_expected_chunks: chunkPlan.length
         }).abortSignal(signal), '建立上傳工作');
         if (start?.status === 'published') {
             const result = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認已完成的上傳', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
-            try { localStorage.removeItem(resumeKey); } catch (error) {}
+            dafPendingAbortJobs.delete(jobId);
+            saveDafPendingAbortJobs();
             return { acceptedCount: Number(result?.accepted_count) || 0, duplicateCount: Number(result?.duplicate_count) || 0 };
         }
         let completed = 0;
@@ -822,7 +845,7 @@ SMT.daf = function (ctx) {
             );
             if (status.error) throw firstChunkError || failedChunk.reason;
             const received = Number(status.data?.received_chunks) || 0;
-            if (received !== chunkPlan.length) throw new Error(`${(firstChunkError || failedChunk.reason)?.message || firstChunkError || failedChunk.reason}；已保存 ${received}/${chunkPlan.length} 批，可重新選取同一檔案續傳`);
+            if (received !== chunkPlan.length) throw firstChunkError || failedChunk.reason;
         }
         setDafUploadProgress(file.name, '比對跨檔 E 欄並發布資料', chunkPlan.length, chunkPlan.length);
         let finalized;
@@ -838,14 +861,30 @@ SMT.daf = function (ctx) {
                 finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認發布結果', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
             } else throw error;
         }
-        if (!finalized?.published) throw new Error('Supabase 尚未確認發布，已保留暫存資料；重新選取同一檔案可續傳');
-        try { localStorage.removeItem(resumeKey); } catch (error) {}
+        if (!finalized?.published) throw new Error('Supabase 尚未確認發布');
+        dafPendingAbortJobs.delete(jobId);
+        saveDafPendingAbortJobs();
         if (!(await window.koyaInvalidateCache?.())) console.warn('上傳已寫入 Supabase，但 Cloudflare 快取未確認失效');
         setDafUploadProgress(file.name, '已發布，正在更新共用摘要', 1, 1);
         return {
             acceptedCount: Number(finalized.accepted_count) || 0,
             duplicateCount: Number(finalized.duplicate_count) || 0
         };
+        } catch (error) {
+            dafPendingAbortJobs.add(jobId);
+            saveDafPendingAbortJobs();
+            setDafUploadProgress(file.name, '上傳失敗，正在清除本次暫存');
+            let cleanup;
+            try { cleanup = await abortDafStagedImport(jobId); }
+            catch (cleanupError) {
+                throw new Error(`${error?.message || error}；暫存清除未確認：${cleanupError?.message || cleanupError}。下次上傳會先重試清除；離線遺留工作會由伺服器定期清理`);
+            }
+            if (cleanup?.published) {
+                try { await window.koyaInvalidateCache?.(); } catch (cacheError) {}
+                return { acceptedCount: Number(cleanup.accepted_count) || 0, duplicateCount: Number(cleanup.duplicate_count) || 0 };
+            }
+            throw Object.assign(new Error(`${error?.message || error}；本次未發布暫存已清除，請重新上傳`), { code: error?.code });
+        }
     };
     const saveRemote = async (batch) => {
         if (!dafRemoteReady.value) return false;

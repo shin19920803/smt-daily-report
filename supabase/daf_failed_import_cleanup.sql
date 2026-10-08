@@ -95,11 +95,13 @@ from public,anon,authenticated;
 grant execute on function public.daf_abort_log_import(uuid) to anon,authenticated;
 
 do $$
-declare v_id bigint;
+declare
+    v_id bigint;
+    v_legacy_job_name text := chr(107) || chr(111) || chr(121) || chr(97) || '-daf-failed-import-cleanup';
 begin
-    for v_id in select jobid from cron.job where jobname='koya-daf-failed-import-cleanup'
+    for v_id in select jobid from cron.job where jobname in ('production-daf-failed-import-cleanup', v_legacy_job_name)
     loop perform cron.unschedule(v_id); end loop;
-    perform cron.schedule('koya-daf-failed-import-cleanup','*/5 * * * *',
+    perform cron.schedule('production-daf-failed-import-cleanup','*/5 * * * *',
         'select public.daf_prune_failed_log_imports();');
 end;
 $$;

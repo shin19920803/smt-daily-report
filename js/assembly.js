@@ -3,21 +3,21 @@ window.SMT = window.SMT || {};
 // Mylar 機台 LOG：瀏覽器版的 Python LOG 自動統計工具
 SMT.assembly = function (ctx) {
     const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
-    const STORAGE_KEY = 'koya_assy_log_batches_v1';
+    const STORAGE_KEY = 'production_assy_log_batches_v1';
     const REMOTE_TABLE = 'assembly_log_batches';
-    const REMOTE_MIGRATED_KEY = 'koya_assy_log_remote_migrated_v1';
-    const MAPPING_STORAGE_KEY = 'koya_assy_log_mappings_v1';
+    const REMOTE_MIGRATED_KEY = 'production_assy_log_remote_migrated_v1';
+    const MAPPING_STORAGE_KEY = 'production_assy_log_mappings_v1';
     const MAPPING_TABLE = 'assembly_log_mappings';
-    const MAPPING_MIGRATED_KEY = 'koya_assy_log_mapping_migrated_v1';
-    const MODEL_SCHEDULE_STORAGE_KEY = 'koya_assy_model_schedules_v1';
+    const MAPPING_MIGRATED_KEY = 'production_assy_log_mapping_migrated_v1';
+    const MODEL_SCHEDULE_STORAGE_KEY = 'production_assy_model_schedules_v1';
     const MODEL_SCHEDULE_TABLE = 'assembly_model_schedules';
-    const MODEL_SCHEDULE_MIGRATED_KEY = 'koya_assy_model_schedule_remote_migrated_v1';
-    const NOTES_STORAGE_KEY = 'koya_assy_log_defect_notes_v1';
-    const HOURLY_NOTES_STORAGE_KEY = 'koya_assy_log_hourly_notes_v1';
-    const STATUS_NOTES_STORAGE_KEY = 'koya_assy_log_status_notes_v1';
-    const SUCCESS_DIVISOR_STORAGE_KEY = 'koya_assy_success_divisor_v1';
-    const today = () => window.koyaTodayDate();
-    const previousDayValue = window.koyaShiftDate(today(), -1);
+    const MODEL_SCHEDULE_MIGRATED_KEY = 'production_assy_model_schedule_remote_migrated_v1';
+    const NOTES_STORAGE_KEY = 'production_assy_log_defect_notes_v1';
+    const HOURLY_NOTES_STORAGE_KEY = 'production_assy_log_hourly_notes_v1';
+    const STATUS_NOTES_STORAGE_KEY = 'production_assy_log_status_notes_v1';
+    const SUCCESS_DIVISOR_STORAGE_KEY = 'production_assy_success_divisor_v1';
+    const today = () => window.getTaiwanDate();
+    const previousDayValue = window.shiftDateByDays(today(), -1);
 
     const assemblyUploadDate = ref(today());
     const assemblyBatches = ref([]);
@@ -985,7 +985,7 @@ SMT.assembly = function (ctx) {
     };
 
     const assemblyQuickRange = (mode, offset) => {
-        const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
+        const now = new Date(`${window.getTaiwanDate()}T00:00:00`);
         if (mode === 'day') {
             const date = new Date(now); date.setDate(date.getDate() + offset);
             return { start: date, end: date };
@@ -1161,9 +1161,9 @@ SMT.assembly = function (ctx) {
     let assemblyLoadRequestId = 0;
     let assemblyRemoteLoadPromise = null;
     const loadAssemblyRemoteRows = async (force = false) => {
-        if (window.koyaFetchCachedJson) {
+        if (window.fetchCachedJson) {
             try {
-                const data = await window.koyaFetchCachedJson('/api/assembly-data', { force });
+                const data = await window.fetchCachedJson('/api/assembly-data', { force });
                 if (Array.isArray(data)) return { data, error: null };
             } catch (error) { console.warn('Mylar 共用快取讀取失敗，改由 Supabase 直讀', error); }
         }
@@ -1479,7 +1479,7 @@ SMT.assembly = function (ctx) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(defectDetails), '不良原因明細');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dailyDefects), '每日NG細項');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sourceDetails), 'LOG原始細項');
-        XLSX.writeFile(wb, 'KOYA_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');
+        XLSX.writeFile(wb, 'production_ASSY_LOG_' + (assemblyStatsFilter.value.start || today()) + '.xlsx');
         toast('Mylar LOG 報表已導出');
     };
 

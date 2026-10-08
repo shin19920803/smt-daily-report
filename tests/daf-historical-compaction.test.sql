@@ -146,7 +146,7 @@ $$;
 
 -- Simulate a legacy duplicate full-record cache in the summary table.
 begin;
-select set_config('koya.allow_daf_summary_write', 'on', true);
+select set_config('app.allow_daf_summary_write', 'on', true);
 update public.daf_log_batches b
 set records = coalesce((
     select jsonb_agg(c.record_json order by c.id)
@@ -506,7 +506,7 @@ begin
     drop table if exists _daf_import_pairs;
     drop table if exists _daf_import_old_jobs;
 
-    perform set_config('koya.allow_daf_summary_write', 'on', true);
+    perform set_config('app.allow_daf_summary_write', 'on', true);
     update public.daf_log_batches
        set records = jsonb_build_array(jsonb_build_object(
            'dedupKey', 'E-LEGACY-RAW', 'dedupTime', 4000, 'date', v_day_15,

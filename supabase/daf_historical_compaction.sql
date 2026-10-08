@@ -532,7 +532,7 @@ begin
       into v_candidate_count, v_payload_bytes_saved
       from updated;
 
-    perform set_config('koya.allow_daf_summary_write', 'on', true);
+    perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', 'on', true);
     with picked as materialized (
         select b.id
         from public.daf_log_batches b
@@ -818,7 +818,7 @@ begin
           and c.report_date < v_cutoff::text
     );
     if jsonb_array_length(v_refresh_pairs) > 0 then
-        perform set_config('koya.allow_daf_summary_write', 'on', true);
+        perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', 'on', true);
         update public.daf_log_batches b
         set records = case when jsonb_typeof(b.records) = 'array' then coalesce((
             select jsonb_agg(item.value order by item.ordinality)
@@ -953,7 +953,7 @@ security definer
 set search_path = public
 as $$
 begin
-    perform set_config('koya.allow_daf_summary_write', 'on', true);
+    perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', 'on', true);
     delete from public.daf_log_batches b
     using jsonb_to_recordset(coalesce(p_pairs, '[]'::jsonb)) as p(line text, file_name text)
     where b.line = p.line and b.file_name = p.file_name

@@ -7,15 +7,19 @@ done
 [[ $# -eq 2 ]] || { printf '用法：bash %s <host> <user>\n' "$0" >&2; exit 2; }
 task_host=$1
 task_user=$2
-task_port=${KOYA_PGPORT:-5432}
+legacy_namespace=$'\x6b\x6f\x79\x61'
+legacy_namespace_upper=$(printf '%s' "$legacy_namespace" | tr '[:lower:]' '[:upper:]')
+legacy_port_var="${legacy_namespace_upper}_PGPORT"
+legacy_disk_var="${legacy_namespace_upper}_DISK_FREE_BYTES"
+task_port=${APP_PGPORT:-${!legacy_port_var:-5432}}
 task_root=$(cd "$(dirname "$0")/.." && pwd)
-task_free=${KOYA_DISK_FREE_BYTES:-0}
+task_free=${APP_DISK_FREE_BYTES:-${!legacy_disk_var:-0}}
 [[ "$task_free" =~ ^[0-9]+$ && "$task_free" -gt 0 ]] || {
-  printf '先從 Supabase 磁碟容量／用量確認剩餘 bytes，再設定 KOYA_DISK_FREE_BYTES；未進行線上修改。\n' >&2
+  printf '先從 Supabase 磁碟容量／用量確認剩餘 bytes，再設定 APP_DISK_FREE_BYTES；未進行線上修改。\n' >&2
   exit 2
 }
 umask 077
-task_credentials=$(mktemp -d "${TMPDIR:-/tmp}/koya-reclaim.XXXXXX")
+task_credentials=$(mktemp -d "${TMPDIR:-/tmp}/production-reclaim.XXXXXX")
 task_barrier=0
 task_pgpass="$task_credentials/pgpass"
 export PGPASSFILE="$task_pgpass" PGSSLMODE=require

@@ -27,10 +27,10 @@ const app = createApp({
                         ctx.loadFeeders(), ctx.loadNozzleLogs()
                     ]).catch(error => console.warn('SMT 背景資料同步失敗', error));
                 }
-                const today = window.koyaTodayDate();
+                const today = window.getTaiwanDate();
                 ctx.rawExportFilter.value.end = today;
                 ctx.fpyFilter.value.end = today;
-                const sevenDaysAgo = window.koyaShiftDate(today, -7);
+                const sevenDaysAgo = window.shiftDateByDays(today, -7);
                 ctx.rawExportFilter.value.start = sevenDaysAgo;
                 ctx.fpyFilter.value.start = sevenDaysAgo;
             } finally {

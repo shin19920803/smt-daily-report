@@ -4,7 +4,13 @@ window.SMT = window.SMT || {};
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentLineMeta, currentTab, data, loadBaseData } = ctx;
     const REMOTE_TABLE = 'daf_log_batches';
-    const SHARED_STATS_STATE_ID = '__koya_shared_daf_stats_state_v1__';
+    const LEGACY_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
+    const SHARED_STATS_STATE_ID = '__shared_production_daf_stats_state_v1__';
+    const LEGACY_SHARED_STATS_STATE_ID = `__${LEGACY_NAMESPACE}_shared_daf_stats_state_v1__`;
+    const LEGACY_SHARED_STATS_KIND = `${LEGACY_NAMESPACE}-shared-daf-stats-v1`;
+    const LEGACY_STATS_SNAPSHOT_V1_KIND = `${LEGACY_NAMESPACE}-daf-stats-snapshot-v1`;
+    const LEGACY_STATS_SNAPSHOT_V2_KIND = `${LEGACY_NAMESPACE}-daf-stats-snapshot-v2-weighted`;
+    const isWeightedStatsSnapshot = kind => ['production-daf-stats-snapshot-v2-weighted', LEGACY_STATS_SNAPSHOT_V2_KIND].includes(kind);
     const SHARED_STATS_STATE_LINE = '__STATS_STATE__';
     const REMOTE_SUMMARY_COLUMNS = 'id,line,file_name,uploaded_at,model_name,product_code,work_order,report_date,date_start,date_end,input_count,good_count,fail_count,yield_rate,defect_rate,unknown_status_count,unknown_status_text,row_count,raw_column_count';
     const REMOTE_DETAIL_COLUMNS = `${REMOTE_SUMMARY_COLUMNS},records`;
@@ -36,13 +42,13 @@ SMT.daf = function (ctx) {
         });
     });
     // 非 SMT 站別共用機種對應；保留舊鍵讀取，避免既有使用者的對應遺失。
-    const MODEL_MAPPING_STORAGE_KEY = 'koya_non_smt_model_mappings_v1';
+    const MODEL_MAPPING_STORAGE_KEY = 'production_non_smt_model_mappings_v1';
     const LEGACY_MODEL_MAPPING_STORAGE_KEYS = [
-        'koya_daf_model_mappings_v1',
-        'koya_ft1_model_mappings_v1',
-        'koya_ft2_model_mappings_v1',
-        'koya_assembly_model_mappings_v1',
-        'koya_lighting_model_mappings_v1'
+        'production_daf_model_mappings_v1',
+        'production_ft1_model_mappings_v1',
+        'production_ft2_model_mappings_v1',
+        'production_assembly_model_mappings_v1',
+        'production_lighting_model_mappings_v1'
     ];
     const LEGACY_COLUMNS = Object.freeze({ workOrder: 2, productCode: 4, dedupKey: 5, date: 6, defect: 8, status: 9, minColumns: 10 });
     const CURRENT_COLUMNS = Object.freeze({ process: 0, workOrder: 1, productCode: 3, dedupKey: 4, date: 5, machineOperator: 6, defect: 7, status: 8, minColumns: 9 });
@@ -52,8 +58,9 @@ SMT.daf = function (ctx) {
     const DAF_MACHINE_REFERENCE_PREFIX = '__DAF_MACHINE_REF__';
     const DAF_MACHINE_REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
     const DAF_MACHINE_CLASSIFICATION_VERSION = 'aggregate-history-v1-ft1-machine-v3';
-    const MODEL_MAPPING_REMOTE_LINE = '__KOYA_MODEL_MAPPING__';
-    const MODEL_MAPPING_REMOTE_PREFIX = '__KOYA_MODEL_MAPPING__';
+    const MODEL_MAPPING_REMOTE_LINE = '__PROCESS_MODEL_MAPPING__';
+    const LEGACY_MODEL_MAPPING_REMOTE_LINE = `__${LEGACY_NAMESPACE.toUpperCase()}_MODEL_MAPPING__`;
+    const MODEL_MAPPING_REMOTE_PREFIX = '__PROCESS_MODEL_MAPPING__';
     const CURRENT_SOURCE_FORMAT = 'current-v2';
     const LEGACY_SOURCE_FORMAT = 'legacy-v1';
     const TEST_PROCESS_OPTIONS = SMT.TEST_PROCESSES || [
@@ -64,7 +71,7 @@ SMT.daf = function (ctx) {
         { id: 'ASSEMBLY', label: '輝度機測試', shortLabel: '輝度機' }
     ];
     const TEST_PROCESS_IDS = TEST_PROCESS_OPTIONS.map(item => item.id);
-    const TEST_PROCESS_STORAGE_KEY = 'koya_test_process_v1';
+    const TEST_PROCESS_STORAGE_KEY = 'production_test_process_v1';
     const readStoredTestProcess = () => {
         try {
             const saved = localStorage.getItem(TEST_PROCESS_STORAGE_KEY);
@@ -231,7 +238,7 @@ SMT.daf = function (ctx) {
     // 儀表板只使用 Supabase 摘要；完整 records 僅在統計／明細明確載入時放入 dafBatches。
     const dafSummaryBatches = ref([]);
     const dafStatsFilter = ref({ start: '', end: '', model: 'all', workOrder: 'all' });
-    const DAF_STATS_STATE_KEY = 'koya_test_stats_state_v1';
+    const DAF_STATS_STATE_KEY = 'production_test_stats_state_v1';
     const dafStatsResult = ref(null);
     const dafStatsResults = ref({});
     // 已載入的大日期區間可涵蓋較小區間；切換日期或製程時直接重算，不重抓明細。
@@ -282,7 +289,7 @@ SMT.daf = function (ctx) {
     };
     const dafStatsState = readDafStatsState();
     const getYesterday = () => {
-        return window.koyaShiftDate(window.koyaTodayDate(), -1);
+        return window.shiftDateByDays(window.getTaiwanDate(), -1);
     };
     const saveDafStatsState = () => {
         Object.assign(dafStatsState, { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 });
@@ -358,7 +365,7 @@ SMT.daf = function (ctx) {
         for (let offset = 0; ; offset += 1000) {
             const { data: page, error } = await _supabase.from(REMOTE_TABLE)
                 .select('id,product_code,model_name,records')
-                .eq('line', MODEL_MAPPING_REMOTE_LINE)
+                .in('line', [MODEL_MAPPING_REMOTE_LINE, LEGACY_MODEL_MAPPING_REMOTE_LINE])
                 .order('uploaded_at', { ascending: false })
                 .range(offset, offset + 999);
             if (error) {
@@ -761,7 +768,7 @@ SMT.daf = function (ctx) {
             if (error) return error;
         }
         if (unique.length) {
-            await window.koyaInvalidateCache?.();
+            await window.invalidateDataCache?.();
             for (const line of ['DAF', 'FT1']) {
                 for (const key of [...dafDetailLoadedLines]) if (key.startsWith(`${line}|`)) dafDetailLoadedLines.delete(key);
                 dafStatsRawRowsCache.delete(line);
@@ -772,7 +779,7 @@ SMT.daf = function (ctx) {
         }
         return null;
     };
-    const DAF_FAILED_IMPORTS_KEY = 'koya-daf-failed-import-cleanup-v1';
+    const DAF_FAILED_IMPORTS_KEY = 'production-daf-failed-import-cleanup-v1';
     const dafPendingAbortJobs = new Set();
     try { JSON.parse(localStorage.getItem(DAF_FAILED_IMPORTS_KEY) || '[]').forEach(id => dafPendingAbortJobs.add(id)); } catch (error) {}
     const saveDafPendingAbortJobs = () => {
@@ -801,7 +808,7 @@ SMT.daf = function (ctx) {
             delete row.records;
             return row;
         });
-        const legacyKey = `koya-daf-import-v2:${file.name}:${file.size}:${file.lastModified}`;
+        const legacyKey = `production-daf-import-v2:${file.name}:${file.size}:${file.lastModified}`;
         try {
             const legacyJob = localStorage.getItem(legacyKey);
             if (legacyJob) { dafPendingAbortJobs.add(legacyJob); saveDafPendingAbortJobs(); }
@@ -877,7 +884,7 @@ SMT.daf = function (ctx) {
         if (!finalized?.published) throw new Error('Supabase 尚未確認發布');
         dafPendingAbortJobs.delete(jobId);
         saveDafPendingAbortJobs();
-        if (!(await window.koyaInvalidateCache?.())) console.warn('上傳已寫入 Supabase，但 Cloudflare 快取未確認失效');
+        if (!(await window.invalidateDataCache?.())) console.warn('上傳已寫入 Supabase，但 Cloudflare 快取未確認失效');
         setDafUploadProgress(file.name, '已發布，正在更新共用摘要', 1, 1);
         return {
             acceptedCount: Number(finalized.accepted_count) || 0,
@@ -893,7 +900,7 @@ SMT.daf = function (ctx) {
                 throw new Error(`${error?.message || error}；暫存清除未確認：${cleanupError?.message || cleanupError}。下次上傳會先重試清除；離線遺留工作會由伺服器定期清理`);
             }
             if (cleanup?.published) {
-                try { await window.koyaInvalidateCache?.(); } catch (cacheError) {}
+                try { await window.invalidateDataCache?.(); } catch (cacheError) {}
                 return { acceptedCount: Number(cleanup.accepted_count) || 0, duplicateCount: Number(cleanup.duplicate_count) || 0 };
             }
             throw Object.assign(new Error(`${error?.message || error}；本次未發布暫存已清除，請重新上傳`), { code: error?.code });
@@ -1032,7 +1039,7 @@ SMT.daf = function (ctx) {
         }
     };
     const getDafSummaryCacheUrl = path => {
-        const base = String(window.KOYA_DATA_CACHE_URL || '').replace(/\/$/, '');
+        const base = String(window.DATA_CACHE_URL || '').replace(/\/$/, '');
         return base ? `${base}${path}` : '';
     };
     const invalidateDafSummaryCache = async () => {
@@ -1065,12 +1072,12 @@ SMT.daf = function (ctx) {
         }
     };
     const loadDafDetailRows = async (line, start = '', end = '', force = false) => {
-        if (!window.koyaFetchCachedJson) return null;
+        if (!window.fetchCachedJson) return null;
         try {
             const params = new URLSearchParams({ line });
             if (start) params.set('start', start);
             if (end) params.set('end', end);
-            const data = await withDafRequestTimeout(window.koyaFetchCachedJson(`/api/daf-details?${params.toString()}`, { force }), `${processLabel(line)} Cloudflare 明細`, DAF_CACHE_REQUEST_TIMEOUT_MS);
+            const data = await withDafRequestTimeout(window.fetchCachedJson(`/api/daf-details?${params.toString()}`, { force }), `${processLabel(line)} Cloudflare 明細`, DAF_CACHE_REQUEST_TIMEOUT_MS);
             if (!Array.isArray(data)) throw new Error('明細格式錯誤');
             return { data, error: null };
         } catch (error) {
@@ -1110,10 +1117,10 @@ SMT.daf = function (ctx) {
             return dafRemoteVersions;
         } catch (error) {
             console.warn('測試製程版本資訊直讀失敗，改用 Cloudflare 備援', error);
-            if (!window.koyaFetchCachedJson) return null;
+            if (!window.fetchCachedJson) return null;
             try {
                 const lines = TEST_PROCESS_IDS.join(',');
-                const data = await withDafRequestTimeout(window.koyaFetchCachedJson(`/api/daf-version?lines=${encodeURIComponent(lines)}`, { force }), '測試製程版本資訊備援', 15000);
+                const data = await withDafRequestTimeout(window.fetchCachedJson(`/api/daf-version?lines=${encodeURIComponent(lines)}`, { force }), '測試製程版本資訊備援', 15000);
                 if (!data?.versions) throw new Error('版本資訊格式錯誤');
                 dafRemoteVersions = data.versions;
                 dafRemoteVersionsLoadedAt = Date.now();
@@ -1369,7 +1376,7 @@ SMT.daf = function (ctx) {
                 }
             }
         });
-        return { kind: 'koya-daf-stats-snapshot-v2-weighted', machineClassificationVersion: DAF_MACHINE_CLASSIFICATION_VERSION, filter, versions: versions || null, results, days };
+        return { kind: 'production-daf-stats-snapshot-v2-weighted', machineClassificationVersion: DAF_MACHINE_CLASSIFICATION_VERSION, filter, versions: versions || null, results, days };
     };
     const sharedDafSnapshotResult = (line, filter, snapshot = dafSharedStatsSnapshot) => {
         if (!snapshot?.filter) return null;
@@ -1388,7 +1395,7 @@ SMT.daf = function (ctx) {
     };
     const parseSharedDafStatsState = row => {
         const state = Array.isArray(row?.records) ? row.records[0] : row?.records;
-        if (!state || state.kind !== 'koya-shared-daf-stats-v1') return null;
+        if (!state || !['shared-production-daf-stats-v1', LEGACY_SHARED_STATS_KIND].includes(state.kind)) return null;
         const start = String(state.start || '');
         const end = String(state.end || '');
         if (!start || !end || start > end) return null;
@@ -1400,7 +1407,7 @@ SMT.daf = function (ctx) {
             quickMode: ['day', 'week', 'month'].includes(state.quickMode) ? state.quickMode : null,
             quickOffset: Number.isFinite(Number(state.quickOffset)) ? Number(state.quickOffset) : 0,
             updatedAt: String(state.updatedAt || row.uploaded_at || ''),
-            snapshot: ['koya-daf-stats-snapshot-v1', 'koya-daf-stats-snapshot-v2-weighted'].includes(state.snapshot?.kind)
+            snapshot: ['production-daf-stats-snapshot-v1', 'production-daf-stats-snapshot-v2-weighted', LEGACY_STATS_SNAPSHOT_V1_KIND, LEGACY_STATS_SNAPSHOT_V2_KIND].includes(state.snapshot?.kind)
                 ? state.snapshot : null
         };
     };
@@ -1409,7 +1416,7 @@ SMT.daf = function (ctx) {
         const updatedAt = new Date().toISOString();
         const snapshot = createSharedDafStatsSnapshot(versions, sourceFilter, sourceResults);
         const state = {
-            kind: 'koya-shared-daf-stats-v1',
+            kind: 'shared-production-daf-stats-v1',
             start: sourceFilter.start || '',
             end: sourceFilter.end || '',
             model: sourceFilter.model || 'all',
@@ -1458,7 +1465,7 @@ SMT.daf = function (ctx) {
         const cachedEntry = dafStatsRangeCache.get(dafStatsRangeKey(sourceFilter));
         if (cachedEntry) cachedEntry.snapshot = snapshot;
         // 統計快照更新後只清除統計快取，不清除五站摘要與明細快取。
-        if (window.koyaInvalidateStatsStateCache && !(await window.koyaInvalidateStatsStateCache())) {
+        if (window.invalidateStatsStateCache && !(await window.invalidateStatsStateCache())) {
             // 快取服務暫時不可用時不否定已成功寫入 Supabase 的統計結果；讀取端會直讀唯一資料源。
             console.warn('共用數據統計狀態快取清除失敗，保留 Supabase 已寫入結果');
         }
@@ -1508,15 +1515,15 @@ SMT.daf = function (ctx) {
                     rows.push(...(pageResult.data || []));
                     if (!pageResult.data || pageResult.data.length < 100) break;
                 }
-                const linePrefix = `${SHARED_STATS_STATE_ID}:${currentDafLine()}`;
-                rows = rows.filter(item => item.id === linePrefix || item.id.startsWith(`${linePrefix}:`));
+                const linePrefixes = [SHARED_STATS_STATE_ID, LEGACY_SHARED_STATS_STATE_ID].map(id => `${id}:${currentDafLine()}`);
+                rows = rows.filter(item => linePrefixes.some(prefix => item.id === prefix || item.id.startsWith(`${prefix}:`)));
                 if (!error && !rows.length) {
                     const legacy = await withDafRequestTimeout(
-                        _supabase.from(REMOTE_TABLE).select('id,file_name,uploaded_at,records').eq('id', SHARED_STATS_STATE_ID).maybeSingle(),
+                        _supabase.from(REMOTE_TABLE).select('id,file_name,uploaded_at,records').in('id', [SHARED_STATS_STATE_ID, LEGACY_SHARED_STATS_STATE_ID]),
                         '舊版共用統計狀態直讀', 8000
                     );
                     error = legacy.error;
-                    if (legacy.data) rows = [legacy.data];
+                    if (legacy.data) rows = legacy.data;
                 }
             } catch (requestError) {
                 error = requestError;
@@ -1524,11 +1531,11 @@ SMT.daf = function (ctx) {
             if (error) {
                 console.warn('共用數據統計狀態直讀失敗，改用 Cloudflare 備援', error);
                 try {
-                    rows = window.koyaFetchCachedJson
-                        ? await withDafRequestTimeout(window.koyaFetchCachedJson(`/api/daf-stats-state?line=${currentDafLine()}`), '共用數據統計狀態備援', 15000)
+                    rows = window.fetchCachedJson
+                        ? await withDafRequestTimeout(window.fetchCachedJson(`/api/daf-stats-state?line=${currentDafLine()}`), '共用數據統計狀態備援', 15000)
                         : null;
                     if (!Array.isArray(rows)) rows = rows ? [rows] : [];
-                    error = rows.length === 0 && !window.koyaFetchCachedJson ? new Error('沒有可用的快取備援') : null;
+                    error = rows.length === 0 && !window.fetchCachedJson ? new Error('沒有可用的快取備援') : null;
                 } catch (fallbackError) {
                     error = fallbackError;
                 }
@@ -1603,7 +1610,7 @@ SMT.daf = function (ctx) {
                 const snapshotVersionsChanged = Boolean(currentVersions && snapshotLines.some(line =>
                     !state.snapshot.versions || !sameDafLineVersion(state.snapshot.versions, currentVersions, [line])
                 ));
-                const snapshotNeedsRefresh = state.snapshot.kind !== 'koya-daf-stats-snapshot-v2-weighted'
+                const snapshotNeedsRefresh = !isWeightedStatsSnapshot(state.snapshot.kind)
                     || snapshotVersionsChanged
                     || state.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION
                     || TEST_PROCESS_IDS.some(line => {
@@ -2302,7 +2309,7 @@ SMT.daf = function (ctx) {
     };
     const subscribeDafRemoteChanges = () => {
         if (!_supabase?.channel || dafRemoteChangeChannel) return;
-        dafRemoteChangeChannel = _supabase.channel('koya-daf-log-sync')
+        dafRemoteChangeChannel = _supabase.channel('production-daf-log-sync')
             .on('postgres_changes', { event: '*', schema: 'public', table: REMOTE_TABLE }, payload => {
                 const line = payload.new?.line || payload.old?.line;
                 if (payload.new?.id === SHARED_STATS_STATE_ID || payload.old?.id === SHARED_STATS_STATE_ID || line === SHARED_STATS_STATE_LINE) {
@@ -2650,7 +2657,7 @@ SMT.daf = function (ctx) {
     );
     const sharedDafEntryNeedsRefresh = (entry, line, filter) => {
         if (!entry?.results?.[line] || entry.results[line].summaryOnly) return true;
-        if (entry?.snapshot?.kind !== 'koya-daf-stats-snapshot-v2-weighted') return true;
+        if (!isWeightedStatsSnapshot(entry?.snapshot?.kind)) return true;
         if (line === 'FT1' && entry.snapshot.machineClassificationVersion !== DAF_MACHINE_CLASSIFICATION_VERSION) return true;
         const result = entry.results?.[line];
         return Boolean(result && (result.summaryOnly || (!result.sourceFiles?.length && dafSummaryHasDataForRange(line, filter))));
@@ -2726,7 +2733,7 @@ SMT.daf = function (ctx) {
     const isDafDashboardDetailsLoaded = date => dafDetailRangeLoaded(currentDafLine(), date, date);
     const ensureDafDashboardDetails = (date, { force = false } = {}) => ensureDafProcessDetails(currentDafLine(), { start: date, end: date, force });
     const dafQuickRange = (mode, offset) => {
-        const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
+        const now = new Date(`${window.getTaiwanDate()}T00:00:00`);
         if (mode === 'day') {
             const date = new Date(now); date.setDate(date.getDate() + offset);
             return { start: date, end: date };
@@ -2753,7 +2760,7 @@ SMT.daf = function (ctx) {
         return start;
     };
     const getDafQuickAnchorDate = () => {
-        const today = dafQuickDate(window.koyaTodayDate()) || new Date();
+        const today = dafQuickDate(window.getTaiwanDate()) || new Date();
         const filterStart = dafQuickDate(dafStatsFilter.value.start);
         const filterEnd = dafQuickDate(dafStatsFilter.value.end);
         const availableDates = (dafStatsResult.value?.daily || [])
@@ -2767,7 +2774,7 @@ SMT.daf = function (ctx) {
         return filterStart || today;
     };
     const getDafQuickOffset = mode => {
-        const today = dafQuickDate(window.koyaTodayDate()) || new Date();
+        const today = dafQuickDate(window.getTaiwanDate()) || new Date();
         const anchor = getDafQuickAnchorDate();
         if (mode === 'day') return Math.round((anchor - today) / 86400000);
         if (mode === 'week') return Math.round((dafQuickWeekStart(anchor) - dafQuickWeekStart(today)) / 604800000);

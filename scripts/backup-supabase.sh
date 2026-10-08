@@ -55,7 +55,7 @@ escape_pgpass_field() {
 }
 
 umask 077
-pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/koya-pgpass.XXXXXX")
+pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/production-pgpass.XXXXXX")
 pgpass_file="$pgpass_dir/pgpass"
 backup_completed=0
 cleanup() {

@@ -7,7 +7,7 @@ SMT.dashboard = function (ctx) {
         const dashboardRecentProds = ref([]);
         const dashboardRecentOoc = ref([]);
         const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-        const dashDate = ref(window.koyaTodayDate());
+        const dashDate = ref(window.getTaiwanDate());
         const dashboardDetail = ref({ show: false, title: '', subtitle: '', metrics: [], sections: [], allowNote: false, noteKey: '', note: '' });
         const smtDashboardData = ref({ production: [], byType: [], byLocation: [], byModel: [], byWorkOrder: [], weekDays: [], trendDays: [], weekRange: null });
         const assemblyWeekDays = ref([]);
@@ -70,9 +70,9 @@ SMT.dashboard = function (ctx) {
         let smtSharedDataCache = null;
         const loadSmtSharedData = async (force = false) => {
             if (!force && smtSharedDataCache) return smtSharedDataCache;
-            if (!window.koyaFetchCachedJson) return null;
+            if (!window.fetchCachedJson) return null;
             try {
-                const data = await window.koyaFetchCachedJson('/api/smt-data', { force });
+                const data = await window.fetchCachedJson('/api/smt-data', { force });
                 if (Array.isArray(data?.production)) {
                     smtSharedDataCache = data;
                     return data;

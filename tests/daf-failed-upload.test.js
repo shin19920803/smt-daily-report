@@ -9,7 +9,7 @@ function harness(handler, initial = {}) {
     let serial = 0;
     const context = {
         localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-        window: { crypto: { randomUUID: () => `fresh-${++serial}` }, koyaInvalidateCache: async () => true },
+        window: { crypto: { randomUUID: () => `fresh-${++serial}` }, invalidateDataCache: async () => true },
         _supabase: { rpc: (name, args) => ({ abortSignal: () => {
             calls.push({ name, args });
             return handler(name, args);
@@ -55,7 +55,7 @@ test('failed chunks are cleared and reported instead of silently resuming', asyn
 });
 test('unconfirmed previous cleanup prevents any fresh upload from starting', async () => {
     const h = harness(() => ({ error: new Error('network offline') }), {
-        'koya-daf-failed-import-cleanup-v1': '["previous-job"]'
+        'production-daf-failed-import-cleanup-v1': '["previous-job"]'
     });
     await assert.rejects(h.upload(file, batches), /network offline/);
     assert.deepEqual(h.calls.map(call => call.name), ['daf_abort_log_import']);

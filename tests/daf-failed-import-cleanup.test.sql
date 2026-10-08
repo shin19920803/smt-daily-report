@@ -84,7 +84,7 @@ begin
     perform public.daf_prune_failed_log_imports();
     if not exists(select 1 from public.daf_log_candidates where job_id=v_id) then
         raise exception 'active upload incorrectly cleaned'; end if;
-    if (select count(*) from cron.job where jobname='koya-daf-failed-import-cleanup')<>1 then
+    if (select count(*) from cron.job where jobname='production-daf-failed-import-cleanup')<>1 then
         raise exception 'cleanup schedule duplicated'; end if;
     raise notice 'PASS: partial cleanup, idempotency, delayed requests, published protection, inactive cleanup, active protection, unique schedule';
 end;

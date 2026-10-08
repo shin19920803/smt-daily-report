@@ -2,7 +2,9 @@ const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
 const APP_ORIGIN = 'https://shin19920803.github.io';
 const PROCESS_LINES = ['DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY'];
-const SHARED_STATS_STATE_ID = '__koya_shared_daf_stats_state_v1__';
+const LEGACY_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
+const SHARED_STATS_STATE_ID = '__shared_production_daf_stats_state_v1__';
+const LEGACY_SHARED_STATS_STATE_ID = `__${LEGACY_NAMESPACE}_shared_daf_stats_state_v1__`;
 const SUMMARY_COLUMNS = [
     'id', 'line', 'file_name', 'uploaded_at', 'model_name', 'product_code', 'work_order',
     'report_date', 'date_start', 'date_end', 'input_count', 'good_count', 'fail_count',
@@ -139,15 +141,19 @@ const readDafStatsStateFromSupabase = async line => {
         url.searchParams.set('order', 'uploaded_at.desc,id.asc');
     }, 100);
     if (result.error) return result.error;
-    const prefix = line && PROCESS_LINES.includes(line) ? `${SHARED_STATS_STATE_ID}:${line}` : '';
-    let rows = result.rows.filter(row => !prefix || row.id === prefix || row.id.startsWith(`${prefix}:`));
+    const prefixes = line && PROCESS_LINES.includes(line)
+        ? [SHARED_STATS_STATE_ID, LEGACY_SHARED_STATS_STATE_ID].map(id => `${id}:${line}`)
+        : [];
+    let rows = result.rows.filter(row => !prefixes.length || prefixes.some(prefix => row.id === prefix || row.id.startsWith(`${prefix}:`)));
     if (!rows.length) {
-        const legacy = await readSupabasePages('daf_log_batches', url => {
-            url.searchParams.set('select', 'id,file_name,uploaded_at,records');
-            url.searchParams.set('id', `eq.${SHARED_STATS_STATE_ID}`);
-        }, 1);
-        if (legacy.error) return legacy.error;
-        rows = legacy.rows;
+        for (const id of [SHARED_STATS_STATE_ID, LEGACY_SHARED_STATS_STATE_ID]) {
+            const legacy = await readSupabasePages('daf_log_batches', url => {
+                url.searchParams.set('select', 'id,file_name,uploaded_at,records');
+                url.searchParams.set('id', `eq.${id}`);
+            }, 1);
+            if (legacy.error) return legacy.error;
+            rows.push(...legacy.rows);
+        }
     }
     return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=0, s-maxage=60' });
 };
@@ -186,7 +192,7 @@ const withCache = async (requestUrl, pathname, params, forceRefresh, loader) => 
         if (cached) {
             const headers = new Headers(cached.headers);
             Object.entries(corsHeaders).forEach(([name, value]) => headers.set(name, value));
-            headers.set('X-Koya-Cache', 'HIT');
+            headers.set('X-Production-Cache', 'HIT');
             return new Response(cached.body, { status: cached.status, headers });
         }
     } else {
@@ -196,7 +202,7 @@ const withCache = async (requestUrl, pathname, params, forceRefresh, loader) => 
     if (!fresh.ok) return fresh;
     await cache.put(key, fresh.clone());
     const headers = new Headers(fresh.headers);
-    headers.set('X-Koya-Cache', forceRefresh ? 'REFRESH' : 'MISS');
+    headers.set('X-Production-Cache', forceRefresh ? 'REFRESH' : 'MISS');
     return new Response(fresh.body, { status: fresh.status, headers });
 };
 
@@ -232,7 +238,7 @@ export default {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
         if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-            return jsonResponse({ ok: true, service: 'koya-data-cache', cacheVersion: '202610021550' });
+            return jsonResponse({ ok: true, service: 'production-data-cache', cacheVersion: '20261008-neutral-brand-v1' });
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-summary') {

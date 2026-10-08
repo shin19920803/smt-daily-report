@@ -15,7 +15,7 @@ SMT.LINES = [
     { id: 'TEST', label: 'DAF/組裝測試', icon: 'fa-vials', canImport: false },
     { id: 'ASSY', label: 'Mylar', icon: 'fa-screwdriver-wrench', canImport: false }
 ];
-SMT.LINE_KEY = 'koya_current_line';
+SMT.LINE_KEY = 'production_current_line';
 
 SMT.core = function (ctx) {
         const currentTab = ref('dashboard');
@@ -84,7 +84,7 @@ SMT.core = function (ctx) {
             return [...new Set(active)];
         });
         const uniqueWoNumbers = computed(() => [...new Set(data.value.workOrders.map(w => w.wo_number))]);
-        const todayStr = window.koyaTodayDate();
+        const todayStr = window.getTaiwanDate();
         const loadBaseData = async () => {
             const L = currentLine.value;
             if (L === 'TEST') {
@@ -176,7 +176,7 @@ SMT.core = function (ctx) {
         return {
             currentTab, loading, showWoModal, showMobileMore, data, toasts, toast,
             getWoColor, fpyTargets, saveFpyTargets, loadFpyTargets, isFpyBelowTarget, todayStr,
-            taiwanTodayDate: window.koyaTodayDate, taiwanDateTime: window.koyaTaiwanDateTime,
+            taiwanTodayDate: window.getTaiwanDate, taiwanDateTime: window.formatTaiwanDateTime,
             activeWoNumbers, uniqueWoNumbers, loadBaseData,
             sortedModels, sortedDefectTypes, sortedLocations,
             lines, visibleLines, currentLine, currentLineMeta, hideLineTools, hideOrders, hideOoc, hideDailyReport, hideSettings, canImport, switchLine,

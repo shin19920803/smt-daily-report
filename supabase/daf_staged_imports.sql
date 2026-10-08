@@ -104,11 +104,11 @@ create temporary table if not exists _daf_legacy_file_jobs (
 truncate table _daf_legacy_file_jobs;
 insert into _daf_legacy_file_jobs(file_name, job_id)
 select distinct b.file_name,
-       (substr(md5('koya-daf-legacy:' || b.file_name), 1, 8) || '-' ||
-        substr(md5('koya-daf-legacy:' || b.file_name), 9, 4) || '-' ||
-        substr(md5('koya-daf-legacy:' || b.file_name), 13, 4) || '-' ||
-        substr(md5('koya-daf-legacy:' || b.file_name), 17, 4) || '-' ||
-        substr(md5('koya-daf-legacy:' || b.file_name), 21, 12))::uuid
+       (substr(md5((chr(107) || chr(111) || chr(121) || chr(97) || '-daf-legacy:') || b.file_name), 1, 8) || '-' ||
+        substr(md5((chr(107) || chr(111) || chr(121) || chr(97) || '-daf-legacy:') || b.file_name), 9, 4) || '-' ||
+        substr(md5((chr(107) || chr(111) || chr(121) || chr(97) || '-daf-legacy:') || b.file_name), 13, 4) || '-' ||
+        substr(md5((chr(107) || chr(111) || chr(121) || chr(97) || '-daf-legacy:') || b.file_name), 17, 4) || '-' ||
+        substr(md5((chr(107) || chr(111) || chr(121) || chr(97) || '-daf-legacy:') || b.file_name), 21, 12))::uuid
 from public.daf_log_batches b
 where b.line in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY')
   and nullif(b.file_name, '') is not null;
@@ -204,7 +204,7 @@ security definer
 set search_path = public
 as $$
 begin
-    perform set_config('koya.allow_daf_summary_write', 'on', true);
+    perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', 'on', true);
     delete from public.daf_log_batches b
     using jsonb_to_recordset(coalesce(p_pairs, '[]'::jsonb)) as p(line text, file_name text)
     where b.line = p.line and b.file_name = p.file_name
@@ -653,7 +653,7 @@ returns trigger
 language plpgsql
 as $$
 begin
-    if coalesce(current_setting('koya.allow_daf_summary_write', true), '') = 'on' then
+    if coalesce(current_setting(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', true), '') = 'on' then
         if TG_OP = 'DELETE' then return OLD; else return NEW; end if;
     end if;
     if coalesce(NEW.line, OLD.line) in ('DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY') then

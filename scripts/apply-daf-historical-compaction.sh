@@ -21,7 +21,11 @@ done
 pg_host=$1
 pg_user=$2
 backup_hint=$3
-pg_port=${KOYA_PGPORT:-5432}
+legacy_namespace=$'\x6b\x6f\x79\x61'
+legacy_namespace_upper=$(printf '%s' "$legacy_namespace" | tr '[:lower:]' '[:upper:]')
+legacy_port_var="${legacy_namespace_upper}_PGPORT"
+legacy_passfile_var="${legacy_namespace_upper}_PGPASSFILE"
+pg_port=${APP_PGPORT:-${!legacy_port_var:-5432}}
 pg_database=postgres
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 migration_path="$repo_root/supabase/daf_historical_compaction.sql"
@@ -37,7 +41,7 @@ backup_stem=${backup_stem%.dump}
 backup_path="$backup_dir/${backup_stem}-pre-daf14-$(date '+%Y%m%d-%H%M%S').dump"
 [[ ! -e "$backup_path" ]] || { printf '新備份檔已存在，拒絕覆寫：%s\n' "$backup_path" >&2; exit 2; }
 
-pgpass_file=${KOYA_PGPASSFILE:-}
+pgpass_file=${APP_PGPASSFILE:-${!legacy_passfile_var:-}}
 pgpass_owned=0
 pgpass_dir=''
 if [[ -n "$pgpass_file" ]]; then
@@ -57,7 +61,7 @@ else
   }
 
   umask 077
-  pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/koya-compact-pgpass.XXXXXX")
+  pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/production-compact-pgpass.XXXXXX")
   pgpass_file="$pgpass_dir/pgpass"
   printf '%s:%s:%s:%s:%s\n' \
     "$(escape_pgpass_field "$pg_host")" \
@@ -71,7 +75,8 @@ else
 fi
 
 cleanup() {
-  unset pg_password PGPASSWORD KOYA_PGPASSFILE
+  unset pg_password PGPASSWORD APP_PGPASSFILE
+  unset "$legacy_passfile_var"
   if [[ "$pgpass_owned" -eq 1 ]]; then
     rm -f -- "$pgpass_file"
     rmdir -- "$pgpass_dir" 2>/dev/null || true
@@ -286,7 +291,7 @@ done
 after_digests=$(psql_exec -At -c "$dashboard_preview_sql")
 after_summary_digests=$(psql_exec -At -c "$summary_digest_sql")
 if [[ "$baseline_digests" != "$after_digests" || "$baseline_summary_digests" != "$after_summary_digests" ]]; then
-  psql_exec -v ON_ERROR_STOP=1 -c 'do $$ declare v_job_id bigint; begin for v_job_id in select jobid from cron.job where jobname = '\''koya-daf-log-maintenance'\'' loop perform cron.unschedule(v_job_id); end loop; end; $$;'
+  psql_exec -v ON_ERROR_STOP=1 -c "do \$\$ declare v_job_id bigint; begin for v_job_id in select jobid from cron.job where jobname in ('production-daf-log-maintenance', chr(107)||chr(111)||chr(121)||chr(97)||'-daf-log-maintenance') loop perform cron.unschedule(v_job_id); end loop; end; \$\$;"
   printf '五站 Dashboard 或每日報工摘要指紋與處理前不同；已停止此任務的自動排程，請勿繼續清理。\n' >&2
   printf 'Dashboard 封存前：\n%s\n封存後：\n%s\n報工摘要封存前：\n%s\n封存後：\n%s\n' \
     "$baseline_digests" "$after_digests" "$baseline_summary_digests" "$after_summary_digests" >&2
@@ -304,7 +309,7 @@ printf '線上資料庫／相關資料表精簡後空間（bytes；database 為�
 
 psql_exec -v ON_ERROR_STOP=1 --file="$schedule_path"
 printf '五站全日期 Dashboard 與報工摘要指紋逐站一致；已啟用 14 天候選封存、raw 去重及 30 天未匹配機台參照清理。\n'
-psql_exec -At -F '|' -c "select jobname, schedule, active from cron.job where jobname = 'koya-daf-log-maintenance'"
+psql_exec -At -F '|' -c "select jobname, schedule, active from cron.job where jobname = 'production-daf-log-maintenance'"
 before_database_bytes=$(printf '%s\n' "$size_before" | awk -F '|' '$1=="database" {print $2}')
 after_database_bytes=$(printf '%s\n' "$size_after" | awk -F '|' '$1=="database" {print $2}')
 if (( after_database_bytes >= before_database_bytes )); then

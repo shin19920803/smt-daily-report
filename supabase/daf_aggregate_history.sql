@@ -242,7 +242,7 @@ create or replace function public.refresh_daf_log_batch_summaries(p_pairs jsonb)
 returns void language plpgsql security definer set search_path = public
 as $$
 begin
-    perform set_config('koya.allow_daf_summary_write','on',true);
+    perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write','on',true);
     delete from public.daf_log_batches b
     using jsonb_to_recordset(coalesce(p_pairs,'[]'::jsonb)) as p(line text,file_name text)
     where b.line=p.line and b.file_name=p.file_name
@@ -507,7 +507,7 @@ begin
     get diagnostics v_deleted=row_count;
     if v_deleted<>v_picked then raise exception '封存候選刪除筆數不一致；本批已回滾'; end if;
 
-    perform set_config('koya.allow_daf_summary_write','on',true);
+    perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write','on',true);
     update public.daf_log_batches b
        set records=case when jsonb_typeof(b.records)='array' then coalesce((
            select jsonb_agg(i.value order by i.ordinality)

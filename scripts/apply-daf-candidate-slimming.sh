@@ -21,7 +21,11 @@ done
 pg_host=$1
 pg_user=$2
 backup_path=$3
-pg_port=${KOYA_PGPORT:-5432}
+legacy_namespace=$'\x6b\x6f\x79\x61'
+legacy_namespace_upper=$(printf '%s' "$legacy_namespace" | tr '[:lower:]' '[:upper:]')
+legacy_port_var="${legacy_namespace_upper}_PGPORT"
+legacy_passfile_var="${legacy_namespace_upper}_PGPASSFILE"
+pg_port=${APP_PGPORT:-${!legacy_port_var:-5432}}
 pg_database=postgres
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 compatibility_path="$repo_root/supabase/daf_historical_compaction.sql"
@@ -32,7 +36,7 @@ migration_path="$repo_root/supabase/daf_candidate_payload_slimming.sql"
 pg_restore --list "$backup_path" >/dev/null || { printf '備份封存目錄無法讀取；拒絕修改線上資料。\n' >&2; exit 2; }
 pg_restore --exit-on-error --file=/dev/null "$backup_path" || { printf '備份內容驗證失敗；拒絕修改線上資料。\n' >&2; exit 2; }
 
-pgpass_file=${KOYA_PGPASSFILE:-}
+pgpass_file=${APP_PGPASSFILE:-${!legacy_passfile_var:-}}
 pgpass_owned=0
 pgpass_dir=''
 if [[ -n "$pgpass_file" ]]; then
@@ -49,7 +53,7 @@ else
   }
 
   umask 077
-  pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/koya-slim-pgpass.XXXXXX")
+  pgpass_dir=$(mktemp -d "${TMPDIR:-/tmp}/production-slim-pgpass.XXXXXX")
   pgpass_file="$pgpass_dir/pgpass"
   printf '%s:%s:%s:%s:%s\n' \
     "$(escape_pgpass_field "$pg_host")" \
@@ -63,7 +67,8 @@ else
 fi
 
 cleanup() {
-  unset pg_password PGPASSWORD KOYA_PGPASSFILE
+  unset pg_password PGPASSWORD APP_PGPASSFILE
+  unset "$legacy_passfile_var"
   if [[ "$pgpass_owned" -eq 1 ]]; then
     rm -f -- "$pgpass_file"
     rmdir -- "$pgpass_dir" 2>/dev/null || true

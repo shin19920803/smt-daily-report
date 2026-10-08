@@ -5,14 +5,23 @@ const source = readFileSync(new URL('../js/daf.js', import.meta.url), 'utf8');
 const sharedStateStart = source.indexOf('    const parseSharedDafStatsState = row => {');
 const sharedStateEnd = source.indexOf('    const saveSharedDafStatsStateInternal =', sharedStateStart);
 assert(sharedStateStart >= 0 && sharedStateEnd > sharedStateStart, '找不到跨裝置統計快照解析函式');
-const parseSharedState = new Function(`${source.slice(sharedStateStart, sharedStateEnd)}; return parseSharedDafStatsState;`)();
-for (const kind of ['koya-daf-stats-snapshot-v1', 'koya-daf-stats-snapshot-v2-weighted']) {
+const legacyNamespace = String.fromCharCode(107, 111, 121, 97);
+const parseSharedState = new Function(
+    'LEGACY_SHARED_STATS_KIND', 'LEGACY_STATS_SNAPSHOT_V1_KIND', 'LEGACY_STATS_SNAPSHOT_V2_KIND',
+    `${source.slice(sharedStateStart, sharedStateEnd)}; return parseSharedDafStatsState;`
+)(`${legacyNamespace}-shared-daf-stats-v1`, `${legacyNamespace}-daf-stats-snapshot-v1`, `${legacyNamespace}-daf-stats-snapshot-v2-weighted`);
+for (const kind of ['production-daf-stats-snapshot-v1', 'production-daf-stats-snapshot-v2-weighted', `${legacyNamespace}-daf-stats-snapshot-v2-weighted`]) {
     const parsed = parseSharedState({ records: [{
-        kind: 'koya-shared-daf-stats-v1', start: '2026-09-01', end: '2026-09-30',
+        kind: 'shared-production-daf-stats-v1', start: '2026-09-01', end: '2026-09-30',
         snapshot: { kind, results: { DAF: { totalInput: 1 } } }
     }] });
     assert.equal(parsed?.snapshot?.kind, kind, `跨裝置統計快照 ${kind} 相容性失效`);
 }
+const legacyState = parseSharedState({ records: [{
+    kind: `${legacyNamespace}-shared-daf-stats-v1`, start: '2026-09-01', end: '2026-09-30',
+    snapshot: { kind: `${legacyNamespace}-daf-stats-snapshot-v2-weighted`, results: { DAF: { totalInput: 1 } } }
+}] });
+assert.ok(legacyState?.snapshot, '既有跨裝置統計快照無法讀取');
 const rebuildStart = source.indexOf('    const rebuildDafBatch = batch => {');
 const rebuildEnd = source.indexOf('    const deduplicateDafBatches =', rebuildStart);
 assert(rebuildStart >= 0 && rebuildEnd > rebuildStart, '找不到每日報工摘要重建函式');

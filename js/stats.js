@@ -2,7 +2,7 @@ window.SMT = window.SMT || {};
 SMT.stats = function (ctx) {
         const { toast, loading, currentTab, fpyTargets, currentLine, currentLineMeta } = ctx;
 
-        const yesterdayValue = window.koyaShiftDate(window.koyaTodayDate(), -1);
+        const yesterdayValue = window.shiftDateByDays(window.getTaiwanDate(), -1);
         const statsFilter = ref({ start: yesterdayValue, end: yesterdayValue, modelId: 'all', woId: 'all' });
         const statsResult = ref(null);
         let smtStatsDataCache = null;
@@ -68,7 +68,7 @@ SMT.stats = function (ctx) {
         const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
         const quickRange = (mode, offset) => {
-            const now = new Date(`${window.koyaTodayDate()}T00:00:00`);
+            const now = new Date(`${window.getTaiwanDate()}T00:00:00`);
             if (mode === 'day') {
                 const d = new Date(now); d.setDate(d.getDate() + offset);
                 return { start: d, end: d };
@@ -248,9 +248,9 @@ SMT.stats = function (ctx) {
         });
         const loadSmtStatsData = async (force = false) => {
             if (!force && smtStatsDataCache) return smtStatsDataCache;
-            if (window.koyaFetchCachedJson) {
+            if (window.fetchCachedJson) {
                 try {
-                    const data = await window.koyaFetchCachedJson('/api/smt-data', { force });
+                    const data = await window.fetchCachedJson('/api/smt-data', { force });
                     if (Array.isArray(data?.production) && Array.isArray(data?.fpy)) {
                         smtStatsDataCache = data;
                         return data;
@@ -512,7 +512,7 @@ SMT.stats = function (ctx) {
                 ];
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(crossData), "交叉分析");
 
-                XLSX.writeFile(wb, `KOYA_${currentLine.value}_Full_Report_${window.koyaTodayDate()}.xlsx`);
+                XLSX.writeFile(wb, `Production_${currentLine.value}_Full_Report_${window.getTaiwanDate()}.xlsx`);
                 toast("完整報表已導出");
             } catch(e) { toast("導出失敗: " + e.message, "error"); } finally { loading.value = false; }
         };

@@ -27,10 +27,10 @@ migrateLegacyStorageKeys();
 
 const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
-const CACHE_SERVICE_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
-window.DATA_CACHE_URL = `https://${CACHE_SERVICE_NAMESPACE}-data-cache.shin19920803.workers.dev`;
+const LEGACY_DATA_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
+window.DATA_CACHE_URL = 'https://production-data-cache.shin19920803.workers.dev';
 const SHARED_STATS_STATE_ID = '__shared_production_daf_stats_state_v1__';
-const LEGACY_SHARED_STATS_STATE_ID = `__${CACHE_SERVICE_NAMESPACE}_shared_daf_stats_state_v1__`;
+const LEGACY_SHARED_STATS_STATE_ID = `__${LEGACY_DATA_NAMESPACE}_shared_daf_stats_state_v1__`;
 
 const TAIWAN_TIME_ZONE = 'Asia/Taipei';
 const getTaiwanDateParts = value => {

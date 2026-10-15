@@ -3,6 +3,8 @@
 \ir ../supabase/daf_historical_compaction.sql
 \ir ../supabase/daf_candidate_payload_slimming.sql
 
+select public.daf_latest_seven_production_days_cutoff()::text as test_retention_cutoff \gset
+
 create temp table reclaim_baseline as
 select line, dashboard_digest
 from public.daf_preview_log_compaction('9999-12-31');
@@ -10,17 +12,17 @@ create temp table reclaim_summaries as
 select line, md5(string_agg(md5((to_jsonb(b) - 'records')::text), '' order by id)) digest
 from public.daf_log_batches b group by line;
 
-select public.daf_activate_14_day_candidate_retention();
+select public.daf_activate_seven_production_days_retention();
 select format('select public.daf_compact_expired_log_batch(%L::date, 5000);',
-              (now() at time zone 'Asia/Taipei')::date - 14)
+              :'test_retention_cutoff'::date)
 from generate_series(1, (
     select (count(*) / 5000 + 2)::integer from public.daf_log_candidates
     where public.daf_is_valid_iso_date(report_date)
-      and report_date < ((now() at time zone 'Asia/Taipei')::date - 14)::text
+      and report_date < :'test_retention_cutoff'
 ))
 \gexec
 select format('select public.daf_strip_expired_log_raw_batch(%L::date, 1000);',
-              (now() at time zone 'Asia/Taipei')::date + 1)
+              :'test_retention_cutoff'::date)
 from generate_series(1, (
     select (count(*) / 1000 + 2)::integer from public.daf_log_candidates
     where record_json ? 'raw'
@@ -82,7 +84,8 @@ $$;
 select public.daf_begin_space_reclamation();
 do $$
 begin
-    if not exists (select 1 from public.daf_log_compact_facts) then
+    if not exists (select 1 from public.daf_log_compact_facts)
+       and not exists (select 1 from public.daf_log_compact_groups) then
         raise exception 'Historical reads became empty during maintenance';
     end if;
     begin

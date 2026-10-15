@@ -4,6 +4,7 @@
 \ir ../supabase/daf_staged_imports.sql
 \ir ../supabase/daf_historical_compaction.sql
 \ir ../supabase/daf_candidate_payload_slimming.sql
+\ir ../supabase/daf_aggregate_history.sql
 -- Local fixture substitutes for pg_cron; never install these on Supabase.
 create schema cron;
 create table cron.job(jobid bigserial primary key,jobname text,schedule text,command text);
@@ -75,6 +76,7 @@ begin
     perform public.daf_start_log_import(v_id,'cleanup-test.xlsx',v_metadata,2);
     perform public.daf_stage_log_import_chunk(v_id,'DAF',0,'inactive',v_records);
     update public.daf_log_import_jobs set last_activity_at=now()-interval '25 hours' where id=v_id;
+    update public.daf_log_import_chunks set created_at=now()-interval '25 hours' where job_id=v_id;
     perform public.daf_prune_failed_log_imports();
     if exists(select 1 from public.daf_log_candidates where job_id=v_id) then
         raise exception 'inactive upload not cleaned'; end if;

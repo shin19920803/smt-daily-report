@@ -156,13 +156,15 @@ create table if not exists public.daf_log_compaction_state (
     id text primary key check (id = 'current'),
     cutoff_date date not null,
     raw_cutoff_date date,
-    candidate_retention_days smallint not null default 30 check (candidate_retention_days between 1 and 365),
+    candidate_retention_days smallint not null default 7 check (candidate_retention_days between 1 and 365),
     updated_at timestamptz not null default now()
 );
 alter table public.daf_log_compaction_state add column if not exists raw_cutoff_date date;
 alter table public.daf_log_compaction_state
-    add column if not exists candidate_retention_days smallint not null default 30
+    add column if not exists candidate_retention_days smallint not null default 7
     check (candidate_retention_days between 1 and 365);
+alter table public.daf_log_compaction_state
+    alter column candidate_retention_days set default 7;
 alter table public.daf_log_compaction_state enable row level security;
 revoke all on public.daf_log_compaction_state from public, anon, authenticated;
 
@@ -188,36 +190,8 @@ security definer
 set search_path = public
 set statement_timeout = '30s'
 as $$
-declare
-    v_line text;
-    v_cutoff date := (now() at time zone 'Asia/Taipei')::date - 14;
-    v_receiving integer;
 begin
-    for v_line in
-        select line from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
-        order by line
-    loop
-        perform pg_advisory_xact_lock(hashtextextended(v_line, 92742));
-    end loop;
-
-    select count(*)::integer into v_receiving
-    from public.daf_log_import_jobs where status = 'receiving';
-    if v_receiving > 0 then
-        raise exception '目前有 % 個上傳工作進行中；14 天保留政策尚未啟用，請待上傳完成後重試', v_receiving;
-    end if;
-
-    insert into public.daf_log_compaction_state(id, cutoff_date, candidate_retention_days)
-    values ('current', v_cutoff, 14)
-    on conflict (id) do update
-       set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
-           candidate_retention_days = 14,
-           updated_at = now();
-
-    return jsonb_build_object(
-        'candidate_retention_days', 14,
-        'cutoff_date', (select cutoff_date from public.daf_log_compaction_state where id = 'current'),
-        'updated_at', (select updated_at from public.daf_log_compaction_state where id = 'current')
-    );
+    return public.daf_activate_seven_production_days_retention();
 end;
 $$;
 revoke all on function public.daf_activate_14_day_candidate_retention() from public, anon, authenticated;
@@ -373,12 +347,9 @@ set search_path = public
 stable
 as $$
     with bounds as (
-        select greatest(
-                   coalesce(s.cutoff_date,
-                       (now() at time zone 'Asia/Taipei')::date - coalesce(s.candidate_retention_days, 30)),
-                   (now() at time zone 'Asia/Taipei')::date - coalesce(s.candidate_retention_days, 30)
-               )::date as archive_cutoff,
-               greatest(coalesce(s.raw_cutoff_date, p_cutoff), p_cutoff)::date as raw_cutoff
+        select coalesce(s.cutoff_date, date '0001-01-01')::date as archive_cutoff,
+               least(greatest(coalesce(s.raw_cutoff_date, p_cutoff), p_cutoff)::date,
+                     coalesce(p_cutoff, date '0001-01-01')) as raw_cutoff
         from (select 1) seed
         left join public.daf_log_compaction_state s on s.id = 'current'
     ), candidate_rows as (
@@ -464,7 +435,8 @@ declare
     v_allowed_cutoff date := (now() at time zone 'Asia/Taipei')::date + 1;
     v_archive_cutoff date;
     v_cutoff date;
-    v_retention_days integer;
+    v_retention_days integer := 7;
+    v_latest_production_cutoff date;
     v_candidate_count integer := 0;
     v_batch_count integer := 0;
     v_payload_bytes_saved bigint := 0;
@@ -486,24 +458,33 @@ begin
         perform pg_advisory_xact_lock(hashtextextended(v_lock_line, 92742));
     end loop;
 
-    select coalesce(candidate_retention_days, 30), cutoff_date
-      into v_retention_days, v_archive_cutoff
-      from public.daf_log_compaction_state where id = 'current';
-    if not found then
-        v_retention_days := 30;
-        v_archive_cutoff := (now() at time zone 'Asia/Taipei')::date - v_retention_days;
-    else
-        v_archive_cutoff := greatest(
-            v_archive_cutoff,
-            (now() at time zone 'Asia/Taipei')::date - v_retention_days
+    v_latest_production_cutoff := public.daf_latest_seven_production_days_cutoff();
+    if v_latest_production_cutoff is null then
+        return jsonb_build_object(
+            'raw_cutoff_date', null,
+            'archive_cutoff_date', null,
+            'stripped_candidates', 0,
+            'stripped_batch_summaries', 0,
+            'payload_bytes_saved', 0,
+            'done', true,
+            'deferred_reason', '每站尚未累積七個生產日期'
         );
     end if;
+    -- Never strip raw data from any of the seven latest production dates,
+    -- even if an older caller or persisted watermark requests a later cutoff.
+    v_cutoff := least(p_cutoff, v_latest_production_cutoff);
+    select cutoff_date into v_archive_cutoff
+      from public.daf_log_compaction_state where id = 'current';
+    v_archive_cutoff := greatest(coalesce(v_archive_cutoff, v_latest_production_cutoff), v_latest_production_cutoff);
     insert into public.daf_log_compaction_state(id, cutoff_date, raw_cutoff_date, candidate_retention_days)
-    values ('current', v_archive_cutoff, p_cutoff, v_retention_days)
+    values ('current', v_archive_cutoff, v_cutoff, v_retention_days)
     on conflict (id) do update
-       set raw_cutoff_date = greatest(coalesce(public.daf_log_compaction_state.raw_cutoff_date, excluded.raw_cutoff_date), excluded.raw_cutoff_date),
+       set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
+           candidate_retention_days = 7,
+           raw_cutoff_date = greatest(coalesce(public.daf_log_compaction_state.raw_cutoff_date, excluded.raw_cutoff_date), excluded.raw_cutoff_date),
            updated_at = now();
-    select least(greatest(coalesce(raw_cutoff_date, p_cutoff), p_cutoff), v_allowed_cutoff)
+    select least(greatest(coalesce(raw_cutoff_date, v_cutoff), v_cutoff),
+                 v_latest_production_cutoff, v_allowed_cutoff)
       into v_cutoff
       from public.daf_log_compaction_state where id = 'current';
 
@@ -625,7 +606,6 @@ set statement_timeout = '110s'
 as $$
 declare
     v_cutoff date;
-    v_retention_days integer;
     v_oldest_allowed_cutoff date;
     v_ids text[];
     v_expected_winners integer;
@@ -648,16 +628,16 @@ begin
         perform pg_advisory_xact_lock(hashtextextended(v_lock_line, 92742));
     end loop;
 
-    select coalesce(candidate_retention_days, 30), cutoff_date
-      into v_retention_days, v_cutoff
-      from public.daf_log_compaction_state where id = 'current';
-    if not found then
-        v_retention_days := 30;
-        v_cutoff := null;
+    select cutoff_date into v_cutoff
+    from public.daf_log_compaction_state where id = 'current';
+    v_oldest_allowed_cutoff := public.daf_latest_seven_production_days_cutoff();
+    if v_oldest_allowed_cutoff is null then
+        return jsonb_build_object('cutoff_date', v_cutoff, 'compacted', 0,
+            'removed_candidates', 0, 'deferred_unresolved_rows', 0,
+            'done', true, 'deferred_reason', '每站尚未累積七個生產日期');
     end if;
-    v_oldest_allowed_cutoff := (now() at time zone 'Asia/Taipei')::date - v_retention_days;
     if p_cutoff > v_oldest_allowed_cutoff then
-        raise exception '封存截止日必須至少早於今天 % 天（最晚可選 %）', v_retention_days, v_oldest_allowed_cutoff;
+        raise exception '封存截止日不可晚於各製程第七個最新生產日期（最晚可選 %）', v_oldest_allowed_cutoff;
     end if;
     v_cutoff := greatest(coalesce(v_cutoff, p_cutoff), p_cutoff);
 
@@ -685,7 +665,7 @@ begin
     end if;
 
     insert into public.daf_log_compaction_state(id, cutoff_date, candidate_retention_days)
-    values ('current', v_cutoff, v_retention_days)
+    values ('current', v_cutoff, 7)
     on conflict (id) do update
        set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
            updated_at = now();
@@ -873,21 +853,24 @@ declare
     v_reference_rows integer;
     v_compaction jsonb;
     v_raw_retention jsonb;
-    v_retention_days integer;
+    v_cutoff date;
+    v_superseded_candidates integer;
 begin
-    select coalesce(candidate_retention_days, 30) into v_retention_days
-    from public.daf_log_compaction_state where id = 'current';
-    if not found then v_retention_days := 30; end if;
     v_reference_rows := public.daf_prune_expired_machine_references(now());
-    v_compaction := public.daf_compact_expired_log_batch(
-        (now() at time zone 'Asia/Taipei')::date - v_retention_days, 5000
-    );
+    v_cutoff := public.daf_latest_seven_production_days_cutoff();
+    if v_cutoff is null then
+        v_compaction := jsonb_build_object('done', true, 'deferred_reason', '每站尚未累積七個生產日期');
+    else
+        v_compaction := public.daf_compact_expired_log_batch(v_cutoff, 5000);
+    end if;
+    v_superseded_candidates := public.daf_prune_superseded_log_candidates(5000);
     v_raw_retention := public.daf_strip_expired_log_raw_batch(
-        (now() at time zone 'Asia/Taipei')::date + 1, 1000
+        coalesce(v_cutoff, (now() at time zone 'Asia/Taipei')::date + 1), 1000
     );
     return jsonb_build_object(
         'deleted_machine_reference_rows', v_reference_rows,
         'compaction', v_compaction,
+        'deleted_superseded_candidates', v_superseded_candidates,
         'raw_retention', v_raw_retention
     );
 end;
@@ -1089,7 +1072,7 @@ begin
         from public.daf_log_compacted_files f
         where f.file_name = new.file_name
     ) then
-        raise exception '此檔案含有 14 天前已封存資料，不能覆蓋；請使用新檔名上傳未封存日期';
+        raise exception '此檔案含有已封存資料，不能覆蓋；請使用新檔名上傳未封存日期';
     end if;
     return new;
 end;
@@ -1143,7 +1126,7 @@ begin
         select 1 from public.daf_log_compacted_files f
         where f.line = old.line and f.file_name = old.file_name
     ) then
-        raise exception '此檔案含有 14 天前已封存資料，無法刪除或覆蓋';
+        raise exception '此檔案含有已封存資料，無法刪除或覆蓋';
     end if;
     return old;
 end;

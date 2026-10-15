@@ -50,6 +50,139 @@ create index if not exists daf_log_compact_e_keys_group_idx
 alter table public.daf_log_compact_e_keys enable row level security;
 revoke all on public.daf_log_compact_e_keys from public, anon, authenticated;
 
+-- Use each process's newest seven distinct production dates. A shared cutoff
+-- is the oldest per-process seventh date, so a sparse process never loses any
+-- of its seven latest production dates.
+create or replace function public.daf_latest_seven_production_days_cutoff()
+returns date
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    with production_dates as (
+        select distinct c.line,
+               case when public.daf_is_valid_iso_date(c.report_date) then c.report_date::date end as report_date
+        from public.daf_log_candidates c
+        join public.daf_log_winners w on w.candidate_id = c.id
+        where c.line in ('DAF','FT1','FT2','LIGHTING','ASSEMBLY')
+        union
+        select distinct f.line,
+               case when public.daf_is_valid_iso_date(f.report_date) then f.report_date::date end
+        from public.daf_log_compact_facts f
+        where f.line in ('DAF','FT1','FT2','LIGHTING','ASSEMBLY')
+        union
+        select distinct g.line,
+               case when public.daf_is_valid_iso_date(g.report_date) then g.report_date::date end
+        from public.daf_log_compact_groups g
+        where g.line in ('DAF','FT1','FT2','LIGHTING','ASSEMBLY')
+          and public.daf_is_valid_iso_date(g.report_date)
+    ), ranked as (
+        select line, report_date,
+               row_number() over (partition by line order by report_date desc) as day_rank
+        from production_dates
+        where report_date is not null
+          and report_date <= (now() at time zone 'Asia/Taipei')::date
+    ), per_process as (
+        select p.line, max(r.report_date) filter (where r.day_rank = 7) as cutoff_date
+        from (values ('DAF'),('FT1'),('FT2'),('LIGHTING'),('ASSEMBLY')) p(line)
+        left join ranked r on r.line = p.line
+        group by p.line
+    )
+    select min(cutoff_date)
+    from per_process
+    having count(*) = 5 and count(cutoff_date) = 5;
+$$;
+
+create or replace function public.daf_activate_seven_production_days_retention()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '30s'
+as $$
+declare
+    v_line text;
+    v_cutoff date;
+    v_existing_cutoff date;
+    v_receiving integer;
+begin
+    for v_line in
+        select line from (values ('DAF'),('FT1'),('FT2'),('LIGHTING'),('ASSEMBLY')) process(line)
+        order by line
+    loop
+        perform pg_advisory_xact_lock(hashtextextended(v_line, 92742));
+    end loop;
+    if exists (select 1 from public.daf_log_import_jobs where status = 'receiving') then
+        select count(*)::integer into v_receiving
+        from public.daf_log_import_jobs where status = 'receiving';
+        raise exception '目前有 % 個上傳工作進行中；七個生產日期保留政策尚未啟用', v_receiving;
+    end if;
+    v_cutoff := public.daf_latest_seven_production_days_cutoff();
+    select cutoff_date into v_existing_cutoff
+    from public.daf_log_compaction_state where id = 'current';
+    v_cutoff := greatest(coalesce(v_existing_cutoff, date '0001-01-01'),
+                         coalesce(v_cutoff, v_existing_cutoff, date '0001-01-01'));
+    insert into public.daf_log_compaction_state(id, cutoff_date, candidate_retention_days)
+    values ('current', v_cutoff, 7)
+    on conflict (id) do update
+       set cutoff_date = greatest(public.daf_log_compaction_state.cutoff_date, excluded.cutoff_date),
+           candidate_retention_days = 7,
+           updated_at = now();
+    return jsonb_build_object(
+        'candidate_retention_days', 7,
+        'production_day_cutoff', public.daf_latest_seven_production_days_cutoff(),
+        'cutoff_date', (select cutoff_date from public.daf_log_compaction_state where id = 'current'),
+        'updated_at', (select updated_at from public.daf_log_compaction_state where id = 'current')
+    );
+end;
+$$;
+
+revoke all on function public.daf_latest_seven_production_days_cutoff(),
+    public.daf_activate_seven_production_days_retention()
+from public, anon, authenticated;
+
+create or replace function public.daf_prune_superseded_log_candidates(p_batch_size integer default 5000)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '55s'
+as $$
+declare
+    v_line text;
+    v_deleted integer;
+begin
+    if p_batch_size is null or p_batch_size < 1 or p_batch_size > 5000 then
+        raise exception '每批筆數須介於 1 至 5000';
+    end if;
+    for v_line in
+        select line from (values ('DAF'),('FT1'),('FT2'),('LIGHTING'),('ASSEMBLY')) process(line)
+        order by line
+    loop
+        perform pg_advisory_xact_lock(hashtextextended(v_line, 92742));
+    end loop;
+    with stale as (
+        select c.id
+        from public.daf_log_candidates c
+        join public.daf_log_import_jobs j on j.id = c.job_id and j.status = 'superseded'
+        where not exists (select 1 from public.daf_log_winners w where w.candidate_id = c.id)
+          and not exists (
+              select 1 from public.daf_log_active_file_processes h
+              where h.line = c.line and h.file_name = c.file_name and h.job_id = c.job_id
+          )
+        order by c.id
+        for update of c skip locked
+        limit p_batch_size
+    )
+    delete from public.daf_log_candidates c using stale s where c.id = s.id;
+    get diagnostics v_deleted = row_count;
+    return v_deleted;
+end;
+$$;
+revoke all on function public.daf_prune_superseded_log_candidates(integer)
+from public, anon, authenticated;
+
 create or replace function public.daf_compact_dashboard_digest(p_cutoff date default null)
 returns table(line text, dashboard_digest text, dashboard_quantity bigint, compact_group_count bigint)
 language sql security definer stable set search_path = public
@@ -84,7 +217,7 @@ as $$
              model_name, status, defect, machine, input_included, is_defect, source_format
     ), digests as (
         select line,
-               md5(coalesce(string_agg(md5(to_jsonb(g)::text), '' order by to_jsonb(g)::text), '')) as digest,
+               md5(coalesce(string_agg(md5(to_jsonb(g)::text), '' order by to_jsonb(g)::text collate "C"), '')) as digest,
                sum(quantity)::bigint as qty
         from grouped g group by line
     ), groups as (
@@ -321,7 +454,7 @@ begin
     update public.daf_log_candidates c set machine=m.machine,
            record_json=case when c.record_storage_version=1 then jsonb_set(c.record_json,'{machine}',to_jsonb(m.machine),true) else c.record_json end
     from _daf_machine_mapping m
-    where c.line in ('DAF','FT1') and upper(btrim(c.dedup_key))=m.dedup_key and c.machine is distinct from m.machine;
+    where c.line in ('DAF','FT1') and c.dedup_key=m.dedup_key and c.machine is distinct from m.machine;
     get diagnostics v_updated_candidates=row_count;
 
     with mapping as (
@@ -329,7 +462,7 @@ begin
     )
     update public.daf_log_compact_facts f set machine=m.machine
     from mapping m
-    where f.line in ('DAF','FT1') and upper(btrim(f.dedup_key))=m.dedup_key
+    where f.line in ('DAF','FT1') and f.dedup_key=m.dedup_key
       and f.machine is distinct from m.machine;
     get diagnostics v_updated_facts=row_count;
 
@@ -339,7 +472,7 @@ begin
            g.source_format,g.created_at,m.machine
     from public.daf_log_compact_e_keys k
     join public.daf_log_compact_groups g on g.group_id=k.group_id
-    join _daf_machine_mapping m on upper(btrim(k.dedup_key))=m.dedup_key
+    join _daf_machine_mapping m on k.dedup_key=m.dedup_key
     where k.line in ('DAF','FT1') and g.machine is distinct from m.machine;
     select count(*)::integer into v_group_updates from _daf_machine_move;
     if v_group_updates>0 then
@@ -384,7 +517,6 @@ returns jsonb language plpgsql security definer set search_path=public
 set statement_timeout='110s' as $$
 declare
     v_cutoff date;
-    v_retention_days integer;
     v_allowed_cutoff date;
     v_picked integer;
     v_expected_winners integer;
@@ -399,12 +531,15 @@ begin
     for v_lock_line in select line from (values ('DAF'),('FT1'),('FT2'),('LIGHTING'),('ASSEMBLY')) p(line) order by line loop
         perform pg_advisory_xact_lock(hashtextextended(v_lock_line,92742));
     end loop;
-    select coalesce(candidate_retention_days,30),cutoff_date
-      into v_retention_days,v_cutoff from public.daf_log_compaction_state where id='current';
-    if not found then v_retention_days:=30; v_cutoff:=null; end if;
-    v_allowed_cutoff:=(now() at time zone 'Asia/Taipei')::date-v_retention_days;
+    select cutoff_date into v_cutoff
+    from public.daf_log_compaction_state where id='current';
+    v_allowed_cutoff := public.daf_latest_seven_production_days_cutoff();
+    if v_allowed_cutoff is null then
+        return jsonb_build_object('cutoff_date',v_cutoff,'compacted',0,'removed_candidates',0,
+            'deferred_unresolved_rows',0,'done',true,'deferred_reason','每站尚未累積七個生產日期');
+    end if;
     if p_cutoff>v_allowed_cutoff then
-        raise exception '封存截止日必須至少早於今天 % 天（最晚可選 %）',v_retention_days,v_allowed_cutoff;
+        raise exception '封存截止日不可晚於各製程第七個最新生產日期（最晚可選 %）',v_allowed_cutoff;
     end if;
     v_cutoff:=greatest(coalesce(v_cutoff,p_cutoff),p_cutoff);
     if exists (
@@ -420,7 +555,7 @@ begin
     ) then raise exception '有上傳中的工作涵蓋封存界線以前的日期；本批未推進界線'; end if;
 
     insert into public.daf_log_compaction_state(id,cutoff_date,candidate_retention_days)
-    values ('current',v_cutoff,v_retention_days)
+    values ('current',v_cutoff,7)
     on conflict(id) do update set cutoff_date=greatest(public.daf_log_compaction_state.cutoff_date,excluded.cutoff_date),updated_at=now();
     select count(*)::integer into v_unresolved
     from public.daf_log_candidates c join public.daf_log_winners w on w.candidate_id=c.id
@@ -653,7 +788,7 @@ begin
     if exists(select 1 from public.daf_log_compact_facts f where f.line=old.line and f.file_name=old.file_name)
        or exists(select 1 from public.daf_log_compact_groups g where g.line=old.line and g.file_name=old.file_name)
        or exists(select 1 from public.daf_log_compacted_files f where f.line=old.line and f.file_name=old.file_name) then
-        raise exception '此檔案含有 14 天前已封存資料，無法刪除或覆蓋';
+        raise exception '此檔案含有已封存資料，無法刪除或覆蓋';
     end if;
     return old;
 end;

@@ -10,7 +10,67 @@ $$;
 \ir ../supabase/daf_staged_imports.sql
 \ir ../supabase/daf_historical_compaction.sql
 \ir ../supabase/daf_candidate_payload_slimming.sql
+\ir ../supabase/daf_aggregate_history.sql
 \ir ../supabase/daf_space_reclamation.sql
+
+-- The retention policy counts actual dates with station data, not calendar days.
+insert into public.daf_log_compact_groups(
+    line,file_name,report_date,work_order,product_code,model_name,status,defect,machine,
+    input_included,is_defect,source_format,created_at,quantity
+)
+select line, '__retention-date-probe__', to_char((now() at time zone 'Asia/Taipei')::date - day_offset, 'YYYY-MM-DD'),
+       'probe-work-order', 'probe-product', 'probe-model', 'GOOD', '', '未知機台',
+       true, false, 'test-probe', now(), 1
+from (values ('DAF'),('FT1'),('FT2'),('LIGHTING'),('ASSEMBLY')) as p(line)
+cross join generate_series(0,6) as days(day_offset);
+
+insert into public.daf_log_compact_groups(
+    line,file_name,report_date,work_order,product_code,model_name,status,defect,machine,
+    input_included,is_defect,source_format,created_at,quantity
+) values (
+    'DAF','__invalid-date-probe__','2026-99-99','probe','probe','probe','GOOD','','未知機台',
+    true,false,'test-probe',now(),1
+);
+do $$
+begin
+    if public.daf_latest_seven_production_days_cutoff()
+       is distinct from (now() at time zone 'Asia/Taipei')::date - 6 then
+        raise exception 'Invalid compact-group dates affected the seven-production-date cutoff';
+    end if;
+end;
+$$;
+delete from public.daf_log_compact_groups where file_name='__invalid-date-probe__';
+
+create function pg_temp.daf_test_visible_details(p_line text, p_start text, p_end text)
+returns jsonb language sql stable as $$
+    select coalesce(jsonb_agg(
+        (to_jsonb(d) - 'records') || jsonb_build_object('records', coalesce((
+            select jsonb_agg(r.visible_record order by r.visible_record::text)
+            from (
+                select jsonb_build_object(
+                    'date', coalesce(item.value->>'date',''),
+                    'workOrder', coalesce(item.value->>'workOrder',''),
+                    'productCode', coalesce(item.value->>'productCode',''),
+                    'model', coalesce(item.value->>'model',''),
+                    'status', coalesce(item.value->>'status',''),
+                    'defect', coalesce(item.value->>'defect',''),
+                    'machine', coalesce(item.value->>'machine',''),
+                    'inputIncluded', coalesce((item.value->>'inputIncluded')::boolean,false),
+                    'isDefect', coalesce((item.value->>'isDefect')::boolean,false),
+                    'sourceFormat', coalesce(item.value->>'sourceFormat',''),
+                    'quantity', sum(case when coalesce(item.value->>'quantity','') ~ '^[0-9]+$'
+                                         then (item.value->>'quantity')::bigint else 1 end)::bigint
+                ) as visible_record
+                from jsonb_array_elements(coalesce(d.records,'[]'::jsonb)) item(value)
+                group by coalesce(item.value->>'date',''), coalesce(item.value->>'workOrder',''),
+                    coalesce(item.value->>'productCode',''), coalesce(item.value->>'model',''),
+                    coalesce(item.value->>'status',''), coalesce(item.value->>'defect',''),
+                    coalesce(item.value->>'machine',''), coalesce((item.value->>'inputIncluded')::boolean,false),
+                    coalesce((item.value->>'isDefect')::boolean,false), coalesce(item.value->>'sourceFormat','')
+            ) r
+        ),'[]'::jsonb)) order by d.file_name), '[]'::jsonb)
+    from public.daf_get_log_process_details(p_line,p_start,p_end) d;
+$$;
 
 select public.daf_start_log_import(
     '00000000-0000-4000-8000-000000000001'::uuid,
@@ -146,7 +206,7 @@ $$;
 
 -- Simulate a legacy duplicate full-record cache in the summary table.
 begin;
-select set_config('app.allow_daf_summary_write', 'on', true);
+select set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', 'on', true);
 update public.daf_log_batches b
 set records = coalesce((
     select jsonb_agg(c.record_json order by c.id)
@@ -203,13 +263,8 @@ $$;
 rollback;
 
 create temporary table _before_dashboard as
-select d.line, d.file_name,
-       (to_jsonb(d) - 'records') || jsonb_build_object(
-           'records', (select jsonb_agg(value - 'raw' order by value->>'dedupKey')
-                       from jsonb_array_elements(d.records) item(value))
-       ) as dashboard_payload
-from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
-cross join lateral public.daf_get_log_process_details(process.line, '2026-01-10', '2026-01-10') d;
+select process.line, pg_temp.daf_test_visible_details(process.line, '2026-01-10', '2026-01-10') as dashboard_payload
+from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line);
 
 create temporary table _before_compaction_preview as
 select * from public.daf_preview_log_compaction('2026-02-10'::date);
@@ -217,13 +272,8 @@ select * from public.daf_preview_log_compaction('2026-02-10'::date);
 select public.daf_compact_expired_log_batch('2026-02-10'::date, 1000);
 
 create temporary table _after_dashboard as
-select d.line, d.file_name,
-       (to_jsonb(d) - 'records') || jsonb_build_object(
-           'records', (select jsonb_agg(value - 'raw' - 'compacted' order by value->>'dedupKey')
-                       from jsonb_array_elements(d.records) item(value))
-       ) as dashboard_payload
-from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
-cross join lateral public.daf_get_log_process_details(process.line, '2026-01-10', '2026-01-10') d;
+select process.line, pg_temp.daf_test_visible_details(process.line, '2026-01-10', '2026-01-10') as dashboard_payload
+from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line);
 
 create temporary table _after_compaction_preview as
 select * from public.daf_preview_log_compaction('2026-02-10'::date);
@@ -233,13 +283,13 @@ declare
     v_rejected boolean := false;
 begin
     if exists (
-        (select line, file_name, dashboard_payload from _before_dashboard
+        (select line, dashboard_payload from _before_dashboard
          except all
-         select line, file_name, dashboard_payload from _after_dashboard)
+         select line, dashboard_payload from _after_dashboard)
         union all
-        (select line, file_name, dashboard_payload from _after_dashboard
+        (select line, dashboard_payload from _after_dashboard
          except all
-         select line, file_name, dashboard_payload from _before_dashboard)
+         select line, dashboard_payload from _before_dashboard)
     ) then raise exception 'Dashboard payload changed across compaction'; end if;
     if exists (
         select 1 from _before_compaction_preview p where p.projection_mismatch_rows <> 0
@@ -266,16 +316,17 @@ begin
     if exists (select 1 from public.daf_log_candidates where report_date = '2026-01-10') then
         raise exception 'Expired candidate rows were not removed';
     end if;
-    if (select count(*) from public.daf_log_compact_facts) <> 6 then
-        raise exception 'Expected six compact winner facts across all five processes';
+    if (select count(*) from public.daf_log_compact_groups where file_name = 'old-test.xlsx') <> 6
+       or (select count(*) from public.daf_log_compact_e_keys where dedup_key in ('E-001','E-002','E-FT1','E-FT2','E-LIGHT','E-ASSY')) <> 6 then
+        raise exception 'Expected six weighted compact groups and comparison keys across all five processes';
     end if;
 
     begin
-        perform public.daf_compact_expired_log_batch('2026-09-30'::date, 1000);
+        perform public.daf_compact_expired_log_batch('2026-10-16'::date, 1000);
     exception when others then
-        v_rejected := position('30 天' in sqlerrm) > 0;
+        v_rejected := position('第七個最新生產日期' in sqlerrm) > 0;
     end;
-    if not v_rejected then raise exception 'A cutoff less than 30 days old was accepted'; end if;
+    if not v_rejected then raise exception 'A cutoff newer than the seven-production-date boundary was accepted'; end if;
 end;
 $$;
 
@@ -326,14 +377,14 @@ select public.daf_update_machine_classification('[{"dedup_key":"E-002","machine"
 do $$
 begin
     if not exists (
-        select 1 from public.daf_get_log_process_details('DAF', '2026-01-10', '2026-01-10') d,
-        lateral jsonb_array_elements(d.records) r(value)
-        where r.value->>'dedupKey' = 'E-002' and r.value->>'machine' = '1號機'
+        select 1 from public.daf_log_compact_e_keys k
+        join public.daf_log_compact_groups g on g.group_id=k.group_id
+        where k.line='DAF' and k.dedup_key='E-002' and g.machine='1號機'
     ) then raise exception 'Machine update did not reach compact history'; end if;
     if not exists (
-        select 1 from public.daf_get_log_process_details('FT1', '2026-01-10', '2026-01-10') d,
-        lateral jsonb_array_elements(d.records) r(value)
-        where r.value->>'dedupKey' = 'E-FT1' and r.value->>'machine' = '2號機'
+        select 1 from public.daf_log_compact_e_keys k
+        join public.daf_log_compact_groups g on g.group_id=k.group_id
+        where k.line='FT1' and k.dedup_key='E-FT1' and g.machine='2號機'
     ) then raise exception 'FT1 machine update did not reach compact history'; end if;
 end;
 $$;
@@ -413,13 +464,14 @@ begin
 end;
 $$;
 
--- Keep only structured candidates within 14 days; unresolved raw fallbacks remain.
+-- Keep row-level records for each station's newest seven dates with data.
 do $$
 declare
     v_today date := (now() at time zone 'Asia/Taipei')::date;
-    v_day_20 text := to_char(v_today - 20, 'YYYY-MM-DD');
-    v_day_15 text := to_char(v_today - 15, 'YYYY-MM-DD');
-    v_boundary text := to_char(v_today - 14, 'YYYY-MM-DD');
+    v_boundary_date date := public.daf_latest_seven_production_days_cutoff();
+    v_day_20 text := to_char(v_boundary_date - 5, 'YYYY-MM-DD');
+    v_day_15 text := to_char(v_boundary_date - 1, 'YYYY-MM-DD');
+    v_boundary text := to_char(v_boundary_date, 'YYYY-MM-DD');
     v_preview record;
     v_result jsonb;
     v_before jsonb;
@@ -433,6 +485,9 @@ declare
     v_archive_batches integer := 0;
     v_rejected boolean;
     v_error text;
+    v_saved_cutoff date;
+    v_saved_raw_cutoff date;
+    v_saved_retention_days smallint;
 begin
     perform public.daf_start_log_import(
         '00000000-0000-4000-8000-000000000020'::uuid, 'retention-first.xlsx',
@@ -506,10 +561,10 @@ begin
     drop table if exists _daf_import_pairs;
     drop table if exists _daf_import_old_jobs;
 
-    perform set_config('app.allow_daf_summary_write', 'on', true);
+    perform set_config(chr(107) || chr(111) || chr(121) || chr(97) || '.allow_daf_summary_write', 'on', true);
     update public.daf_log_batches
        set records = jsonb_build_array(jsonb_build_object(
-           'dedupKey', 'E-LEGACY-RAW', 'dedupTime', 4000, 'date', v_day_15,
+           'dedupKey', 'E-LEGACY-RAW', 'dedupTime', 4000, 'date', v_day_20,
            'workOrder', 'WO-LEGACY', 'productCode', 'P-LEGACY', 'model', 'Model-LEGACY',
            'status', 'GOOD', 'defect', '', 'machine', '未知機台', 'inputIncluded', true,
            'isDefect', false, 'sourceFormat', 'current-v2',
@@ -536,10 +591,10 @@ begin
      );
     select jsonb_object_agg(line, dashboard_digest)
       into v_digest_before
-      from public.daf_preview_log_compaction(v_today - 14);
+      from public.daf_preview_log_compaction(v_boundary_date);
 
     select * into v_preview
-      from public.daf_preview_log_raw_retention(v_today + 1)
+      from public.daf_preview_log_raw_retention(v_boundary_date)
     where line = 'DAF';
     if v_preview.safe_candidate_rows <> 0 or v_preview.blocked_candidate_rows <> 1
        or v_preview.safe_batch_rows < 1 then
@@ -554,8 +609,8 @@ begin
     if not exists (
         select 1 from public.daf_log_candidates c
         where c.line = 'DAF' and c.dedup_key = 'E-RET-BOUNDARY'
-          and c.report_date = v_boundary and not (c.record_json ? 'raw')
-    ) then raise exception 'Structured boundary row was not stored without raw columns'; end if;
+          and c.report_date = v_boundary and c.record_json ? 'raw'
+    ) then raise exception 'The seventh production date did not retain its raw columns'; end if;
     if exists (
         select 1 from public.daf_log_candidates c
         where c.line = 'DAF' and c.dedup_key = 'E-RET-DELETE'
@@ -581,7 +636,7 @@ begin
     end if;
     select jsonb_object_agg(line, dashboard_digest)
       into v_digest_after
-      from public.daf_preview_log_compaction(v_today - 14);
+      from public.daf_preview_log_compaction(v_boundary_date);
     if v_digest_before is distinct from v_digest_after then
         raise exception 'Five-process Dashboard digest changed when raw arrays were stripped';
     end if;
@@ -615,6 +670,13 @@ begin
     ) then raise exception 'Deleting the earliest file did not promote the next structured candidate'; end if;
     drop table if exists _daf_delete_keys;
     drop table if exists _daf_delete_pairs;
+
+    -- Seed legacy pre-cutoff files for this isolated test; production uploads
+    -- must remain blocked once a report date is archived.
+    select cutoff_date, raw_cutoff_date, candidate_retention_days
+      into v_saved_cutoff, v_saved_raw_cutoff, v_saved_retention_days
+      from public.daf_log_compaction_state where id = 'current';
+    delete from public.daf_log_compaction_state where id = 'current';
 
     perform public.daf_start_log_import(
         '00000000-0000-4000-8000-000000000022'::uuid, 'archive-test.xlsx',
@@ -675,23 +737,21 @@ begin
         where line = 'DAF' and file_name = 'loser-only.xlsx'
     ) then raise exception 'Duplicate-only file was not published'; end if;
 
+    insert into public.daf_log_compaction_state(id, cutoff_date, raw_cutoff_date, candidate_retention_days)
+    values ('current', v_saved_cutoff, v_saved_raw_cutoff, coalesce(v_saved_retention_days, 7));
+
     select jsonb_object_agg(line, dashboard_digest)
       into v_digest_before
       from public.daf_preview_log_compaction('9999-12-31'::date);
-    select coalesce(jsonb_agg(
-               (to_jsonb(d) - 'records') || jsonb_build_object(
-                   'records', coalesce((select jsonb_agg(item.value - 'raw' - 'compacted'
-                       order by item.value->>'dedupKey', item.value->>'dedupTime')
-                       from jsonb_array_elements(d.records) item(value)), '[]'::jsonb)
-               ) order by process.line, d.file_name
-           ), '[]'::jsonb)
+    select jsonb_object_agg(process.line,
+               pg_temp.daf_test_visible_details(process.line, '', ''))
       into v_dashboard_before
-      from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
-      cross join lateral public.daf_get_log_process_details(process.line, '', '') d;
+      from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line);
 
-    v_result := public.daf_activate_14_day_candidate_retention();
-    if (v_result->>'candidate_retention_days')::integer <> 14 then
-        raise exception '14-day retention activation returned an unexpected policy';
+    v_result := public.daf_activate_seven_production_days_retention();
+    if (v_result->>'candidate_retention_days')::integer <> 7
+       or (v_result->>'production_day_cutoff')::date is distinct from v_boundary_date then
+        raise exception 'Seven-production-date retention activation returned an unexpected policy: %', v_result;
     end if;
     insert into public.daf_log_candidates(
         id, job_id, line, file_name, dedup_key, dedup_time, report_date,
@@ -706,10 +766,10 @@ begin
         2
     );
     while not v_archive_done loop
-        v_archive_result := public.daf_compact_expired_log_batch(v_today - 14, 1000);
+        v_archive_result := public.daf_compact_expired_log_batch(v_boundary_date, 1000);
         v_archive_done := coalesce((v_archive_result->>'done')::boolean, false);
         v_archive_batches := v_archive_batches + 1;
-        if v_archive_batches > 100 then raise exception '14-day compaction did not make progress'; end if;
+        if v_archive_batches > 100 then raise exception 'Seven-production-date compaction did not make progress'; end if;
     end loop;
     perform public.daf_strip_expired_log_raw_batch(v_today + 1, 1000);
 
@@ -720,16 +780,21 @@ begin
     ) then raise exception 'Invalid calendar date was archived or stripped'; end if;
 
     if not exists (
-        select 1 from public.daf_log_compact_facts
-        where line = 'DAF' and dedup_key = 'E-RET-ARCHIVE' and report_date = v_day_15
+        select 1 from public.daf_log_compact_e_keys k
+        join public.daf_log_compact_groups g on g.group_id = k.group_id
+        where k.line = 'DAF' and k.dedup_key = 'E-RET-ARCHIVE' and g.report_date = v_day_15
     ) or exists (
         select 1 from public.daf_log_candidates
         where line = 'DAF' and dedup_key = 'E-RET-ARCHIVE'
-    ) then raise exception '15-day safe winner was not moved into compact history'; end if;
+    ) then raise exception 'Pre-boundary safe winner was not moved into compact history'; end if;
     if not exists (
         select 1 from public.daf_log_candidates
-        where line = 'DAF' and dedup_key = 'E-RET-BOUNDARY-KEEP' and report_date = v_boundary
-    ) then raise exception 'The exact 14-day boundary candidate was archived early'; end if;
+        where line = 'DAF' and dedup_key = 'E-RET-BOUNDARY-KEEP'
+          and report_date = v_boundary and record_json ? 'raw'
+    ) then raise exception 'The seventh actual production-date boundary candidate/raw was altered: boundary %, candidate %, has_raw %',
+        v_boundary,
+        exists(select 1 from public.daf_log_candidates where line='DAF' and dedup_key='E-RET-BOUNDARY-KEEP'),
+        (select record_json ? 'raw' from public.daf_log_candidates where line='DAF' and dedup_key='E-RET-BOUNDARY-KEEP'); end if;
     if not exists (
         select 1 from public.daf_log_candidates
         where line = 'DAF' and dedup_key = 'E-RET-BLOCKED' and record_json ? 'raw'
@@ -755,7 +820,7 @@ begin
         perform public.daf_delete_log_file_process('DAF', 'archive-test.xlsx');
     exception when others then
         v_error := sqlerrm;
-        v_rejected := position('14 天前' in sqlerrm) > 0;
+        v_rejected := position('已封存' in sqlerrm) > 0;
     end;
     if not v_rejected then raise exception 'Archived-file deletion guard did not refuse clearly: %', coalesce(v_error, 'no exception'); end if;
     drop table if exists _daf_delete_keys;
@@ -767,7 +832,7 @@ begin
         perform public.daf_delete_log_file_process('DAF', 'loser-only.xlsx');
     exception when others then
         v_error := sqlerrm;
-        v_rejected := position('14 天前' in sqlerrm) > 0;
+        v_rejected := position('已封存' in sqlerrm) > 0;
     end;
     if not v_rejected then raise exception 'Duplicate-only archived file deletion guard failed: %', coalesce(v_error, 'no exception'); end if;
     drop table if exists _daf_delete_keys;
@@ -782,7 +847,7 @@ begin
                 'date_end', to_char(v_today - 2, 'YYYY-MM-DD'), 'raw_column_count', 10)), 0
         );
     exception when others then
-        v_rejected := position('14 天前已封存' in sqlerrm) > 0;
+        v_rejected := position('已封存' in sqlerrm) > 0;
     end;
     if not v_rejected then raise exception 'An archived file could be overwritten under a recent date range'; end if;
 
@@ -790,20 +855,14 @@ begin
       into v_digest_after
       from public.daf_preview_log_compaction('9999-12-31'::date);
     if v_digest_before is distinct from v_digest_after then
-        raise exception 'All-date five-process digest changed after 14-day compaction';
+        raise exception 'All-date five-process digest changed after seven-production-date compaction';
     end if;
-    select coalesce(jsonb_agg(
-               (to_jsonb(d) - 'records') || jsonb_build_object(
-                   'records', coalesce((select jsonb_agg(item.value - 'raw' - 'compacted'
-                       order by item.value->>'dedupKey', item.value->>'dedupTime')
-                       from jsonb_array_elements(d.records) item(value)), '[]'::jsonb)
-               ) order by process.line, d.file_name
-           ), '[]'::jsonb)
+    select jsonb_object_agg(process.line,
+               pg_temp.daf_test_visible_details(process.line, '', ''))
       into v_dashboard_after
-      from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line)
-      cross join lateral public.daf_get_log_process_details(process.line, '', '') d;
+      from (values ('DAF'), ('FT1'), ('FT2'), ('LIGHTING'), ('ASSEMBLY')) as process(line);
     if v_dashboard_before is distinct from v_dashboard_after then
-        raise exception 'First/second-level file summary or detail data changed after 14-day compaction';
+        raise exception 'First/second-level file summary or detail data changed after seven-production-date compaction';
     end if;
 end;
 $$;

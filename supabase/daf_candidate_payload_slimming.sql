@@ -45,48 +45,75 @@ begin
 end;
 $$;
 
-create or replace function public.daf_try_slim_candidate_json(p_record jsonb, p_expected jsonb)
+create or replace function public.daf_try_slim_candidate_json(p_record jsonb, p_expected jsonb, p_cutoff date)
 returns jsonb
-language sql
+language plpgsql
 immutable
 set search_path = public
 as $$
-    select case
-        when jsonb_typeof(p_record) = 'object'
-         and jsonb_typeof(p_expected) = 'object'
-         and p_record ?& array[
+declare
+    v_report_date date;
+    v_result jsonb;
+begin
+    if jsonb_typeof(p_record) <> 'object'
+       or jsonb_typeof(p_expected) <> 'object'
+       or not (p_record ?& array[
         'dedupKey', 'dedupTime', 'date', 'workOrder', 'productCode', 'model',
         'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
-         ]
-         and p_expected ?& array[
+       ])
+       or not (p_expected ?& array[
         'dedupKey', 'dedupTime', 'date', 'workOrder', 'productCode', 'model',
         'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
-         ]
-         and p_record @> p_expected
-         and (
-             not (p_record ? 'raw')
-             or (
-                 jsonb_typeof(p_record->'raw') = 'array'
-                 and (
-                     nullif(btrim(coalesce(p_expected->>'productCode', '')), '') is not null
-                     or coalesce(p_record->'raw'->>(case when p_record->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 3 else 4 end), '') = ''
-                 )
-                 and (
-                     nullif(btrim(coalesce(p_expected->>'dedupKey', '')), '') is not null
-                     or coalesce(p_record->'raw'->>(case when p_record->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 4 else 5 end), '') = ''
-                 )
-                 and (
-                     nullif(btrim(coalesce(p_expected->>'dedupTime', '')), '') is not null
-                     or coalesce(p_record->'raw'->>(case when p_record->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 5 else 6 end), '') = ''
-                 )
-             )
-         )
-        then (p_record - array[
+       ])
+       or not (p_record @> p_expected) then
+        return null;
+    end if;
+
+    if p_record ? 'raw' and (
+        jsonb_typeof(p_record->'raw') is distinct from 'array'
+        or (
+            nullif(btrim(coalesce(p_expected->>'productCode', '')), '') is null
+            and coalesce(p_record->'raw'->>(case when p_expected->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 3 else 4 end), '') <> ''
+        )
+        or (
+            nullif(btrim(coalesce(p_expected->>'dedupKey', '')), '') is null
+            and coalesce(p_record->'raw'->>(case when p_expected->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 4 else 5 end), '') <> ''
+        )
+        or (
+            nullif(btrim(coalesce(p_expected->>'dedupTime', '')), '') is null
+            and coalesce(p_record->'raw'->>(case when p_expected->>'sourceFormat' = 'current-v2' or p_record->'raw'->>0 = 'FT1' then 5 else 6 end), '') <> ''
+        )
+    ) then
+        return null;
+    end if;
+
+    v_result := p_record - array[
             'dedupKey', 'dedupTime', 'date', 'workOrder', 'productCode', 'model',
             'status', 'defect', 'machine', 'inputIncluded', 'isDefect', 'sourceFormat'
-        ]) - 'raw'
-        else null
-    end;
+    ];
+    if p_record ? 'raw' and public.daf_is_valid_iso_date(p_expected->>'date') then
+        v_report_date := (p_expected->>'date')::date;
+        -- Keep raw source rows for the seven newest production dates. If a
+        -- cutoff cannot yet be established, retain raw instead of guessing.
+        if p_cutoff is not null and v_report_date < p_cutoff then
+            v_result := v_result - 'raw';
+        end if;
+    end if;
+    return v_result;
+end;
+$$;
+
+create or replace function public.daf_try_slim_candidate_json(p_record jsonb, p_expected jsonb)
+returns jsonb
+language plpgsql
+stable
+set search_path = public
+as $$
+begin
+    return public.daf_try_slim_candidate_json(
+        p_record, p_expected, public.daf_latest_seven_production_days_cutoff()
+    );
+end;
 $$;
 
 create or replace function public.daf_preview_candidate_slimming()
@@ -100,18 +127,23 @@ returns table (
     estimated_payload_savings_bytes bigint,
     raw_payload_bytes bigint
 )
-language sql
+language plpgsql
 security definer
 set search_path = public
 stable
 as $$
-    with evaluated as (
+begin
+    return query
+    with cutoff as materialized (
+        select public.daf_latest_seven_production_days_cutoff() as report_date_cutoff
+    ), evaluated as (
         select c.line, c.record_json,
                public.daf_try_slim_candidate_json(
-                   c.record_json, public.daf_candidate_canonical_json(c)
+                   c.record_json, public.daf_candidate_canonical_json(c), cutoff.report_date_cutoff
                ) as slim_json
         from public.daf_log_candidates c
         join public.daf_log_import_jobs j on j.id = c.job_id
+        cross join cutoff
         where c.record_storage_version = 1 and j.status <> 'receiving'
     )
     select e.line,
@@ -125,6 +157,7 @@ as $$
     from evaluated e
     group by e.line
     order by e.line;
+end;
 $$;
 
 create or replace function public.daf_slim_log_candidates_batch(p_batch_size integer default 500, p_after_id text default null)
@@ -135,6 +168,7 @@ set search_path = public
 set statement_timeout = '55s'
 as $$
 declare
+    v_cutoff date;
     v_scanned integer := 0;
     v_converted integer := 0;
     v_unmodified integer := 0;
@@ -146,6 +180,7 @@ begin
     if p_batch_size is null or p_batch_size < 1 or p_batch_size > 5000 then
         raise exception '每批筆數須介於 1 至 5000';
     end if;
+    v_cutoff := public.daf_latest_seven_production_days_cutoff();
 
     if to_regclass('pg_temp._daf_candidate_slim_batch') is null then
         create temporary table _daf_candidate_slim_batch (
@@ -167,7 +202,7 @@ begin
         with picked as materialized (
             select c.id, c.record_json, c.created_at,
                    public.daf_try_slim_candidate_json(
-                       c.record_json, public.daf_candidate_canonical_json(c)
+                       c.record_json, public.daf_candidate_canonical_json(c), v_cutoff
                    ) as slim_json,
                    c.record_storage_version as candidate_version
             from public.daf_log_candidates c
@@ -183,7 +218,7 @@ begin
         with picked as materialized (
             select c.id, c.record_json, c.created_at,
                    public.daf_try_slim_candidate_json(
-                       c.record_json, public.daf_candidate_canonical_json(c)
+                       c.record_json, public.daf_candidate_canonical_json(c), v_cutoff
                    ) as slim_json,
                    c.record_storage_version as candidate_version
             from public.daf_log_candidates c
@@ -220,7 +255,7 @@ begin
         join public.daf_log_candidates c on c.id = b.id
         where b.slim_json is not null
           and public.daf_candidate_to_record(c) is distinct from
-              (b.original_json - case when b.original_json ? 'raw' then array['raw']::text[] else array[]::text[] end)
+              (b.slim_json || public.daf_candidate_canonical_json(c))
     ) then
         raise exception '候選資料精簡後無法逐筆還原原 JSON，本批次已回復';
     end if;
@@ -258,6 +293,7 @@ set statement_timeout = '55s'
 as $$
 declare
     v_job public.daf_log_import_jobs%rowtype;
+    v_cutoff date;
     v_record_count integer;
     v_inserted boolean;
 begin
@@ -272,6 +308,7 @@ begin
     if jsonb_typeof(p_records) <> 'array' then raise exception 'records must be a JSON array'; end if;
     v_record_count := jsonb_array_length(p_records);
     if v_record_count > 500 then raise exception 'chunk exceeds 500 records'; end if;
+    v_cutoff := public.daf_latest_seven_production_days_cutoff();
 
     insert into public.daf_log_import_chunks(job_id, line, chunk_index, content_hash, row_count)
     values (p_job_id, p_line, p_chunk_index, p_content_hash, v_record_count)
@@ -318,7 +355,7 @@ begin
         from parsed
     ), compacted as (
         select expected.*,
-               public.daf_try_slim_candidate_json(original_json, expected_json) as slim_json
+               public.daf_try_slim_candidate_json(original_json, expected_json, v_cutoff) as slim_json
         from expected
     )
     insert into public.daf_log_candidates(
@@ -342,6 +379,7 @@ end;
 $$;
 
 revoke all on function public.daf_try_slim_candidate_json(jsonb, jsonb),
+    public.daf_try_slim_candidate_json(jsonb, jsonb, date),
     public.daf_preview_candidate_slimming(),
     public.daf_slim_log_candidates_batch(integer, text)
 from public, anon, authenticated;

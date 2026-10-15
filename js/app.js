@@ -1,6 +1,9 @@
 const app = createApp({
     setup() {
         const ctx = {};
+        ctx.authUser = window.DashboardAuth.user;
+        ctx.accessManagerOpen = ref(false);
+        ctx.logoutUser = window.DashboardAuth.logout;
         [SMT.core, SMT.orders, SMT.report, SMT.assembly, SMT.daf, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
             .forEach(mod => Object.assign(ctx, mod(ctx)));
 
@@ -61,4 +64,5 @@ app.component('break-list', {
     </div>`
 });
 
-app.mount('#app');
+app.component('account-manager', window.DashboardAuth.accountComponent);
+window.DashboardAuth.mountLogin(() => app.mount('#app'));

@@ -19,7 +19,19 @@
 </head>
 <body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
 
+<div id="login-root" v-cloak class="fixed inset-0 z-[150] bg-slate-100 flex items-center justify-center p-5">
+    <form @submit.prevent="login" class="bg-white border border-slate-200 rounded-2xl shadow-xl p-7 w-full max-w-sm space-y-5">
+        <div><div class="w-11 h-11 bg-blue-600 rounded-xl flex items-center justify-center text-white mb-4"><i class="fas fa-lock"></i></div><h1 class="text-2xl font-black text-slate-900">生產管理系統</h1><p class="mt-2 text-sm text-slate-500">請輸入帳號與密碼登入</p></div>
+        <p v-if="error" role="alert" class="text-sm text-red-700 bg-red-50 rounded-lg p-3">{{ error }}</p>
+        <label class="block text-sm font-bold text-slate-700">帳號<input v-model="username" required maxlength="64" :disabled="busy" autocomplete="username" autocapitalize="none" spellcheck="false" class="mt-2 border border-slate-300 rounded-lg p-3 w-full"></label>
+        <label class="block text-sm font-bold text-slate-700">密碼<input v-model="password" type="password" required maxlength="72" :disabled="busy" autocomplete="off" class="mt-2 border border-slate-300 rounded-lg p-3 w-full"></label>
+        <label class="flex items-center gap-2 text-sm text-slate-600"><input v-model="remember" type="checkbox" :disabled="busy">記住帳號</label>
+        <button type="submit" :disabled="busy" class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg p-3 w-full">{{ busy ? '登入中…' : '登入' }}</button>
+    </form>
+</div>
+
 <div id="app" v-cloak class="flex w-full h-full flex-col md:flex-row">
+    <account-manager v-if="accessManagerOpen && authUser?.isOwner" @close="accessManagerOpen=false"></account-manager>
 
     <!-- Toast Container -->
     <div class="toast-container">
@@ -74,7 +86,10 @@
                 <i class="fas fa-cog w-5 text-center mr-3 text-sm"></i> <span class="text-sm">基礎設定</span>
             </a>
         </nav>
-        <div class="h-20 border-t border-slate-700/50"></div>
+        <div class="border-t border-slate-700/50 p-3 text-sm text-slate-200 space-y-2">
+            <div class="truncate">{{ authUser?.displayName }} <span class="text-xs text-slate-400">{{ authUser?.username }}</span></div>
+            <div class="flex gap-3"><button v-if="authUser?.isOwner" @click="accessManagerOpen=true" class="text-blue-300 hover:text-white">使用者管理</button><button @click="logoutUser" class="text-slate-300 hover:text-white">登出</button></div>
+        </div>
     </aside>
 
     <!-- Main Content -->
@@ -1862,6 +1877,8 @@
                 <a v-if="!hideLineTools" @click="currentTab='equipment'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='equipment' ? 'text-teal-600 bg-teal-50' : 'text-gray-600'"><i class="fas fa-tools w-5 mr-2"></i>設備</a>
                 <a @click="currentTab='stats'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='stats' ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas fa-chart-bar w-5 mr-2"></i>數據統計</a>
                 <a v-if="!hideSettings" @click="currentTab='settings'; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentTab==='settings' ? 'text-gray-800 bg-gray-100' : 'text-gray-600'"><i class="fas fa-cog w-5 mr-2"></i>設定</a>
+                <a v-if="authUser?.isOwner" @click="accessManagerOpen=true; showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold text-blue-700"><i class="fas fa-users w-5 mr-2"></i>使用者管理</a>
+                <a @click="logoutUser" class="flex items-center px-4 py-2.5 text-sm font-bold text-gray-600"><i class="fas fa-sign-out-alt w-5 mr-2"></i>登出</a>
                 <div class="border-t border-gray-100 mt-2 pt-2">
                     <div class="px-4 pb-1 text-[10px] font-bold text-gray-400">切換產線</div>
                     <a v-for="l in visibleLines" :key="l.id" @click="switchLine(l.id); showMobileMore=false" class="flex items-center px-4 py-2.5 text-sm font-bold" :class="currentLine===l.id ? 'text-blue-600 bg-blue-50' : 'text-gray-600'"><i class="fas w-5 mr-2" :class="l.icon"></i>{{ l.label }}<i v-if="currentLine===l.id" class="fas fa-check ml-auto text-xs"></i></a>
@@ -1872,7 +1889,8 @@
 
 </div>
 
-<script src="js/supabase-client.js?v=20261008-neutral-entry-v1"></script>
+<script src="js/auth.js?v=20261015-access-v1"></script>
+<script src="js/supabase-client.js?v=20261015-access-v1"></script>
 <script src="js/core.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/orders.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/report.js?v=20261008-neutral-entry-v1"></script>
@@ -1885,6 +1903,6 @@
 <script src="js/stats.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/equipment.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/settings.js?v=20261008-neutral-entry-v1"></script>
-<script src="js/app.js?v=20261008-neutral-entry-v1"></script>
+<script src="js/app.js?v=20261015-access-v1"></script>
 </body>
 </html>

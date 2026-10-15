@@ -29,6 +29,7 @@ const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
 const LEGACY_DATA_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
 window.DATA_CACHE_URL = 'https://production-data-cache.shin19920803.workers.dev';
+window.DashboardAuth.configure({ url: SUPABASE_URL, key: SUPABASE_KEY, cacheUrl: window.DATA_CACHE_URL });
 const SHARED_STATS_STATE_ID = '__shared_production_daf_stats_state_v1__';
 const LEGACY_SHARED_STATS_STATE_ID = `__${LEGACY_DATA_NAMESPACE}_shared_daf_stats_state_v1__`;
 
@@ -132,4 +133,7 @@ const trackedFetch = async (input, init = {}) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response.ok && !isStatsStateWrite && !isDafMachineReferenceWrite && !isDafImportStagingRequest && !isDafMachineClassificationWrite) void window.invalidateDataCache();
     return response;
 };
-const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: trackedFetch } });
+const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: { fetch: trackedFetch },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+});

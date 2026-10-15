@@ -16,13 +16,13 @@ const VERSION_COLUMNS = 'id,file_name,uploaded_at,model_name,product_code,work_o
 const corsHeaders = {
     'Access-Control-Allow-Origin': APP_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type, apikey, authorization',
+    'Access-Control-Allow-Headers': 'content-type, apikey, authorization, x-dashboard-session',
     'Vary': 'Origin'
 };
 
 const jsonResponse = (body, status = 200, extraHeaders = {}) => new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8', ...extraHeaders }
+    headers: { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store', ...extraHeaders }
 });
 
 const supabaseHeaders = {
@@ -49,14 +49,14 @@ const updateDafDetailsGeneration = async (requestUrl, line) => {
     }));
 };
 
-const readSupabasePages = async (table, configure, pageSize = 1000) => {
+const readSupabasePages = async (table, configure, pageSize = 1000, headers = supabaseHeaders) => {
     const rows = [];
     for (let offset = 0; ; offset += pageSize) {
         const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
         configure(url);
         url.searchParams.set('offset', String(offset));
         url.searchParams.set('limit', String(pageSize));
-        const response = await fetch(url, { headers: supabaseHeaders });
+        const response = await fetch(url, { headers });
         if (!response.ok) return { error: new Response(await response.text(), { status: response.status, headers: corsHeaders }) };
         const page = await response.json();
         if (!Array.isArray(page)) return { error: jsonResponse({ error: 'Supabase response is not an array' }, 502) };
@@ -66,21 +66,21 @@ const readSupabasePages = async (table, configure, pageSize = 1000) => {
     return { rows };
 };
 
-const readDafSummaryFromSupabase = async line => {
+const readDafSummaryFromSupabase = async (line, headers) => {
     const result = await readSupabasePages('daf_log_batches', url => {
         // 只傳摘要欄位，避免儀表板把 records 一起拉下來；新欄位不會影響既有欄位解析。
         url.searchParams.set('select', SUMMARY_COLUMNS);
         url.searchParams.set('line', `eq.${line}`);
         url.searchParams.set('order', 'uploaded_at.desc,id.asc');
-    });
+    }, 1000, headers);
     if (result.error) return result.error;
     return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
 };
 
-const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
+const readDafDetailsFromSupabase = async (line, start = '', end = '', headers) => {
     const stagedResponse = await fetch(`${SUPABASE_URL}/rest/v1/rpc/daf_get_log_process_details`, {
         method: 'POST',
-        headers: { ...supabaseHeaders, 'Content-Type': 'application/json' },
+        headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ p_line: line, p_start: start, p_end: end })
     });
     if (stagedResponse.ok) {
@@ -98,7 +98,7 @@ const readDafDetailsFromSupabase = async (line, start = '', end = '') => {
         if (start) url.searchParams.set('date_end', `gte.${start}`);
         if (end) url.searchParams.set('date_start', `lte.${end}`);
         url.searchParams.set('order', 'uploaded_at.desc,id.asc');
-    }, 100);
+    }, 100, headers);
     if (result.error) return result.error;
     // 只取涵蓋所選日期的批次，但每個批次保留完整 records，避免明細切片被當成完整資料。
     return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=60' });
@@ -109,14 +109,14 @@ const sha256 = async value => {
     return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 };
 
-const readDafVersionsFromSupabase = async lines => {
+const readDafVersionsFromSupabase = async (lines, headers) => {
     const versions = {};
     const results = await Promise.all(lines.map(async line => {
         const result = await readSupabasePages('daf_log_batches', url => {
             url.searchParams.set('select', VERSION_COLUMNS);
             url.searchParams.set('line', `eq.${line}`);
             url.searchParams.set('order', 'id.asc');
-        }, 100);
+        }, 100, headers);
         if (result.error) return { line, error: result.error };
         const signature = result.rows.map(row => [
             row.id, row.file_name, row.uploaded_at, row.model_name, row.product_code, row.work_order,
@@ -132,14 +132,14 @@ const readDafVersionsFromSupabase = async lines => {
     return jsonResponse({ versions }, 200, { 'Cache-Control': 'public, max-age=15, s-maxage=60' });
 };
 
-const readDafStatsStateFromSupabase = async line => {
+const readDafStatsStateFromSupabase = async (line, headers) => {
     const result = await readSupabasePages('daf_log_batches', url => {
         // 只讀小型統計快照列；完整 LOG 不經過這個端點。
         url.searchParams.set('select', 'id,file_name,uploaded_at,records');
         url.searchParams.set('line', 'eq.__STATS_STATE__');
         url.searchParams.set('file_name', 'eq.系統共用數據統計狀態');
         url.searchParams.set('order', 'uploaded_at.desc,id.asc');
-    }, 100);
+    }, 100, headers);
     if (result.error) return result.error;
     const prefixes = line && PROCESS_LINES.includes(line)
         ? [SHARED_STATS_STATE_ID, LEGACY_SHARED_STATS_STATE_ID].map(id => `${id}:${line}`)
@@ -150,7 +150,7 @@ const readDafStatsStateFromSupabase = async line => {
             const legacy = await readSupabasePages('daf_log_batches', url => {
                 url.searchParams.set('select', 'id,file_name,uploaded_at,records');
                 url.searchParams.set('id', `eq.${id}`);
-            }, 1);
+            }, 1, headers);
             if (legacy.error) return legacy.error;
             rows.push(...legacy.rows);
         }
@@ -158,28 +158,28 @@ const readDafStatsStateFromSupabase = async line => {
     return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=0, s-maxage=60' });
 };
 
-const readSmtDataFromSupabase = async () => {
+const readSmtDataFromSupabase = async headers => {
     const production = await readSupabasePages('daily_production', url => {
         url.searchParams.set('select', '*,work_orders!inner(*,models(*)),defect_logs(*,defect_types(*),defect_locations(*))');
         url.searchParams.set('line', 'eq.SMT');
         url.searchParams.set('order', 'production_date.asc');
-    });
+    }, 1000, headers);
     if (production.error) return production.error;
     const fpy = await readSupabasePages('daily_fpy', url => {
         url.searchParams.set('select', '*,work_orders!inner(*,models(*))');
         url.searchParams.set('line', 'eq.SMT');
         url.searchParams.set('order', 'production_date.asc');
-    });
+    }, 1000, headers);
     if (fpy.error) return fpy.error;
     return jsonResponse({ production: production.rows, fpy: fpy.rows }, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
 };
 
-const readAssemblyDataFromSupabase = async () => {
+const readAssemblyDataFromSupabase = async headers => {
     const result = await readSupabasePages('assembly_log_batches', url => {
         url.searchParams.set('select', '*');
         url.searchParams.set('line', 'eq.ASSY');
         url.searchParams.set('order', 'uploaded_at.desc');
-    }, 100);
+    }, 100, headers);
     if (result.error) return result.error;
     return jsonResponse(result.rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=600' });
 };
@@ -193,6 +193,7 @@ const withCache = async (requestUrl, pathname, params, forceRefresh, loader) => 
             const headers = new Headers(cached.headers);
             Object.entries(corsHeaders).forEach(([name, value]) => headers.set(name, value));
             headers.set('X-Production-Cache', 'HIT');
+            headers.set('Cache-Control', 'private, no-store');
             return new Response(cached.body, { status: cached.status, headers });
         }
     } else {
@@ -203,6 +204,7 @@ const withCache = async (requestUrl, pathname, params, forceRefresh, loader) => 
     await cache.put(key, fresh.clone());
     const headers = new Headers(fresh.headers);
     headers.set('X-Production-Cache', forceRefresh ? 'REFRESH' : 'MISS');
+    headers.set('Cache-Control', 'private, no-store');
     return new Response(fresh.body, { status: fresh.status, headers });
 };
 
@@ -241,10 +243,25 @@ export default {
             return jsonResponse({ ok: true, service: 'production-data-cache', cacheVersion: '20261008-neutral-brand-v1' });
         }
 
+        // Validate before even reading a shared cache entry. Each request keeps
+        // its own headers so concurrent users cannot inherit another session.
+        const dbHeaders = { ...supabaseHeaders, 'X-Dashboard-Session': request.headers.get('X-Dashboard-Session') || '' };
+        try {
+            const validation = await fetch(`${SUPABASE_URL}/rest/v1/rpc/dashboard_session_validate`, {
+                method: 'POST', headers: { ...dbHeaders, 'Content-Type': 'application/json' }, body: '{}'
+            });
+            if (!validation.ok) return jsonResponse({ error: '登入服務暫時無法使用' }, 503);
+            const access = await validation.json();
+            if (typeof access.required !== 'boolean' || typeof access.valid !== 'boolean') return jsonResponse({ error: '登入驗證失敗' }, 503);
+            if (access.required && !access.valid) return jsonResponse({ error: '請先登入' }, 401);
+        } catch {
+            return jsonResponse({ error: '登入服務暫時無法使用' }, 503);
+        }
+
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-summary') {
             const line = requestUrl.searchParams.get('line');
             if (!PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
-            return withCache(requestUrl, '/api/daf-summary', { line }, requestUrl.searchParams.get('refresh') === '1', () => readDafSummaryFromSupabase(line));
+            return withCache(requestUrl, '/api/daf-summary', { line }, requestUrl.searchParams.get('refresh') === '1', () => readDafSummaryFromSupabase(line, dbHeaders));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-details') {
@@ -257,29 +274,29 @@ export default {
             const generation = await readDafDetailsGeneration(requestUrl, line);
             const params = { line, start, end, generation };
             // 日期區間各自快取；資料更新會改 generation，使舊區間鍵不再被讀取。
-            return withCache(requestUrl, '/api/daf-details', params, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line, start, end));
+            return withCache(requestUrl, '/api/daf-details', params, requestUrl.searchParams.get('refresh') === '1', () => readDafDetailsFromSupabase(line, start, end, dbHeaders));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-version') {
             const requestedLines = (requestUrl.searchParams.get('lines') || '').split(',').filter(Boolean);
             const lines = [...new Set(requestedLines)];
             if (!lines.length || lines.some(line => !PROCESS_LINES.includes(line))) return jsonResponse({ error: 'Invalid process' }, 400);
-            return withCache(requestUrl, '/api/daf-version', { lines: lines.join(',') }, requestUrl.searchParams.get('refresh') === '1', () => readDafVersionsFromSupabase(lines));
+            return withCache(requestUrl, '/api/daf-version', { lines: lines.join(',') }, requestUrl.searchParams.get('refresh') === '1', () => readDafVersionsFromSupabase(lines, dbHeaders));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/daf-stats-state') {
             const line = requestUrl.searchParams.get('line') || '';
             if (line && !PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
             const params = line ? { line } : {};
-            return withCache(requestUrl, '/api/daf-stats-state', params, requestUrl.searchParams.get('refresh') === '1', () => readDafStatsStateFromSupabase(line));
+            return withCache(requestUrl, '/api/daf-stats-state', params, requestUrl.searchParams.get('refresh') === '1', () => readDafStatsStateFromSupabase(line, dbHeaders));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {
-            return withCache(requestUrl, '/api/smt-data', {}, requestUrl.searchParams.get('refresh') === '1', readSmtDataFromSupabase);
+            return withCache(requestUrl, '/api/smt-data', {}, requestUrl.searchParams.get('refresh') === '1', () => readSmtDataFromSupabase(dbHeaders));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/assembly-data') {
-            return withCache(requestUrl, '/api/assembly-data', {}, requestUrl.searchParams.get('refresh') === '1', readAssemblyDataFromSupabase);
+            return withCache(requestUrl, '/api/assembly-data', {}, requestUrl.searchParams.get('refresh') === '1', () => readAssemblyDataFromSupabase(dbHeaders));
         }
 
         if (requestUrl.pathname === '/api/cache/invalidate' || requestUrl.pathname === '/api/daf-summary/invalidate') {

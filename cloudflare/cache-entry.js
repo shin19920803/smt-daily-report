@@ -12,7 +12,7 @@ const LEGACY_BACKEND_ORIGIN = `https://${LEGACY_NAMESPACE}-data-cache.shin199208
 const corsHeaders = {
     'Access-Control-Allow-Origin': APP_ORIGIN,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type, apikey, authorization',
+    'Access-Control-Allow-Headers': 'content-type, apikey, authorization, x-dashboard-session',
     'Vary': 'Origin'
 };
 
@@ -42,6 +42,7 @@ export default {
             headers.delete(LEGACY_CACHE_HEADER);
             Object.entries(corsHeaders).forEach(([name, value]) => headers.set(name, value));
             if (cacheStatus) headers.set('X-Production-Cache', cacheStatus);
+            headers.set('Cache-Control', 'private, no-store');
             return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
         } catch (error) {
             return jsonResponse({ error: 'Cache service temporarily unavailable' }, 502);

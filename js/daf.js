@@ -123,11 +123,13 @@ SMT.daf = function (ctx) {
         };
     };
     const deleteDafMachineReferenceRows = async (ids, { onError } = {}) => {
-        const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+        const uniqueIds = [...new Set((ids || []).filter(Boolean))].sort();
         for (let index = 0; index < uniqueIds.length; index += 100) {
             const chunk = uniqueIds.slice(index, index + 100);
-            const { error } = await _supabase.from(REMOTE_TABLE).delete().eq('line', DAF_MACHINE_REFERENCE_LINE).in('id', chunk);
-            if (error) { onError?.(error); return false; }
+            try {
+                await runDafMachineReferenceWrite(signal => _supabase.from(REMOTE_TABLE).delete()
+                    .eq('line', DAF_MACHINE_REFERENCE_LINE).in('id', chunk).abortSignal(signal), '清除已比對或到期的機台參照');
+            } catch (error) { onError?.(error); return false; }
         }
         return true;
     };
@@ -158,12 +160,18 @@ SMT.daf = function (ctx) {
     const persistDafMachineReferences = async ({ references = [], matchedKeys = [], storedMap = new Map(), onError } = {}) => {
         const matched = new Set(matchedKeys || []);
         const matchedIds = [...matched].map(key => storedMap.get(key)?.id).filter(Boolean);
-        const referencesToStore = (references || []).filter(reference => isDafMachineLabel(reference.machine) && !matched.has(reference.dedupKey));
+        // 每台電腦依相同鍵順序取得列鎖；相同鍵只送最後一筆，避免批內重複 upsert。
+        const referencesToStore = [...new Map((references || [])
+            .filter(reference => isDafMachineLabel(reference.machine) && !matched.has(reference.dedupKey))
+            .map(reference => [reference.dedupKey, reference])).values()]
+            .sort((a, b) => a.dedupKey < b.dedupKey ? -1 : a.dedupKey > b.dedupKey ? 1 : 0);
         if (referencesToStore.length) {
             for (let offset = 0; offset < referencesToStore.length; offset += 100) {
-                const { error } = await _supabase.from(REMOTE_TABLE)
-                    .upsert(referencesToStore.slice(offset, offset + 100).map(toDafMachineReferenceRemote), { onConflict: 'id' });
-                if (error) { onError?.(error); return false; }
+                const rows = referencesToStore.slice(offset, offset + 100).map(toDafMachineReferenceRemote);
+                try {
+                    await runDafMachineReferenceWrite(signal => _supabase.from(REMOTE_TABLE)
+                        .upsert(rows, { onConflict: 'id' }).abortSignal(signal), '保存待比對機台參照');
+                } catch (error) { onError?.(error); return false; }
             }
             referencesToStore.forEach(reference => storedMap.set(reference.dedupKey, { ...reference, id: dafMachineReferenceId(reference.dedupKey) }));
             if (await isDafStagedImportReady()) {
@@ -740,7 +748,7 @@ SMT.daf = function (ctx) {
         maxRows: DAF_IMPORT_CHUNK_MAX_ROWS, maxBytes: DAF_IMPORT_CHUNK_MAX_BYTES
     });
     const hashDafImportPayload = payload => window.SMT_DAF_UPLOAD_UTILS.hashPayload(payload);
-    const dafImportRetry = async (action, label, retries = 3, timeoutMs = DAF_REMOTE_REQUEST_TIMEOUT_MS) => {
+    const dafImportRetry = async (action, label, retries = 3, timeoutMs = DAF_REMOTE_REQUEST_TIMEOUT_MS, retryJitterMs = 0) => {
         let lastError;
         for (let attempt = 0; attempt < retries; attempt++) {
             const controller = new AbortController();
@@ -752,20 +760,34 @@ SMT.daf = function (ctx) {
                 controller.abort(error);
                 lastError = error;
                 if (isMissingDafImportRpc(error) || !window.SMT_DAF_UPLOAD_UTILS.isRetryableUploadError(error) || attempt === retries - 1) break;
-                await new Promise(resolve => setTimeout(resolve, 400 * (2 ** attempt)));
+                await new Promise(resolve => setTimeout(resolve, 400 * (2 ** attempt) + Math.floor(Math.random() * retryJitterMs)));
             }
         }
         throw lastError || new Error(`${label}失敗`);
     };
+    // 參照 upsert、分類更新與刪除皆可安全重試；沿用同一份內容與保存時間。
+    // 每次失敗會中止原請求，僅對鎖競爭／暫時性錯誤退避重試，最多四次。
+    const runDafMachineReferenceWrite = async (action, label) => {
+        try {
+            return await dafImportRetry(action, label, 4, DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS, 250);
+        } catch (error) {
+            throw Object.assign(new Error(`${label}：${error?.message || String(error)}`), {
+                code: error?.code, details: error?.details, hint: error?.hint,
+                status: error?.status, statusCode: error?.statusCode
+            });
+        }
+    };
     const updateDafStagedMachineLabels = async mappings => {
         const unique = [...new Map((mappings || [])
             .filter(item => item?.dedup_key && isDafMachineLabel(item.machine))
-            .map(item => [normalizeText(item.dedup_key), { dedup_key: normalizeText(item.dedup_key), machine: item.machine }])).values()];
+            .map(item => [normalizeText(item.dedup_key), { dedup_key: normalizeText(item.dedup_key), machine: item.machine }])).values()]
+            .sort((a, b) => a.dedup_key < b.dedup_key ? -1 : a.dedup_key > b.dedup_key ? 1 : 0);
         for (let offset = 0; offset < unique.length; offset += 100) {
-            const { error } = await _supabase.rpc('daf_update_machine_classification', {
-                p_mappings: unique.slice(offset, offset + 100)
-            });
-            if (error) return error;
+            try {
+                await runDafMachineReferenceWrite(signal => _supabase.rpc('daf_update_machine_classification', {
+                    p_mappings: unique.slice(offset, offset + 100)
+                }).abortSignal(signal), '更新既有 DAF／FT1 機台分類');
+            } catch (error) { return error; }
         }
         if (unique.length) {
             await window.invalidateDataCache?.();

@@ -316,6 +316,7 @@ begin
     from jsonb_to_recordset(coalesce(p_mappings,'[]'::jsonb)) as m(dedup_key text,machine text)
     where m.machine in ('1號機','2號機') and nullif(btrim(m.dedup_key),'') is not null
     order by upper(btrim(m.dedup_key)),m.machine;
+    analyze _daf_machine_mapping;
 
     update public.daf_log_candidates c set machine=m.machine,
            record_json=case when c.record_storage_version=1 then jsonb_set(c.record_json,'{machine}',to_jsonb(m.machine),true) else c.record_json end

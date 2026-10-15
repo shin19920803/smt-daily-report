@@ -11,8 +11,8 @@ umask 077
 report_dir="$repo_root/../smt-daily-report-backups"
 mkdir -p -- "$report_dir"
 report_path="$report_dir/daf-machine-reference-lock-fix-$(date '+%Y%m%d-%H%M%S').log"
-# 密碼僅由 psql 的 Password 提示讀取，不放進指令、日誌或檔案。
-psql --no-psqlrc --password --set=ON_ERROR_STOP=1 \
+# 首次以鑰匙圈原生提示設定；之後自動驗證並使用，不強制重複輸入。
+bash "$repo_root/scripts/with-supabase-db.sh" psql --no-psqlrc --no-password --set=ON_ERROR_STOP=1 \
   --host=aws-1-ap-south-1.pooler.supabase.com --port=5432 \
   --username=postgres.ccwkcwriebxipndxkvyr --dbname=postgres \
   --file="$repo_root/supabase/daf_machine_reference_lock_fix.sql" | tee "$report_path"

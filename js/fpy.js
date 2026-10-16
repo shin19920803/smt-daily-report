@@ -61,16 +61,27 @@ SMT.fpy = function (ctx) {
             if (files.length === 0) return;
             loading.value = true;
             try {
-                let totalSuccess = 0, totalSkip = 0, allErrs = [];
+                let totalSuccess = 0, totalSkip = 0, allErrs = [], rejectedFiles = [];
                 for (const file of files) {
                     const ab = await file.arrayBuffer();
                     const wb = XLSX.read(ab, { type: 'array', cellDates: false });
                     const ws = wb.Sheets[wb.SheetNames[0]];
                     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+                    let validated = null;
+                    if (currentLine.value === 'SMT') {
+                        try { validated = SMT.validateSmtImport(rows, 'fpy'); }
+                        catch (error) {
+                            const message = `${file.name}：${error.message}`;
+                            rejectedFiles.push(message); allErrs.push(message);
+                            continue;
+                        }
+                    }
                     if (rows.length < 2) { allErrs.push(`${file.name} 無資料`); continue; }
                     const headers = rows[0].map(h => String(h).trim());
                     const find = (...keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
-                    const iDate = find('日期'), iWo = find('工單'), iModel = find('機種'), iSpi = find('SPI'), iAoi = find('AOI');
+                    const { iDate, iWo, iModel, iSpi, iAoi } = validated?.columns || {
+                        iDate: find('日期'), iWo: find('工單'), iModel: find('機種'), iSpi: find('SPI'), iAoi: find('AOI')
+                    };
                     if (iDate < 0 || iWo < 0) { allErrs.push(`${file.name} 缺少日期或工單欄位`); continue; }
                     for (let i = 1; i < rows.length; i++) {
                         const r = rows[i]; if (!r || !r[iDate] || !r[iWo]) continue;
@@ -95,11 +106,12 @@ SMT.fpy = function (ctx) {
                         totalSuccess++;
                     }
                 }
-                await loadFpyHistory();
+                if (rejectedFiles.length < files.length) await loadFpyHistory();
                 let msg = `匯入完成：成功 ${totalSuccess} 筆`;
                 if (totalSkip > 0) msg += `，跳過 ${totalSkip} 筆`;
                 if (allErrs.length > 0) { msg += `，問題 ${allErrs.length} 筆`; console.warn('FPY 匯入問題:', allErrs); }
-                toast(msg, totalSuccess > 0 ? 'success' : 'warning');
+                if (totalSuccess > 0 || rejectedFiles.length === 0) toast(msg, totalSuccess > 0 ? 'success' : 'warning');
+                if (rejectedFiles.length > 0) toast(`已阻擋錯誤檔案：${rejectedFiles.join('；')}`, 'error');
             } catch(err) { toast('匯入失敗: ' + err.message, 'error'); }
             finally { loading.value = false; e.target.value = ''; }
         };

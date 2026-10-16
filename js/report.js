@@ -147,6 +147,7 @@ SMT.report = function (ctx) {
                 const ab = await file.arrayBuffer();
                 const wb = XLSX.read(ab); const ws = wb.Sheets[wb.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                if (currentLine.value === 'SMT') SMT.validateSmtImport(rows, 'defects');
                 if (rows.length < 2) { toast('CSV 無資料', 'warning'); loading.value = false; return; }
                 const locCodes = rows[0].slice(1).map(c => String(c).trim());
                 let addedTypes = 0, addedLocs = 0;
@@ -181,7 +182,7 @@ SMT.report = function (ctx) {
                 if (addedTypes > 0) msg += `，新增 ${addedTypes} 個不良項目`;
                 if (addedLocs > 0) msg += `，新增 ${addedLocs} 個位置代碼`;
                 toast(msg);
-            } catch(err) { toast('匯入失敗: ' + err.message, 'error'); } finally { loading.value = false; e.target.value = ''; }
+            } catch(err) { toast(`匯入失敗（${file.name}）: ${err.message}`, 'error'); } finally { loading.value = false; e.target.value = ''; }
         };
 
         const editingDefect = ref(null);

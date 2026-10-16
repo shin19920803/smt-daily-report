@@ -144,10 +144,20 @@ SMT.report = function (ctx) {
             const file = e.target.files[0]; if (!file || !report.value.currentId) return toast('請先建立投入數', 'warning');
             loading.value = true;
             try {
+                const importTarget = { line: currentLine.value, woId: report.value.wo_id, productionId: report.value.currentId };
+                if (importTarget.line === 'SMT') {
+                    const workOrder = data.value.workOrders.find(item => item.id === importTarget.woId);
+                    SMT.validateSmtReportFilename(file.name, workOrder?.wo_number);
+                }
                 const ab = await file.arrayBuffer();
                 const wb = XLSX.read(ab); const ws = wb.Sheets[wb.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-                if (currentLine.value === 'SMT') SMT.validateSmtImport(rows, 'defects');
+                if (importTarget.line === 'SMT') {
+                    if (currentLine.value !== importTarget.line || report.value.wo_id !== importTarget.woId || report.value.currentId !== importTarget.productionId) {
+                        throw new Error('報工工單已變更，請在目前工單重新選擇檔案');
+                    }
+                    SMT.validateSmtImport(rows, 'defects');
+                }
                 if (rows.length < 2) { toast('CSV 無資料', 'warning'); loading.value = false; return; }
                 const locCodes = rows[0].slice(1).map(c => String(c).trim());
                 let addedTypes = 0, addedLocs = 0;

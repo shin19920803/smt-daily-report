@@ -50,11 +50,14 @@ function harness({ line = 'SMT', existingFpy = null } = {}) {
     report.report.value.currentId = 'production-1'; report.report.value.wo_id = 'wo-1';
     const fp = window.SMT.fpy(ctx);
     const event = (...tables) => ({ target: { files: tables.map((rows, index) => ({ name: `upload-${index + 1}.csv`, arrayBuffer: async () => rows })), value: 'selected-file' } });
-    return { ctx, report, fp, writes, queries, messages, event, validate: window.SMT.validateSmtImport };
+    const reportEvent = (rows, name = '20261015_626090094.csv') => {
+        const value = event(rows); value.target.files[0].name = name; return value;
+    };
+    return { ctx, report, fp, writes, queries, messages, event, reportEvent, validate: window.SMT.validateSmtImport, validateFilename: window.SMT.validateSmtReportFilename };
 }
 
 test('SMT files cannot cross the two upload entry points; rejection performs zero database calls', async () => {
-    const report = harness(); const reportEvent = report.event(fpy);
+    const report = harness(); const reportEvent = report.reportEvent(fpy);
     const before = JSON.stringify(report.ctx.data.value);
     await report.report.importDefectCsv(reportEvent);
     assert.deepEqual(report.queries, []);
@@ -70,12 +73,57 @@ test('SMT files cannot cross the two upload entry points; rejection performs zer
 });
 
 test('valid defect matrix preserves quantity/location/type; blank quantities remain allowed', async () => {
-    const h = harness(); await h.report.importDefectCsv(h.event(defects));
+    const h = harness(); await h.report.importDefectCsv(h.reportEvent(defects));
     assert.deepEqual(h.writes, [{ table: 'defect_logs', operation: 'insert', payload: {
         production_id: 'production-1', defect_type_id: 'standing', location_id: 'r6', quantity: 2
     } }]);
-    const zero = harness(); await zero.report.importDefectCsv(zero.event([['瑕疵項目', 'C1'], ['缺件', '']]));
+    const zero = harness(); await zero.report.importDefectCsv(zero.reportEvent([['瑕疵項目', 'C1'], ['缺件', '']]));
     assert.deepEqual(zero.writes, []); assert.match(zero.messages.at(-1).message, /匯入成功/);
+});
+
+test('SMT filename mismatch is rejected before reading the file or making any database call', async () => {
+    for (const name of ['20261015_626090095.csv', '626090095.csv', '20261015_6260900949.csv', '20261015_626090094 (1).csv', 'unrelated.csv', '20261015_626090094.xlsx']) {
+        const h = harness(); const event = h.reportEvent(defects, name);
+        let reads = 0; event.target.files[0].arrayBuffer = async () => { reads++; return defects; };
+        const before = JSON.stringify(h.ctx.data.value);
+        await h.report.importDefectCsv(event);
+        assert.equal(reads, 0); assert.deepEqual(h.queries, []); assert.deepEqual(h.writes, []);
+        assert.equal(JSON.stringify(h.ctx.data.value), before);
+        assert.equal(h.report.report.value.currentId, 'production-1');
+        assert.equal(h.ctx.loading.value, false); assert.equal(event.target.value, '');
+        assert.match(h.messages[0].message, /626090094/); assert.equal(h.messages[0].type, 'error');
+    }
+});
+
+test('matching filenames preserve report quantity; date prefix need not match the report date', async () => {
+    for (const name of ['20261015_626090094.csv', '626090094.csv', '20260901_626090094.CSV']) {
+        const h = harness(); await h.report.importDefectCsv(h.reportEvent(defects, name));
+        assert.equal(h.writes.length, 1); assert.equal(h.writes[0].payload.quantity, 2);
+        assert.equal(h.writes[0].payload.production_id, 'production-1');
+    }
+    const { validateFilename } = harness();
+    assert.doesNotThrow(() => validateFilename('20261015_AB-001.csv', 'ab-001'));
+    assert.throws(() => validateFilename('20261015_123.csv', '00123'), /不同/);
+});
+
+test('filename is checked against the actual selected order ID; missing or changed context fails closed', async () => {
+    const stale = harness(); stale.report.report.value.selectedWoNumber = '626090095';
+    await stale.report.importDefectCsv(stale.reportEvent(defects, '20261015_626090095.csv'));
+    assert.deepEqual(stale.queries, []);
+    const missing = harness(); missing.ctx.data.value.workOrders = [];
+    await missing.report.importDefectCsv(missing.reportEvent(defects));
+    assert.deepEqual(missing.queries, []); assert.match(missing.messages[0].message, /資料不完整/);
+    const changed = harness(); const event = changed.reportEvent(defects);
+    event.target.files[0].arrayBuffer = async () => { changed.report.report.value.wo_id = 'wo-2'; return defects; };
+    await changed.report.importDefectCsv(event);
+    assert.deepEqual(changed.queries, []); assert.match(changed.messages[0].message, /工單已變更/);
+});
+
+test('filename rule does not apply to FPY or other processes', async () => {
+    const fp = harness(); await fp.fp.importFpyFile(fp.event(fpy));
+    assert.equal(fp.writes.length, 1);
+    const other = harness({ line: 'ASSY' }); await other.report.importDefectCsv(other.event(defects));
+    assert.equal(other.writes.length, 1); assert.equal(other.writes[0].payload.quantity, 2);
 });
 
 test('valid FPY preserves rate parsing, optional model and one blank rate', async () => {

@@ -1,5 +1,17 @@
 window.SMT = window.SMT || {};
 
+SMT.validateSmtReportFilename = (fileName, workOrder) => {
+    const expected = String(workOrder ?? '').trim();
+    if (!expected) throw new Error('目前報工工單資料不完整，請重新選擇工單後再上傳');
+    // The optional date is a filename prefix, not a restriction on report dates.
+    const match = /^(?:\d{8}_)?(.+)\.csv$/i.exec(String(fileName ?? '').trim());
+    if (!match) throw new Error(`檔名格式錯誤，請使用「YYYYMMDD_${expected}.csv」或「${expected}.csv」`);
+    const actual = match[1].trim();
+    if (actual.toUpperCase() !== expected.toUpperCase()) {
+        throw new Error(`檔名工單「${actual}」與目前報工工單「${expected}」不同，已阻擋匯入`);
+    }
+};
+
 // Check the same first-sheet/header layout consumed by the existing importers.
 // Format recognition must finish before creating settings or writing records.
 SMT.validateSmtImport = (rows, target) => {

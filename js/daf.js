@@ -765,6 +765,29 @@ SMT.daf = function (ctx) {
         }
         throw lastError || new Error(`${label}失敗`);
     };
+    const runDafImportRequest = async (rpcName, args, label, timeoutMs = DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS, retries = 3, context = {}) => {
+        const startedAt = Date.now();
+        try {
+            return await dafImportRetry(
+                signal => _supabase.rpc(rpcName, args).abortSignal(signal),
+                label, retries, timeoutMs, 250
+            );
+        } catch (error) {
+            const message = String(error?.message || error || `${label}失敗`);
+            throw Object.assign(new Error(message), {
+                code: error?.code, details: error?.details, hint: error?.hint,
+                status: error?.status, statusCode: error?.statusCode,
+                uploadDiagnostic: {
+                    phase: label, rpcName, jobId: context.jobId || '', line: context.line || '',
+                    chunkIndex: Number.isInteger(context.chunkIndex) ? context.chunkIndex : null,
+                    chunkCount: Number.isInteger(context.chunkCount) ? context.chunkCount : null,
+                    recordCount: Number.isInteger(context.recordCount) ? context.recordCount : null,
+                    payloadBytes: Number.isInteger(context.payloadBytes) ? context.payloadBytes : null,
+                    elapsedMs: Math.max(0, Date.now() - startedAt)
+                }
+            });
+        }
+    };
     // 參照 upsert、分類更新與刪除皆可安全重試；沿用同一份內容與保存時間。
     // 每次失敗會中止原請求，僅對鎖競爭／暫時性錯誤退避重試，最多四次。
     const runDafMachineReferenceWrite = async (action, label) => {
@@ -808,9 +831,9 @@ SMT.daf = function (ctx) {
         try { localStorage.setItem(DAF_FAILED_IMPORTS_KEY, JSON.stringify([...dafPendingAbortJobs])); } catch (error) {}
     };
     const abortDafStagedImport = async jobId => {
-        const result = await dafImportRetry(signal => _supabase.rpc('daf_abort_log_import', {
+        const result = await runDafImportRequest('daf_abort_log_import', {
             p_job_id: jobId
-        }).abortSignal(signal), '清除失敗上傳暫存', 3, DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS);
+        }, '清除失敗上傳暫存', DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS, 3, { jobId });
         if (!result?.cleared && !result?.published) throw new Error('資料庫尚未確認清除失敗上傳');
         dafPendingAbortJobs.delete(jobId);
         saveDafPendingAbortJobs();
@@ -845,11 +868,13 @@ SMT.daf = function (ctx) {
         saveDafPendingAbortJobs();
         try {
         setDafUploadProgress(file.name, '建立全新的上傳工作');
-        const start = await dafImportRetry(signal => _supabase.rpc('daf_start_log_import', {
+        const start = await runDafImportRequest('daf_start_log_import', {
             p_job_id: jobId, p_file_name: file.name, p_metadata: metadata, p_expected_chunks: chunkPlan.length
-        }).abortSignal(signal), '建立上傳工作');
+        }, '建立上傳工作', DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS, 3,
+        { jobId, chunkCount: chunkPlan.length });
         if (start?.status === 'published') {
-            const result = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認已完成的上傳', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
+            const result = await runDafImportRequest('daf_finalize_log_import', { p_job_id: jobId },
+                '確認已完成的上傳', DAF_FINALIZE_REQUEST_TIMEOUT_MS, 3, { jobId, chunkCount: chunkPlan.length });
             dafPendingAbortJobs.delete(jobId);
             saveDafPendingAbortJobs();
             return { acceptedCount: Number(result?.accepted_count) || 0, duplicateCount: Number(result?.duplicate_count) || 0 };
@@ -864,10 +889,13 @@ SMT.daf = function (ctx) {
                 try {
                     const payload = JSON.stringify(chunk.records);
                     const contentHash = await hashDafImportPayload(payload);
-                    await dafImportRetry(signal => _supabase.rpc('daf_stage_log_import_chunk', {
+                    await runDafImportRequest('daf_stage_log_import_chunk', {
                         p_job_id: jobId, p_line: chunk.line, p_chunk_index: chunk.chunkIndex,
                         p_content_hash: contentHash, p_records: chunk.records
-                    }).abortSignal(signal), `${processLabel(chunk.line)} 第 ${chunk.chunkIndex + 1} 批`, 3, DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS);
+                    }, `${processLabel(chunk.line)} 第 ${chunk.chunkIndex + 1} 批寫入`, DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS, 3, {
+                        jobId, line: chunk.line, chunkIndex: chunk.chunkIndex, chunkCount: chunkPlan.length,
+                        recordCount: chunk.records.length, payloadBytes: new TextEncoder().encode(payload).length
+                    });
                     completed++;
                     setDafUploadProgress(file.name, `分批寫入 Supabase（${completed}/${chunkPlan.length}）`, completed, chunkPlan.length);
                 } catch (error) {
@@ -880,27 +908,37 @@ SMT.daf = function (ctx) {
         const chunkResults = await Promise.allSettled(pending);
         const failedChunk = chunkResults.find(result => result.status === 'rejected');
         if (failedChunk) {
-            const statusController = new AbortController();
-            const status = await withDafRequestTimeout(
-                _supabase.rpc('daf_get_log_import_status', { p_job_id: jobId }).abortSignal(statusController.signal),
-                '確認分批上傳狀態', 10000
-            );
-            if (status.error) throw firstChunkError || failedChunk.reason;
-            const received = Number(status.data?.received_chunks) || 0;
+            let status;
+            try {
+                status = await runDafImportRequest('daf_get_log_import_status', { p_job_id: jobId },
+                    '確認分批上傳狀態', 10000, 1, { jobId, chunkCount: chunkPlan.length });
+            } catch (statusError) {
+                const originalError = firstChunkError || failedChunk.reason;
+                originalError.uploadDiagnostic ||= {};
+                originalError.uploadDiagnostic.statusCheckError = statusError?.message || String(statusError);
+                throw originalError;
+            }
+            const received = Number(status?.received_chunks) || 0;
             if (received !== chunkPlan.length) throw firstChunkError || failedChunk.reason;
         }
         setDafUploadProgress(file.name, '比對跨檔 E 欄並發布資料', chunkPlan.length, chunkPlan.length);
         let finalized;
         try {
-            finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '發布上傳資料', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
+            finalized = await runDafImportRequest('daf_finalize_log_import', { p_job_id: jobId },
+                '發布上傳資料', DAF_FINALIZE_REQUEST_TIMEOUT_MS, 3, { jobId, chunkCount: chunkPlan.length });
         } catch (error) {
-            const statusController = new AbortController();
-            const status = await withDafRequestTimeout(
-                _supabase.rpc('daf_get_log_import_status', { p_job_id: jobId }).abortSignal(statusController.signal),
-                '確認發布狀態', 10000
-            );
-            if (!status.error && status.data?.status === 'published') {
-                finalized = await dafImportRetry(signal => _supabase.rpc('daf_finalize_log_import', { p_job_id: jobId }).abortSignal(signal), '確認發布結果', 3, DAF_FINALIZE_REQUEST_TIMEOUT_MS);
+            let status;
+            try {
+                status = await runDafImportRequest('daf_get_log_import_status', { p_job_id: jobId },
+                    '確認發布狀態', 10000, 1, { jobId, chunkCount: chunkPlan.length });
+            } catch (statusError) {
+                error.uploadDiagnostic ||= {};
+                error.uploadDiagnostic.statusCheckError = statusError?.message || String(statusError);
+                throw error;
+            }
+            if (status?.status === 'published') {
+                finalized = await runDafImportRequest('daf_finalize_log_import', { p_job_id: jobId },
+                    '確認發布結果', DAF_FINALIZE_REQUEST_TIMEOUT_MS, 3, { jobId, chunkCount: chunkPlan.length });
             } else throw error;
         }
         if (!finalized?.published) throw new Error('Supabase 尚未確認發布');
@@ -919,13 +957,19 @@ SMT.daf = function (ctx) {
             let cleanup;
             try { cleanup = await abortDafStagedImport(jobId); }
             catch (cleanupError) {
-                throw new Error(`${error?.message || error}；暫存清除未確認：${cleanupError?.message || cleanupError}。下次上傳會先重試清除；離線遺留工作會由伺服器定期清理`);
+                throw Object.assign(new Error(`${error?.message || error}；暫存清除未確認：${cleanupError?.message || cleanupError}。下次上傳會先重試清除；離線遺留工作會由伺服器定期清理`), {
+                    code: error?.code, details: error?.details, hint: error?.hint,
+                    uploadDiagnostic: { ...error?.uploadDiagnostic, cleanupError: cleanupError?.message || String(cleanupError) }
+                });
             }
             if (cleanup?.published) {
                 try { await window.invalidateDataCache?.(); } catch (cacheError) {}
                 return { acceptedCount: Number(cleanup.accepted_count) || 0, duplicateCount: Number(cleanup.duplicate_count) || 0 };
             }
-            throw Object.assign(new Error(`${error?.message || error}；本次未發布暫存已清除，請重新上傳`), { code: error?.code });
+            throw Object.assign(new Error(`${error?.message || error}；本次未發布暫存已清除，請重新上傳`), {
+                code: error?.code, details: error?.details, hint: error?.hint,
+                uploadDiagnostic: { ...error?.uploadDiagnostic, cleanupConfirmed: true }
+            });
         }
     };
     const saveRemote = async (batch) => {
@@ -3071,6 +3115,7 @@ SMT.daf = function (ctx) {
     };
     const recordDafUploadFailure = (queue, fileName, stage, reason, line = '') => {
         const error = reason && typeof reason === 'object' ? reason : null;
+        const diagnostic = error?.uploadDiagnostic || null;
         const message = String(error?.message || reason || '系統未提供錯誤訊息').trim();
         const stringifyField = value => {
             if (value == null || value === '') return '';
@@ -3079,12 +3124,13 @@ SMT.daf = function (ctx) {
         };
         const detail = {
             fileName: String(fileName || '未識別檔案'),
-            process: line ? processLabel(line) : '檔案處理',
-            stage: String(stage || '上傳處理'),
+            process: (line || diagnostic?.line) ? processLabel(line || diagnostic.line) : '檔案處理',
+            stage: String(diagnostic?.phase || stage || '上傳處理'),
             message,
             code: String(error?.code || error?.status || ''),
             details: stringifyField(error?.details),
-            hint: stringifyField(error?.hint)
+            hint: stringifyField(error?.hint),
+            diagnostic
         };
         queue.failureDetails ||= [];
         queue.failureDetails.push(detail);
@@ -3189,7 +3235,8 @@ SMT.daf = function (ctx) {
                         queue.duplicates += result.duplicateCount;
                         dafBatchSaved = readyBatches.some(batch => batch.line === 'DAF');
                     } catch (error) {
-                        recordDafUploadFailure(queue, file.name, '分批上傳／原子發布', error);
+                        recordDafUploadFailure(queue, file.name, error?.uploadDiagnostic?.phase || '分批上傳／原子發布', error,
+                            error?.uploadDiagnostic?.line || '');
                         continue;
                     }
                 } else {

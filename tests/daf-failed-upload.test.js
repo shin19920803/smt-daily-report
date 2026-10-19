@@ -26,10 +26,10 @@ function harness(handler, initial = {}) {
         currentDafLine: () => 'DAF', processLabel: line => line,
         setDafUploadProgress() {},
         DAF_IMPORT_CHUNK_REQUEST_TIMEOUT_MS: 60000, DAF_FINALIZE_REQUEST_TIMEOUT_MS: 60000,
-        AbortController, console
+        AbortController, TextEncoder, console
     };
     const source = fs.readFileSync(require.resolve('../js/daf.js'), 'utf8');
-    const block = source.slice(source.indexOf('    const DAF_FAILED_IMPORTS_KEY'), source.indexOf('    const saveRemote = async'));
+    const block = source.slice(source.indexOf('    const runDafImportRequest ='), source.indexOf('    const saveRemote = async'));
     vm.runInNewContext(`${block}\nthis.upload = uploadDafBatchesStaged;`, context);
     return { upload: context.upload, calls, storage };
 }
@@ -47,9 +47,18 @@ test('each selection starts a fresh job rather than resuming previous chunks', a
 });
 test('failed chunks are cleared and reported instead of silently resuming', async () => {
     const h = harness(name => name === 'daf_stage_log_import_chunk'
-        ? { error: new Error('57014 timeout') }
+        ? { error: Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }) }
         : name === 'daf_get_log_import_status' ? { data: { received_chunks: 0 } } : success(name));
-    await assert.rejects(h.upload(file, batches), /本次未發布暫存已清除/);
+    await assert.rejects(h.upload(file, batches), error => {
+        assert.match(error.message, /本次未發布暫存已清除/);
+        assert.equal(error.code, '57014');
+        assert.equal(error.uploadDiagnostic.rpcName, 'daf_stage_log_import_chunk');
+        assert.equal(error.uploadDiagnostic.phase, 'DAF 第 1 批寫入');
+        assert.equal(error.uploadDiagnostic.chunkIndex, 0);
+        assert.equal(error.uploadDiagnostic.recordCount, 1);
+        assert.equal(error.uploadDiagnostic.cleanupConfirmed, true);
+        return true;
+    });
     assert.ok(h.calls.some(call => call.name === 'daf_abort_log_import'));
     assert.ok(!h.calls.some(call => call.name === 'daf_finalize_log_import'));
 });

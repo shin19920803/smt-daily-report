@@ -12,6 +12,53 @@ $$;
 \ir ../supabase/daf_candidate_payload_slimming.sql
 \ir ../supabase/daf_aggregate_history.sql
 \ir ../supabase/daf_space_reclamation.sql
+create schema if not exists dashboard_private;
+create table if not exists dashboard_private.access_settings(id boolean primary key, enabled boolean not null);
+insert into dashboard_private.access_settings values (true, false) on conflict (id) do nothing;
+create or replace function dashboard_private.current_account_id() returns uuid language sql stable as $$
+    select case when coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') = 'anon'
+        then null::uuid else '00000000-0000-4000-8000-000000000001'::uuid end
+$$;
+\ir ../supabase/daf_upload_contention_fix.sql
+\ir ../supabase/daf_maintenance_contention_fix.sql
+
+do $$
+begin
+    perform set_config('statement_timeout', '2s', true);
+    perform set_config('request.path', '/rpc/daf_finalize_log_import', true);
+    perform public.dashboard_require_session();
+    if current_setting('statement_timeout')::interval <> interval '60 seconds' then
+        raise exception 'Upload RPC pre-request did not raise the request-local timeout';
+    end if;
+
+    update dashboard_private.access_settings set enabled = true where id;
+    perform set_config('statement_timeout', '2s', true);
+    perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+    begin
+        perform public.dashboard_require_session();
+        raise exception 'Unauthenticated upload request was unexpectedly accepted';
+    exception when sqlstate 'PT401' then
+        null;
+    end;
+    if current_setting('statement_timeout')::interval <> interval '2 seconds' then
+        raise exception 'Unauthenticated request received the extended timeout';
+    end if;
+
+    perform set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+    perform public.dashboard_require_session();
+    if current_setting('statement_timeout')::interval <> interval '60 seconds' then
+        raise exception 'Authenticated upload request did not receive the extended timeout';
+    end if;
+
+    update dashboard_private.access_settings set enabled = false where id;
+    perform set_config('statement_timeout', '2s', true);
+    perform set_config('request.path', '/rpc/daf_get_log_process_details', true);
+    perform public.dashboard_require_session();
+    if current_setting('statement_timeout')::interval <> interval '2 seconds' then
+        raise exception 'Non-upload API timeout was unexpectedly changed';
+    end if;
+end;
+$$;
 
 -- The retention policy counts actual dates with station data, not calendar days.
 insert into public.daf_log_compact_groups(
@@ -867,13 +914,65 @@ begin
 end;
 $$;
 
+-- The stage cutoff is snapshotted once at job creation; active uploads defer
+-- maintenance, and a later watermark advance cannot change this job's payload.
+do $$
+declare
+    v_job uuid := '00000000-0000-4000-8000-000000009999'::uuid;
+    v_cutoff date;
+    v_metadata jsonb;
+    v_records jsonb;
+    v_result jsonb;
+begin
+    select raw_cutoff_date into v_cutoff
+    from public.daf_log_compaction_state where id = 'current';
+    if v_cutoff is null then raise exception 'Test requires an initialized raw-retention watermark'; end if;
+
+    v_metadata := jsonb_build_array(jsonb_build_object(
+        'line','DAF','date_start',v_cutoff::text,'date_end',v_cutoff::text,
+        'uploaded_at',now(),'id','upload-contention-watermark-test'
+    ));
+    perform public.daf_start_log_import(v_job,'upload-contention-watermark-test.xlsx',v_metadata,1);
+
+    v_result := public.daf_run_log_maintenance_batch();
+    if v_result->>'deferred_reason' <> 'recent_upload_in_progress' then
+        raise exception 'Maintenance did not defer for a recently started upload: %',v_result;
+    end if;
+
+    update public.daf_log_compaction_state
+       set raw_cutoff_date = raw_cutoff_date + 1
+     where id = 'current';
+    v_records := jsonb_build_array(jsonb_build_object(
+        'dedupKey','upload-contention-watermark-test-e','dedupTime',1,
+        'date',v_cutoff::text,'workOrder','probe','productCode','probe',
+        'model','probe','status','GOOD','defect','','machine','未知機台',
+        'inputIncluded',true,'isDefect',false,'sourceFormat','test',
+        'raw',jsonb_build_array('keep-until-compaction')
+    ));
+    perform public.daf_stage_log_import_chunk(v_job,'DAF',0,'upload-contention-hash',v_records);
+    if not exists (
+        select 1 from public.daf_log_import_jobs j
+        join public.daf_log_candidates c on c.job_id = j.id
+        where j.id = v_job and j.raw_retention_cutoff = v_cutoff
+          and c.record_json ? 'raw'
+    ) then
+        raise exception 'Upload did not keep its original cutoff snapshot';
+    end if;
+    -- This test fixture only stages data (never publishes it); cascading delete
+    -- removes its own disposable job, chunks, and candidate rows.
+    delete from public.daf_log_import_jobs where id = v_job;
+end;
+$$;
+
 do $$
 declare
     v_result jsonb;
 begin
     v_result := public.daf_run_log_maintenance_batch();
-    if not (v_result ?& array['compaction', 'raw_retention', 'deleted_machine_reference_rows']) then
-        raise exception 'Scheduled maintenance did not run both retention paths: %', v_result;
+    if not (v_result ? 'deleted_machine_reference_rows') or not (
+        v_result ? 'compaction' or v_result ? 'raw_retention' or v_result ? 'deleted_superseded_candidates'
+    ) then
+        raise exception 'Scheduled maintenance did not run one bounded maintenance path: %', v_result;
     end if;
 end;
 $$;

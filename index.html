@@ -469,6 +469,11 @@
                                 </div>
                                 <p class="text-sm text-red-900 whitespace-pre-wrap break-words">{{ item.message }}</p>
                                 <p v-if="item.code" class="mt-2 text-xs text-gray-600 break-all">錯誤代碼／狀態：{{ item.code }}</p>
+                                <p v-if="item.diagnostic" class="mt-2 text-xs text-gray-600 break-all">
+                                    RPC：{{ item.diagnostic.rpcName || '未知' }}<span v-if="item.diagnostic.jobId">；工作：{{ item.diagnostic.jobId }}</span><span v-if="item.diagnostic.chunkCount">；批次：{{ item.diagnostic.chunkIndex + 1 }}/{{ item.diagnostic.chunkCount }}</span><span v-if="item.diagnostic.recordCount !== null">；筆數：{{ item.diagnostic.recordCount }}</span><span v-if="item.diagnostic.payloadBytes !== null">；資料量：{{ item.diagnostic.payloadBytes }} bytes</span><span v-if="item.diagnostic.elapsedMs !== undefined">；耗時：{{ item.diagnostic.elapsedMs }} ms</span>
+                                </p>
+                                <p v-if="item.diagnostic && item.diagnostic.cleanupError" class="mt-2 text-xs text-red-800 break-words">清理未確認：{{ item.diagnostic.cleanupError }}</p>
+                                <p v-if="item.diagnostic && item.diagnostic.statusCheckError" class="mt-1 text-xs text-gray-600 break-words">狀態確認失敗：{{ item.diagnostic.statusCheckError }}</p>
                                 <p v-if="item.details" class="mt-2 text-xs text-gray-600 whitespace-pre-wrap break-words">補充資訊：{{ item.details }}</p>
                                 <p v-if="item.hint" class="mt-1 text-xs text-gray-600 whitespace-pre-wrap break-words">系統提示：{{ item.hint }}</p>
                             </article>
@@ -1904,7 +1909,7 @@
 <script src="js/report.js?v=20261016-workorder-guard-v2"></script>
 <script src="js/assembly.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/daf-upload-utils.js?v=20261008-neutral-entry-v1"></script>
-<script src="js/daf.js?v=20261015-machine-reference-lock-v1"></script>
+<script src="js/daf.js?v=20261019-upload-timeout-diagnostic-v1"></script>
 <script src="js/fpy.js?v=20261019-missing-order-guard-v1"></script>
 <script src="js/ooc.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/dashboard.js?v=20261008-neutral-entry-v1"></script>

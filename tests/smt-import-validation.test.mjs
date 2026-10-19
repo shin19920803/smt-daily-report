@@ -20,6 +20,7 @@ function harness({ line = 'SMT', existingFpy = null } = {}) {
         calendarYear: { value: 2026 }, calendarMonth: { value: 9 }
     };
     const window = { SMT: {}, getTaiwanDate: () => '2026-10-16', shiftDateByDays: () => '2026-10-15' };
+    const database = { orders: [...ctx.data.value.workOrders], error: null };
     const sandbox = vm.createContext({ window, console: { warn() {}, error() {} },
         ref: value => ({ value }), computed: getter => ({ get value() { return getter(); } }),
         XLSX: {
@@ -29,12 +30,19 @@ function harness({ line = 'SMT', existingFpy = null } = {}) {
         _supabase: { from(table) {
             queries.push(table);
             let single = false;
+            let orderPattern = '', orderLine = null, start = 0, end = 999;
             const chain = {
-                select() { return chain; }, eq() { return chain; }, order() { return chain; }, limit() { return chain; },
+                select() { return chain; }, eq(field, value) { if (field === 'line') orderLine = value; return chain; }, order() { return chain; }, limit() { return chain; },
+                ilike(field, pattern) { orderPattern = pattern.replace(/\\([\\%_])/g, '$1'); return chain; },
+                range(from, to) { start = from; end = to; return chain; },
                 maybeSingle() { single = true; return chain; },
                 insert(payload) { writes.push({ table, operation: 'insert', payload: JSON.parse(JSON.stringify(payload)) }); return chain; },
                 update(payload) { writes.push({ table, operation: 'update', payload: JSON.parse(JSON.stringify(payload)) }); return chain; },
                 then(resolve, reject) {
+                    if (table === 'work_orders') {
+                        const orders = database.orders.filter(order => (order.line ?? 'SMT') === orderLine && String(order.wo_number).toUpperCase() === orderPattern).slice(start, end + 1);
+                        return Promise.resolve({ data: database.error ? null : orders, error: database.error }).then(resolve, reject);
+                    }
                     const data = single ? (table === 'daily_fpy' ? existingFpy : { id: 'production-1', input_quantity: 100 }) : [];
                     return Promise.resolve({ data, error: null }).then(resolve, reject);
                 }
@@ -53,7 +61,7 @@ function harness({ line = 'SMT', existingFpy = null } = {}) {
     const reportEvent = (rows, name = '20261015_626090094.csv') => {
         const value = event(rows); value.target.files[0].name = name; return value;
     };
-    return { ctx, report, fp, writes, queries, messages, event, reportEvent, validate: window.SMT.validateSmtImport, validateFilename: window.SMT.validateSmtReportFilename };
+    return { ctx, report, fp, writes, queries, messages, event, reportEvent, database, validate: window.SMT.validateSmtImport, validateFilename: window.SMT.validateSmtReportFilename };
 }
 
 test('SMT files cannot cross the two upload entry points; rejection performs zero database calls', async () => {
@@ -160,4 +168,80 @@ test('missing/ambiguous headers are rejected; header whitespace, BOM and case ar
     assert.throws(() => validate([['瑕疵項目'], ['缺件']], 'defects'), /位置代碼/);
     assert.doesNotThrow(() => validate([['\uFEFF 瑕疵項目 ', 'C1'], ['缺件', '']], 'defects'));
     assert.doesNotThrow(() => validate([[' 日期 ', '工單號碼', 'ｓｐｉ（％）', 'aoi (%)'], ['2026/10/15', '626090094', '', '100%']], 'fpy'));
+});
+
+test('a missing FPY order blocks all rows and displays an actionable missing-order dialog', async () => {
+    const h = harness();
+    const rows = [fpy[0], fpy[1], ['2026/10/15', '626090999', 'NEW_MODEL', '98%', '99%']];
+    const event = h.event(rows); await h.fp.importFpyFile(event);
+    assert.deepEqual(h.writes, []);
+    assert(!h.queries.includes('daily_fpy'));
+    assert.equal(h.fp.fpyMissingOrders.value.show, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(h.fp.fpyMissingOrders.value.items)), [
+        { number: '626090999', models: ['NEW_MODEL'], files: ['upload-1.csv'] }
+    ]);
+    assert.equal(h.ctx.loading.value, false); assert.equal(event.target.value, '');
+    assert(!h.messages.some(item => item.type === 'success'));
+    h.fp.goToFpyWorkOrders();
+    assert.equal(h.ctx.currentTab.value, 'orders'); assert.equal(h.fp.fpyMissingOrders.value.show, false);
+});
+
+test('preflight covers every file regardless of ordering and deduplicates missing-order references', async () => {
+    const missing = [fpy[0], ['2026/10/15', '626090999', 'NEW_MODEL', '', '99%']];
+    for (const files of [[fpy, missing, missing], [missing, fpy, missing]]) {
+        const h = harness(); await h.fp.importFpyFile(h.event(...files));
+        assert.deepEqual(h.writes, []); assert(!h.queries.includes('daily_fpy'));
+        assert.equal(h.fp.fpyMissingOrders.value.items.length, 1);
+        assert.equal(h.fp.fpyMissingOrders.value.items[0].files.length, 2);
+        assert.equal(h.queries.filter(table => table === 'work_orders').length, 2);
+    }
+});
+
+test('fresh database order checks override stale local presence or absence', async () => {
+    const deleted = harness(); deleted.database.orders = [];
+    await deleted.fp.importFpyFile(deleted.event(fpy));
+    assert.deepEqual(deleted.writes, []); assert.equal(deleted.fp.fpyMissingOrders.value.show, true);
+    const fresh = harness(); fresh.ctx.data.value.workOrders = [];
+    await fresh.fp.importFpyFile(fresh.event(fpy));
+    assert.equal(fresh.writes.length, 1); assert.equal(fresh.writes[0].payload.wo_id, 'wo-1');
+    assert.equal(fresh.fp.fpyMissingOrders.value.show, false);
+});
+
+test('creating the missing database order allows a fresh upload of the complete original file', async () => {
+    const h = harness();
+    const rows = [fpy[0], fpy[1], ['2026/10/15', '626090999', 'NEW_MODEL', '98%', '99%']];
+    await h.fp.importFpyFile(h.event(rows)); assert.deepEqual(h.writes, []);
+    h.database.orders.push({ id: 'wo-new', wo_number: '626090999', models: { name: 'NEW_MODEL' } });
+    assert.deepEqual(h.writes, []); // Adding an order does not silently resume an upload.
+    await h.fp.importFpyFile(h.event(rows));
+    assert.equal(h.fp.fpyMissingOrders.value.show, false);
+    assert.equal(h.writes.length, 2);
+    assert.deepEqual(h.writes.map(write => write.payload.wo_id), ['wo-1', 'wo-new']);
+    assert.equal(h.writes[1].payload.spi_rate, 98); assert.equal(h.writes[1].payload.aoi_rate, 99);
+});
+
+test('database lookup errors stop before any writes without claiming an order is missing', async () => {
+    const h = harness(); h.database.error = { message: 'network unavailable' };
+    await h.fp.importFpyFile(h.event(fpy));
+    assert.deepEqual(h.writes, []); assert(!h.queries.includes('daily_fpy'));
+    assert.equal(h.fp.fpyMissingOrders.value.show, false);
+    assert(h.messages.some(item => /無法確認資料庫工單/.test(item.message) && item.type === 'error'));
+});
+
+test('work-order model variants are paginated and model-specific matching is preserved', async () => {
+    const h = harness();
+    h.database.orders = Array.from({ length: 1001 }, (_, i) => ({ id: `wo-${i}`, wo_number: '626090094', models: { name: `MODEL_${i}` } }));
+    const rows = [fpy[0], ['2026/10/15', '626090094', 'MODEL_1000', '', '99%']];
+    await h.fp.importFpyFile(h.event(rows));
+    assert.equal(h.queries.filter(table => table === 'work_orders').length, 2);
+    assert.equal(h.writes.length, 1); assert.equal(h.writes[0].payload.wo_id, 'wo-1000');
+});
+
+test('orders from another process cannot satisfy SMT preflight; even blank-rate references are checked', async () => {
+    const h = harness(); h.database.orders[0] = { ...h.database.orders[0], line: 'ASSY' };
+    await h.fp.importFpyFile(h.event(fpy));
+    assert.deepEqual(h.writes, []); assert.equal(h.fp.fpyMissingOrders.value.show, true);
+    const blank = harness();
+    await blank.fp.importFpyFile(blank.event([fpy[0], fpy[1], ['', '626090999', 'NEW_MODEL', '', '']]));
+    assert.deepEqual(blank.writes, []); assert.equal(blank.fp.fpyMissingOrders.value.items[0].number, '626090999');
 });

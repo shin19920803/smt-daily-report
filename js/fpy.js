@@ -9,6 +9,12 @@ SMT.fpy = function (ctx) {
         const selectedFpyId = ref(null);
         const fpyDayModal = ref({ show: false, date: '', list: [] });
         const isEditingFpy = ref(false);
+        const fpyMissingOrders = ref({ show: false, items: [] });
+        const closeFpyMissingOrders = () => { fpyMissingOrders.value = { show: false, items: [] }; };
+        const goToFpyWorkOrders = () => {
+            closeFpyMissingOrders();
+            ctx.currentTab.value = 'orders';
+        };
 
         const availableModelsForFpy = computed(() => !fpyForm.value.selectedWoNumber ? [] : data.value.workOrders.filter(w => w.wo_number === fpyForm.value.selectedWoNumber));
         const fpyWoList = computed(() => { if (fpyForm.value.showAllWo) return uniqueWoNumbers.value; return activeWoNumbers.value; });
@@ -59,23 +65,78 @@ SMT.fpy = function (ctx) {
         const importFpyFile = async (e) => {
             const files = Array.from(e.target.files || []);
             if (files.length === 0) return;
+            const importLine = currentLine.value;
+            if (importLine === 'SMT') closeFpyMissingOrders();
             loading.value = true;
             try {
                 let totalSuccess = 0, totalSkip = 0, allErrs = [], rejectedFiles = [];
-                for (const file of files) {
+                const prepared = new Map();
+                let checkedWorkOrders = null;
+                const readRows = async file => {
                     const ab = await file.arrayBuffer();
                     const wb = XLSX.read(ab, { type: 'array', cellDates: false });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-                    let validated = null;
-                    if (currentLine.value === 'SMT') {
+                    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+                };
+                if (importLine === 'SMT') {
+                    // Parse every selected file and check every referenced order
+                    // against Supabase before the first FPY insert or update.
+                    const references = new Map();
+                    for (const file of files) {
+                        const rows = await readRows(file);
+                        let validated;
                         try { validated = SMT.validateSmtImport(rows, 'fpy'); }
                         catch (error) {
+                            prepared.set(file, { error: error.message });
                             const message = `${file.name}：${error.message}`;
                             rejectedFiles.push(message); allErrs.push(message);
                             continue;
                         }
+                        prepared.set(file, { rows, validated });
+                        const { iWo, iModel } = validated.columns;
+                        for (const row of rows.slice(1)) {
+                            const number = String(row?.[iWo] ?? '').trim().toUpperCase();
+                            if (!number) continue;
+                            if (!references.has(number)) references.set(number, { number, models: new Set(), files: new Set() });
+                            const reference = references.get(number);
+                            reference.files.add(file.name);
+                            const model = iModel >= 0 ? String(row[iModel] ?? '').trim() : '';
+                            if (model) reference.models.add(model);
+                        }
                     }
+                    checkedWorkOrders = [];
+                    const numbers = [...references.keys()];
+                    // Query only the referenced orders; escape LIKE wildcards
+                    // and paginate model variants instead of trusting local data.
+                    for (let offset = 0; offset < numbers.length; offset += 5) {
+                        const groups = await Promise.all(numbers.slice(offset, offset + 5).map(async number => {
+                            const matches = [];
+                            const pattern = number.replace(/[\\%_]/g, '\\$&');
+                            for (let start = 0; ; start += 1000) {
+                                const { data: orders, error } = await _supabase.from('work_orders')
+                                    .select('id,wo_number,models(name)').eq('line', 'SMT').ilike('wo_number', pattern)
+                                    .order('created_at', { ascending: false }).order('id').range(start, start + 999);
+                                if (error || !Array.isArray(orders)) throw new Error(`無法確認資料庫工單，尚未開始匯入：${error?.message || '工單查詢未完成'}`);
+                                matches.push(...orders);
+                                if (orders.length < 1000) break;
+                            }
+                            return matches;
+                        }));
+                        checkedWorkOrders.push(...groups.flat());
+                    }
+                    if (currentLine.value !== importLine) throw new Error('產線已切換，請回到 SMT 重新上傳');
+                    const existingNumbers = new Set(checkedWorkOrders.map(order => String(order.wo_number ?? '').trim().toUpperCase()));
+                    const missing = [...references.values()].filter(item => !existingNumbers.has(item.number));
+                    if (missing.length) {
+                        fpyMissingOrders.value = { show: true, items: missing.map(item => ({ number: item.number, models: [...item.models], files: [...item.files] })) };
+                        if (rejectedFiles.length) toast(`已阻擋錯誤檔案：${rejectedFiles.join('；')}`, 'error');
+                        return;
+                    }
+                }
+                for (const file of files) {
+                    const cached = prepared.get(file);
+                    if (cached?.error) continue;
+                    const rows = cached?.rows || await readRows(file);
+                    const validated = cached?.validated || null;
                     if (rows.length < 2) { allErrs.push(`${file.name} 無資料`); continue; }
                     const headers = rows[0].map(h => String(h).trim());
                     const find = (...keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
@@ -95,14 +156,17 @@ SMT.fpy = function (ctx) {
                         const spi = iSpi >= 0 ? parseRate(r[iSpi]) : null;
                         const aoi = iAoi >= 0 ? parseRate(r[iAoi]) : null;
                         if (spi === null && aoi === null) { totalSkip++; continue; }
-                        const candidates = data.value.workOrders.filter(w => (w.wo_number||'').toUpperCase() === woNum);
+                        const candidates = (checkedWorkOrders ?? data.value.workOrders).filter(w => (w.wo_number||'').toUpperCase() === woNum);
                         if (candidates.length === 0) { allErrs.push(`${woNum} 找不到工單`); totalSkip++; continue; }
                         let wo = modelName ? (candidates.find(w => (w.models?.name||'').toUpperCase() === modelName) || candidates.find(w => (w.models?.name||'').toUpperCase().includes(modelName) || modelName.includes((w.models?.name||'').toUpperCase()))) : null;
                         if (!wo) wo = candidates[0];
-                        const { data: existing } = await _supabase.from('daily_fpy').select('*').eq('wo_id', wo.id).eq('production_date', dateStr).maybeSingle();
+                        const { data: existing, error: lookupError } = await _supabase.from('daily_fpy').select('*').eq('wo_id', wo.id).eq('production_date', dateStr).maybeSingle();
+                        if (lookupError) throw lookupError;
                         const payload = { wo_id: wo.id, production_date: dateStr, spi_rate: spi !== null ? spi : (existing?.spi_rate ?? null), aoi_rate: aoi !== null ? aoi : (existing?.aoi_rate ?? null) };
-                        if (existing) await _supabase.from('daily_fpy').update(payload).eq('id', existing.id);
-                        else await _supabase.from('daily_fpy').insert({ ...payload, line: currentLine.value });
+                        const { error: writeError } = existing
+                            ? await _supabase.from('daily_fpy').update(payload).eq('id', existing.id)
+                            : await _supabase.from('daily_fpy').insert({ ...payload, line: importLine });
+                        if (writeError) throw writeError;
                         totalSuccess++;
                     }
                 }
@@ -122,6 +186,7 @@ SMT.fpy = function (ctx) {
         return {
             fpyForm, fpyHistory, fpyFilter, showFpyModal, showFpyExportModal, selectedFpyId,
             fpyDayModal, isEditingFpy, availableModelsForFpy, fpyWoList, fpyCalendarDays,
+            fpyMissingOrders, closeFpyMissingOrders, goToFpyWorkOrders,
             openFpyModal, openFpyDayDetail, fetchFpyRecord, saveFpy, importFpyFile,
             loadFpyHistory, deleteFpy, exportFpyData
         };

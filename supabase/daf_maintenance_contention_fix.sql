@@ -1,4 +1,4 @@
--- Keep the minute maintenance job from holding the five process locks for a
+-- Keep the bounded maintenance job from holding the five process locks for a
 -- large compaction or waiting behind an active upload.
 begin;
 
@@ -19,7 +19,7 @@ declare
     v_task integer;
 begin
     -- Never wait behind an upload start. If an upload owns the gate, retry on
-    -- the next scheduled minute instead.
+    -- the next scheduled run instead.
     if not pg_try_advisory_xact_lock(hashtextextended('daf-upload-maintenance-gate', 92743)) then
         return jsonb_build_object('deferred_reason', 'upload_start_in_progress');
     end if;

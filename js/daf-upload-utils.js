@@ -43,7 +43,33 @@
         return /network|fetch failed|failed to fetch|connection reset|temporarily unavailable|timeout|逾時|超時/i.test(String(error?.message || error || ''));
     };
 
-    const api = { splitRecordsIntoChunks, hashPayload, isRetryableUploadError };
+    const selectWorkbookSheet = (workbook, { requireDetail = false } = {}) => {
+        const sheetNames = Array.isArray(workbook?.SheetNames) ? workbook.SheetNames : [];
+        if (requireDetail) {
+            if (!sheetNames.includes('Detail') || !workbook?.Sheets?.Detail) {
+                throw new Error('找不到 Detail 工作表，請確認上傳檔案包含名稱為 Detail 的分頁；其他工作表不會匯入');
+            }
+            return workbook.Sheets.Detail;
+        }
+        const firstSheetName = sheetNames[0];
+        const sheet = firstSheetName ? workbook?.Sheets?.[firstSheetName] : null;
+        if (!sheet) throw new Error('檔案沒有可讀取的工作表');
+        return sheet;
+    };
+
+    const readWorkbookRows = (workbook, { requireDetail = false, sheetToJson, isNonEmptyRow } = {}) => {
+        if (typeof sheetToJson !== 'function' || typeof isNonEmptyRow !== 'function') {
+            throw new TypeError('讀取工作表時缺少必要的轉換函式');
+        }
+        const sheet = selectWorkbookSheet(workbook, { requireDetail });
+        const rows = sheetToJson(sheet, { header: 1, raw: true, defval: '' }).filter(isNonEmptyRow);
+        if (requireDetail && !rows.length) {
+            throw new Error('Detail 工作表是空白的，沒有可匯入資料；其他工作表不會匯入');
+        }
+        return rows;
+    };
+
+    const api = { splitRecordsIntoChunks, hashPayload, isRetryableUploadError, selectWorkbookSheet, readWorkbookRows };
     root.SMT_DAF_UPLOAD_UTILS = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

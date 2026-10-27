@@ -530,10 +530,12 @@ SMT.daf = function (ctx) {
         } else {
             throw new Error('不支援的檔案格式，請使用 xlsx、xls、xlsm、csv 或 txt');
         }
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        if (!sheet) throw new Error('檔案沒有可讀取的工作表');
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' })
-            .filter(row => row.some(cell => cleanText(cell) !== ''));
+        const isExcel = ['xlsx', 'xls', 'xlsm'].includes(extension);
+        const rows = SMT_DAF_UPLOAD_UTILS.readWorkbookRows(workbook, {
+            requireDetail: isExcel,
+            sheetToJson: (sheet, options) => XLSX.utils.sheet_to_json(sheet, options),
+            isNonEmptyRow: row => row.some(cell => cleanText(cell) !== '')
+        });
         const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
         const minColumns = currentDafColumns().minColumns;
         if (columnCount < minColumns) throw new Error(`${currentDafLabel()} 檔案目前只有 ${columnCount} 欄，至少需要 ${minColumns} 欄才能讀取狀態欄`);

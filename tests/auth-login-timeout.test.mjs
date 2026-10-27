@@ -162,6 +162,18 @@ test('登入 RPC 失敗狀態碼會呈現服務忙碌訊息', async () => {
     assert.equal(h.state.busy.value, false);
 });
 
+test('PostgREST schema cache 失敗不會被誤報成帳密錯誤', async () => {
+    const h = createHarness(async () => ({
+        ok: false, status: 503,
+        json: async () => ({ code: 'PGRST002', message: 'Could not query the database for the schema cache. Retrying.' })
+    }));
+    h.state.username.value = 'Y0163'; h.state.password.value = 'secret';
+    await h.state.login();
+    assert.match(h.state.error.value, /無法讀取資料庫結構/);
+    assert.doesNotMatch(h.state.error.value, /帳號或密碼錯誤/);
+    assert.equal(h.state.busy.value, false);
+});
+
 test('登出 RPC 卡住時仍會清除前端登入狀態並回登入頁', async () => {
     let calls = 0;
     const h = createHarness((_, init) => {

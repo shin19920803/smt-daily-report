@@ -119,6 +119,9 @@ window.DashboardAuth = (() => {
                         if (failure?.code === 'DASHBOARD_RPC_TIMEOUT') error.value = '登入服務回應逾時，請確認網路後重試';
                         else if (failure?.code === 'DASHBOARD_NETWORK') error.value = '目前無法連線到登入服務，請檢查網路後重試';
                         else if (failure?.code === 'DASHBOARD_INVALID_RESPONSE') error.value = failure.message;
+                        else if (failure?.code === 'PGRST002' || /could not query the database for the schema cache/i.test(failure?.message || '')) {
+                            error.value = 'Supabase 目前無法讀取資料庫結構，登入尚未完成；這不是帳號密碼錯誤，請稍後重試。';
+                        }
                         else if (failure?.status === 429 || failure?.message?.includes('登入嘗試過多')) error.value = '登入嘗試過多，請稍後再試';
                         else if (failure?.status >= 500) error.value = '登入服務目前忙碌，請稍後重試';
                         else error.value = failure.message || '登入失敗，請稍後再試';

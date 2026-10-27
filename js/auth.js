@@ -1,6 +1,8 @@
 /* Login sessions stay in memory. Only the optional account name is remembered. */
 window.DashboardAuth = (() => {
     const nativeFetch = window.fetch.bind(window);
+    const RPC_TIMEOUT_MS = 15000;
+    const LOGOUT_TIMEOUT_MS = 5000;
     const user = Vue.ref(null);
     let config;
     let token = '';
@@ -33,24 +35,54 @@ window.DashboardAuth = (() => {
         };
         addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
     };
-    const rpc = async (name, body = {}) => {
-        const response = await nativeFetch(`${config.url}/rest/v1/rpc/${name}`, {
-            method: 'POST', cache: 'no-store', headers: {
-                apikey: config.key, Authorization: `Bearer ${config.key}`,
-                'Content-Type': 'application/json', 'X-Dashboard-Session': token
-            }, body: JSON.stringify(body)
+    const rpc = async (name, body = {}, { timeoutMs = RPC_TIMEOUT_MS } = {}) => {
+        const controller = new AbortController();
+        let timedOut = false;
+        let timeoutId;
+        const request = (async () => {
+            const response = await nativeFetch(`${config.url}/rest/v1/rpc/${name}`, {
+                method: 'POST', cache: 'no-store', signal: controller.signal, headers: {
+                    apikey: config.key, Authorization: `Bearer ${config.key}`,
+                    'Content-Type': 'application/json', 'X-Dashboard-Session': token
+                }, body: JSON.stringify(body)
+            });
+            let result;
+            try { result = await response.json(); }
+            catch (cause) {
+                if (response.status === 204 || response.status === 205) result = null;
+                else throw Object.assign(new Error('登入服務回應格式錯誤，請稍後重試'), { code: 'DASHBOARD_INVALID_RESPONSE', cause });
+            }
+            if (!response.ok) {
+                if (response.status === 401 && token) expire();
+                const error = new Error(result?.message || '登入服務暫時無法使用，請稍後重試');
+                error.status = response.status;
+                error.code = result?.code || `HTTP_${response.status}`;
+                throw error;
+            }
+            return result;
+        })();
+        const deadline = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                timedOut = true;
+                controller.abort();
+                reject(Object.assign(new Error('登入服務回應逾時，請稍後重試'), { code: 'DASHBOARD_RPC_TIMEOUT' }));
+            }, timeoutMs);
         });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            if (response.status === 401 && token) expire();
-            throw new Error(result.message || '無法連線，請稍後再試');
-        }
-        return result;
+        try { return await Promise.race([request, deadline]); }
+        catch (failure) {
+            if (timedOut) throw Object.assign(new Error('登入服務回應逾時，請稍後重試'), { code: 'DASHBOARD_RPC_TIMEOUT' });
+            if (failure?.name === 'AbortError') throw Object.assign(new Error('請求已取消，請重新操作'), { code: 'DASHBOARD_RPC_ABORTED' });
+            if (failure instanceof TypeError || failure?.name === 'TypeError') {
+                throw Object.assign(new Error('無法連線至登入服務，請檢查網路後重試'), { code: 'DASHBOARD_NETWORK', cause: failure });
+            }
+            throw failure;
+        } finally { clearTimeout(timeoutId); }
     };
     const logout = async () => {
         if (leaving) return;
         leaving = true;
-        try { await rpc('dashboard_logout'); }
+        try { await rpc('dashboard_logout', {}, { timeoutMs: LOGOUT_TIMEOUT_MS }); }
+        catch (failure) { console.warn('登出服務未能確認，已清除本機登入狀態', failure?.code || failure?.status || 'network_error'); }
         finally { token = ''; user.value = null; location.reload(); }
     };
     const mountLogin = mountDashboard => {
@@ -70,7 +102,11 @@ window.DashboardAuth = (() => {
                     error.value = '';
                     try {
                         const result = await rpc('dashboard_login', { p_username: username.value.trim(), p_password: password.value });
-                        if (!result.ok || !result.token || !result.user) throw new Error(result.message || '帳號或密碼錯誤');
+                        if (!result?.ok || typeof result.token !== 'string' || !result.token
+                            || !result.user || typeof result.user !== 'object'
+                            || !result.user.id || typeof result.user.username !== 'string') {
+                            throw new Error(result?.message || '帳號或密碼錯誤');
+                        }
                         token = result.token;
                         user.value = result.user;
                         password.value = '';
@@ -80,7 +116,12 @@ window.DashboardAuth = (() => {
                     } catch (failure) {
                         token = '';
                         user.value = null;
-                        error.value = failure.message || '登入失敗，請稍後再試';
+                        if (failure?.code === 'DASHBOARD_RPC_TIMEOUT') error.value = '登入服務回應逾時，請確認網路後重試';
+                        else if (failure?.code === 'DASHBOARD_NETWORK') error.value = '目前無法連線到登入服務，請檢查網路後重試';
+                        else if (failure?.code === 'DASHBOARD_INVALID_RESPONSE') error.value = failure.message;
+                        else if (failure?.status === 429 || failure?.message?.includes('登入嘗試過多')) error.value = '登入嘗試過多，請稍後再試';
+                        else if (failure?.status >= 500) error.value = '登入服務目前忙碌，請稍後重試';
+                        else error.value = failure.message || '登入失敗，請稍後再試';
                     } finally { password.value = ''; busy.value = false; }
                 };
                 return { username, password, remember, busy, error, login };

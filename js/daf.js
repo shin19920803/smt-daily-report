@@ -238,9 +238,10 @@ SMT.daf = function (ctx) {
         'FP-D01810MB12': 'CY26-16-GOODIX',
         'FP-D01820MB11': 'CY26-16-SYNAPTICS',
         'FP-D01820MB12': 'CY26-16-SYNAPTICS',
-        'FP-D01304BE11': 'B24-GOODIX'
+        'FP-D01304BE11': 'B24-GOODIX',
+        'FP-D01321BE11': 'B24-ELAN',
+        'FP-D01524BK11': 'B27-ELAN'
     };
-    const MAPPING_ENTRIES = Object.entries(MODEL_MAPPING).sort((a, b) => b[0].length - a[0].length);
 
     const dafBatches = ref([]);
     // 儀表板只使用 Supabase 摘要；完整 records 僅在統計／明細明確載入時放入 dafBatches。
@@ -318,32 +319,32 @@ SMT.daf = function (ctx) {
     };
     const normalizeText = (value) => cleanText(value).toUpperCase();
     const normalizeModelName = value => normalizeText(value) || '未識別機種';
+    const normalizeDafProductCode = value => SMT_DAF_UPLOAD_UTILS.normalizeProductCode(value);
     const readModelMappings = () => {
-        const merged = {};
+        const entries = [];
         [currentDafMappingStorageKey(), ...LEGACY_MODEL_MAPPING_STORAGE_KEYS].forEach(key => {
             try {
                 const parsed = JSON.parse(localStorage.getItem(key) || '{}');
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-                Object.entries(parsed).forEach(([code, model]) => {
-                    const normalizedCode = normalizeText(code);
-                    const normalizedModel = normalizeModelName(model);
-                    if (normalizedCode && normalizedModel !== '未識別機種' && !merged[normalizedCode]) merged[normalizedCode] = normalizedModel;
-                });
+                entries.push(...Object.entries(parsed));
             } catch (e) {}
         });
-        return merged;
+        return SMT_DAF_UPLOAD_UTILS.normalizeModelMappings(entries);
     };
     const persistModelMappings = () => {
         try {
-            const normalized = Object.fromEntries(Object.entries(dafModelMappings.value).map(([code, model]) => [normalizeText(code), normalizeModelName(model)]));
+            const normalized = SMT_DAF_UPLOAD_UTILS.normalizeModelMappings(Object.entries(dafModelMappings.value));
             dafModelMappings.value = normalized;
             localStorage.setItem(currentDafMappingStorageKey(), JSON.stringify(normalized));
+            LEGACY_MODEL_MAPPING_STORAGE_KEYS.forEach(key => {
+                if (key !== currentDafMappingStorageKey()) localStorage.removeItem(key);
+            });
         } catch (e) {}
     };
-    const modelMappingRemoteId = code => `${MODEL_MAPPING_REMOTE_PREFIX}${encodeURIComponent(normalizeText(code))}`;
+    const modelMappingRemoteId = code => `${MODEL_MAPPING_REMOTE_PREFIX}${encodeURIComponent(normalizeDafProductCode(code))}`;
     const modelMappingRemoteRow = (code, model) => {
-        const normalizedCode = normalizeText(code);
-        const normalizedModel = normalizeModelName(model);
+        const normalizedCode = normalizeDafProductCode(code);
+        const normalizedModel = SMT_DAF_UPLOAD_UTILS.MODEL_CODE_OVERRIDES[normalizedCode] || normalizeModelName(model);
         return {
             id: modelMappingRemoteId(normalizedCode), line: MODEL_MAPPING_REMOTE_LINE,
             file_name: '非 SMT 製程機種對應記憶', uploaded_at: new Date().toISOString(),
@@ -355,7 +356,7 @@ SMT.daf = function (ctx) {
         };
     };
     const saveRemoteModelMapping = async (code, model) => {
-        const normalizedCode = normalizeText(code);
+        const normalizedCode = normalizeDafProductCode(code);
         const normalizedModel = normalizeModelName(model);
         if (!normalizedCode || normalizedModel === '未識別機種' || !_supabase) return false;
         const { data, error } = await _supabase.from(REMOTE_TABLE)
@@ -383,13 +384,10 @@ SMT.daf = function (ctx) {
             rows.push(...(page || []));
             if (!page || page.length < 1000) break;
         }
-        const remoteMappings = {};
-        rows.forEach(row => {
+        const remoteMappings = SMT_DAF_UPLOAD_UTILS.normalizeModelMappings(rows.map(row => {
             const record = Array.isArray(row.records) ? row.records[0] : row.records;
-            const code = normalizeText(row.product_code || record?.productCode);
-            const model = normalizeModelName(row.model_name || record?.model);
-            if (code && model !== '未識別機種' && !remoteMappings[code]) remoteMappings[code] = model;
-        });
+            return [row.product_code || record?.productCode, row.model_name || record?.model];
+        }));
         const localMappings = readModelMappings();
         const merged = { ...localMappings, ...remoteMappings };
         dafModelMappings.value = merged;
@@ -414,7 +412,7 @@ SMT.daf = function (ctx) {
     const learnModelMappings = (batches) => {
         let changed = false;
         (batches || []).forEach(batch => (batch.records || []).forEach(record => {
-            const code = normalizeText(record.productCode);
+            const code = normalizeDafProductCode(record.productCode);
             const model = normalizeModelName(record.model);
             if (code && model && model !== '未識別機種' && !dafModelMappings.value[code]) {
                 dafModelMappings.value[code] = model;
@@ -471,6 +469,7 @@ SMT.daf = function (ctx) {
             : (parseDateTime(raw[columns.date])?.getTime() || null);
         return {
             ...record,
+            productCode: normalizeDafProductCode(record.productCode || raw[columns.productCode]),
             model: mappedModel !== '未識別機種' ? mappedModel : normalizeModelName(record.model),
             machine: cleanText(record.machine),
             dedupKey: normalizeText(record.dedupKey || raw[columns.dedupKey] || ''),
@@ -543,12 +542,9 @@ SMT.daf = function (ctx) {
     };
 
     const findDafModelMatch = value => {
-        const normalized = normalizeText(value);
-        if (!normalized) return null;
-        const dynamicEntries = Object.entries(dafModelMappings.value).sort((a, b) => b[0].length - a[0].length);
-        return MAPPING_ENTRIES.find(([productCode]) => normalized.includes(productCode))
-            || dynamicEntries.find(([productCode]) => normalized.includes(productCode))
-            || null;
+        const code = normalizeDafProductCode(value);
+        const model = code && (MODEL_MAPPING[code] || dafModelMappings.value[code]);
+        return model ? [code, model] : null;
     };
     const resolveDafModel = value => {
         const match = findDafModelMatch(value);
@@ -558,8 +554,12 @@ SMT.daf = function (ctx) {
         const columns = currentDafColumns();
         const rawValues = [...new Map(rows.map(row => {
             const raw = cleanText(row[columns.productCode]);
-            return [normalizeText(raw), raw];
-        }).filter(([key, raw]) => key && !/產品|料號|product\s*code|part\s*number|型號|model/i.test(raw))).values()];
+            if (!raw) return ['', ''];
+            const code = normalizeDafProductCode(raw);
+            if (!code && /產品|料號|product\s*code|part\s*number|型號|model/i.test(raw)) return ['', ''];
+            if (!code) throw new Error('產品代號無法辨識：每筆資料須包含一個 FP- 代號（或既有三項例外），請確認產品代號欄');
+            return [code, code];
+        }).filter(([key]) => key)).values()];
         const matched = [];
         const unknownProductCodes = [];
         rawValues.forEach(raw => {
@@ -569,7 +569,7 @@ SMT.daf = function (ctx) {
         });
         const unknownWorkOrders = new Map(unknownProductCodes.map(code => [normalizeText(code), new Set()]));
         rows.forEach(row => {
-            const code = normalizeText(row[columns.productCode]);
+            const code = normalizeDafProductCode(row[columns.productCode]);
             const workOrder = cleanText(row[columns.workOrder]);
             if (unknownWorkOrders.has(code) && workOrder) unknownWorkOrders.get(code).add(workOrder);
         });
@@ -644,7 +644,7 @@ SMT.daf = function (ctx) {
                 if (processLine === 'DAF' && isDafMachineLabel(dafMachine)) matchedMachineReferenceKeys.add(dedupKey);
                 return {
                     workOrder: cleanText(row[columns.workOrder]) || '未識別工單',
-                    productCode: cleanText(row[columns.productCode]),
+                    productCode: normalizeDafProductCode(row[columns.productCode]),
                     dedupKey,
                     dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
                     date: parsedDate,
@@ -3360,9 +3360,9 @@ SMT.daf = function (ctx) {
         if (selected && created) return toast('請選擇既有機種或新增機種其中一種', 'warning');
         if (!selected && !created) return toast('請選擇既有機種或輸入新的機種名稱', 'warning');
         const modelName = created || selected;
-        dafModelMappings.value = { ...dafModelMappings.value, [normalizeText(code)]: normalizeModelName(modelName) };
+        if (!(await saveRemoteModelMapping(code, modelName))) return toast('機種對照保存失敗，請重試；尚未繼續上傳', 'error');
+        dafModelMappings.value = { ...dafModelMappings.value, [normalizeDafProductCode(code)]: normalizeModelName(modelName) };
         persistModelMappings();
-        await saveRemoteModelMapping(code, modelName);
         if (modal.currentIndex < modal.items.length - 1) {
             dafUnknownModelModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedModel: '', newModel: '' };
             return;

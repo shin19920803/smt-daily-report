@@ -1,4 +1,30 @@
 (function (root) {
+    const LEGACY_MODEL_CODES = Object.freeze([
+        "RFPCB,DAF,TAROKO 14''", 'RFPCB,DAF,TAROKO 14,SYNAPTICS', 'MS3633-T07'
+    ]);
+    const MODEL_CODE_OVERRIDES = Object.freeze({
+        'FP-D01321BE11': 'B24-ELAN',
+        'FP-D01524BK11': 'B27-ELAN'
+    });
+    const normalizeProductCode = value => {
+        const text = String(value ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
+        const codes = [...new Set([...text.matchAll(/(?:^|[^A-Z0-9_-])(FP-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?=$|[^A-Z0-9_-])/g)].map(match => match[1]))];
+        if (codes.length) return codes.length === 1 ? codes[0] : '';
+        return LEGACY_MODEL_CODES.find(code => text.includes(code)) || '';
+    };
+    // Callers supply newest/preferred entries first. Only the two user-confirmed
+    // collisions override that precedence; no substring model matching remains.
+    const normalizeModelMappings = entries => {
+        const mappings = {};
+        for (const [value, model] of entries) {
+            const code = normalizeProductCode(value);
+            const name = String(model ?? '').trim().toUpperCase();
+            if (code && name && name !== '未識別機種' && !mappings[code]) {
+                mappings[code] = MODEL_CODE_OVERRIDES[code] || name;
+            }
+        }
+        return mappings;
+    };
     const splitRecordsIntoChunks = (records, { maxRows = 500, maxBytes = 512 * 1024 } = {}) => {
         const encoder = new TextEncoder();
         const chunks = [];
@@ -69,7 +95,8 @@
         return rows;
     };
 
-    const api = { splitRecordsIntoChunks, hashPayload, isRetryableUploadError, selectWorkbookSheet, readWorkbookRows };
+    const api = { splitRecordsIntoChunks, hashPayload, isRetryableUploadError, selectWorkbookSheet, readWorkbookRows,
+        normalizeProductCode, normalizeModelMappings, MODEL_CODE_OVERRIDES };
     root.SMT_DAF_UPLOAD_UTILS = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

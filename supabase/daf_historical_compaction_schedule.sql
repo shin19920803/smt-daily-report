@@ -1,5 +1,5 @@
 -- Apply only after the production preview and first dashboard digest comparison pass.
--- This schedules one compaction batch per minute; it does not schedule backups.
+-- This schedules one bounded maintenance batch every three minutes; it does not schedule backups.
 create extension if not exists pg_cron;
 
 do $$
@@ -21,7 +21,7 @@ begin
 
     perform cron.schedule(
         'production-daf-log-maintenance',
-        '*/1 * * * *',
+        '*/3 * * * *',
         'select public.daf_run_log_maintenance_batch();'
     );
 end;

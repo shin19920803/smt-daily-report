@@ -1175,24 +1175,31 @@ SMT.daf = function (ctx) {
         }
         return versions;
     };
+    const loadDafVersionsFromCache = async force => {
+        if (!window.fetchCachedJson) throw new Error('Cloudflare 版本快取不可用');
+        const lines = TEST_PROCESS_IDS.join(',');
+        const result = await withDafRequestTimeout(
+            window.fetchCachedJson(`/api/daf-version?lines=${encodeURIComponent(lines)}`, { force }),
+            '測試製程版本資訊快取', DAF_CACHE_REQUEST_TIMEOUT_MS
+        );
+        if (!result?.versions) throw new Error('版本資訊格式錯誤');
+        return result.versions;
+    };
     const loadDafVersions = async (force = false) => {
         if (!force && dafRemoteVersions && Date.now() - dafRemoteVersionsLoadedAt < 60000) return dafRemoteVersions;
         try {
-            dafRemoteVersions = await withDafRequestTimeout(loadDafVersionsFromSupabase(), '測試製程版本資訊', 8000);
+            // 先使用跨電腦共用的 Cloudflare 快取，避免每台瀏覽器分頁讀取整份批次摘要。
+            dafRemoteVersions = await loadDafVersionsFromCache(force);
             dafRemoteVersionsLoadedAt = Date.now();
             return dafRemoteVersions;
-        } catch (error) {
-            console.warn('測試製程版本資訊直讀失敗，改用 Cloudflare 備援', error);
-            if (!window.fetchCachedJson) return null;
+        } catch (cacheError) {
+            console.warn('測試製程版本資訊快取讀取失敗，改由 Supabase 直讀', cacheError);
             try {
-                const lines = TEST_PROCESS_IDS.join(',');
-                const data = await withDafRequestTimeout(window.fetchCachedJson(`/api/daf-version?lines=${encodeURIComponent(lines)}`, { force }), '測試製程版本資訊備援', 15000);
-                if (!data?.versions) throw new Error('版本資訊格式錯誤');
-                dafRemoteVersions = data.versions;
+                dafRemoteVersions = await withDafRequestTimeout(loadDafVersionsFromSupabase(), '測試製程版本資訊直讀', 8000);
                 dafRemoteVersionsLoadedAt = Date.now();
                 return dafRemoteVersions;
-            } catch (fallbackError) {
-                console.warn('測試製程版本資訊備援讀取失敗，改用既有統計結果', fallbackError);
+            } catch (supabaseError) {
+                console.warn('測試製程版本資訊直讀失敗，沿用既有統計結果', supabaseError);
                 return null;
             }
         }

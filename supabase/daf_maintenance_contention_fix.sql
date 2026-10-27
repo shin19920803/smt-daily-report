@@ -41,10 +41,10 @@ begin
 
     v_reference_rows := public.daf_prune_expired_machine_references(now());
 
-    -- Do only one expensive path on each cron tick. The 3-minute rotation
-    -- avoids holding the shared process locks through several maintenance
-    -- operations in one transaction.
-    v_task := extract(minute from (now() at time zone 'UTC'))::integer % 3;
+    -- The cron runs every three minutes and rotates one bounded task each run.
+    -- Avoid repeated full cutoff scans every minute while keeping all three
+    -- maintenance paths active (each path runs once every nine minutes).
+    v_task := floor(extract(epoch from now()) / 180)::integer % 3;
 
     if v_task = 0 then
       begin
@@ -107,6 +107,27 @@ alter function public.daf_prune_superseded_log_candidates(integer)
     reset statement_timeout;
 alter function public.daf_strip_expired_log_raw_batch(date, integer)
     reset statement_timeout;
+
+-- Update the schedule in the same transaction as the rotation interval so a
+-- partial deployment cannot pin the worker on one task or run it every minute.
+do $$
+declare
+    v_job_id bigint;
+    v_legacy_job_name text := chr(107) || chr(111) || chr(121) || chr(97) || '-daf-log-maintenance';
+begin
+    for v_job_id in
+        select jobid from cron.job
+        where jobname in ('production-daf-log-maintenance', v_legacy_job_name)
+    loop
+        perform cron.unschedule(v_job_id);
+    end loop;
+    perform cron.schedule(
+        'production-daf-log-maintenance',
+        '*/3 * * * *',
+        'select public.daf_run_log_maintenance_batch();'
+    );
+end;
+$$;
 
 notify pgrst, 'reload schema';
 commit;

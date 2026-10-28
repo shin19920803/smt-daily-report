@@ -126,8 +126,13 @@
             let filesRevision = null;
 
             const callRpc = async (name, args = {}) => {
-                if (!root._supabase) throw new Error('資料庫連線尚未初始化，請重新整理頁面後再試。');
-                const { data, error: rpcError } = await root._supabase.rpc(name, args);
+                // `_supabase` is a global lexical binding created by supabase-client.js;
+                // top-level `const` does not create `window._supabase` in classic scripts.
+                const client = typeof _supabase !== 'undefined' && typeof _supabase?.rpc === 'function'
+                    ? _supabase
+                    : null;
+                if (!client) throw new Error('資料庫服務尚未就緒，請重新載入頁面；若仍無法使用，請聯絡管理者。');
+                const { data, error: rpcError } = await client.rpc(name, args);
                 if (rpcError) throw rpcError;
                 return data;
             };

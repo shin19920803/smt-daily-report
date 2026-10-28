@@ -13,7 +13,8 @@ SMT.TEST_PROCESS_IDS = SMT.TEST_PROCESSES.map(item => item.id);
 SMT.LINES = [
     { id: 'SMT', label: 'SMT', icon: 'fa-microchip', canImport: true },
     { id: 'TEST', label: 'DAF/組裝測試', icon: 'fa-vials', canImport: false },
-    { id: 'ASSY', label: 'Mylar', icon: 'fa-screwdriver-wrench', canImport: false }
+    { id: 'ASSY', label: 'Mylar', icon: 'fa-screwdriver-wrench', canImport: false },
+    { id: 'AUTO_TESTER', label: '自動測試機', icon: 'fa-barcode', canImport: false }
 ];
 SMT.LINE_KEY = 'production_current_line';
 
@@ -31,11 +32,11 @@ SMT.core = function (ctx) {
         const currentLine = ref(validLine((() => { try { return localStorage.getItem(SMT.LINE_KEY); } catch(e) { return null; } })()));
         const currentLineMeta = computed(() => SMT.LINES.find(l => l.id === currentLine.value) || SMT.LINES[0]);
         const switchableDafLines = ['TEST'];
-        const hideLineTools = computed(() => ['TEST', 'ASSY'].includes(currentLine.value));
-        const hideOrders = computed(() => ['TEST', 'ASSY'].includes(currentLine.value));
+        const hideLineTools = computed(() => ['TEST', 'ASSY', 'AUTO_TESTER'].includes(currentLine.value));
+        const hideOrders = computed(() => ['TEST', 'ASSY', 'AUTO_TESTER'].includes(currentLine.value));
         const hideOoc = computed(() => currentLine.value === 'SMT' || hideLineTools.value);
         const hideDailyReport = computed(() => currentLine.value === 'SMT');
-        const hideSettings = computed(() => ['TEST', 'ASSY'].includes(currentLine.value));
+        const hideSettings = computed(() => ['TEST', 'ASSY', 'AUTO_TESTER'].includes(currentLine.value));
         // 匯入格式因機台而異，DAF / 組裝測試的格式尚未定義，先只開放 SMT
         const canImport = computed(() => currentLineMeta.value.canImport);
 
@@ -87,6 +88,10 @@ SMT.core = function (ctx) {
         const todayStr = window.getTaiwanDate();
         const loadBaseData = async () => {
             const L = currentLine.value;
+            if (L === 'AUTO_TESTER') {
+                data.value = { workOrders: [], models: [], defectTypes: [], defectLocations: [], machines: [], oocCauses: [] };
+                return;
+            }
             if (L === 'TEST') {
                 const emptyTestBaseData = () => ({ workOrders: [], models: [], defectTypes: [], defectLocations: [], machines: [], oocCauses: [] });
                 const applyTestBaseData = ([modelResults, defectResults]) => {
@@ -137,7 +142,7 @@ SMT.core = function (ctx) {
             const target = validLine(lineId);
             if (target === currentLine.value) return;
             if ((target === 'SMT' && ['report', 'ooc'].includes(currentTab.value)) ||
-                (switchableDafLines.concat('ASSY').includes(target) && ['fpy', 'ooc', 'equipment', 'orders', 'settings'].includes(currentTab.value))) {
+                (switchableDafLines.concat('ASSY', 'AUTO_TESTER').includes(target) && ['fpy', 'ooc', 'equipment', 'orders', 'settings'].includes(currentTab.value))) {
                 currentTab.value = target === 'SMT' ? 'orders' : 'dashboard';
             }
             currentLine.value = target;
@@ -151,14 +156,18 @@ SMT.core = function (ctx) {
                 if (ctx.selectedNozzleModelId) ctx.selectedNozzleModelId.value = null;
                 if (ctx.calHistory) ctx.calHistory.value = [];
                 const isSmt = target === 'SMT';
-                const tasks = [
-                    loadBaseData(),
-                    ctx.loadAssemblyData && ctx.loadAssemblyData({ background: true }),
-                    ctx.loadDafData && ctx.loadDafData({ background: true })
-                ];
-                await Promise.all(tasks);
-                const refreshed = ctx.refreshDashboard ? await ctx.refreshDashboard() : true;
-                if (refreshed !== false && ctx.initDashboardCharts && currentTab.value === 'dashboard') await ctx.initDashboardCharts();
+                if (target === 'AUTO_TESTER') {
+                    await loadBaseData();
+                } else {
+                    const tasks = [
+                        loadBaseData(),
+                        ctx.loadAssemblyData && ctx.loadAssemblyData({ background: true }),
+                        ctx.loadDafData && ctx.loadDafData({ background: true })
+                    ];
+                    await Promise.all(tasks);
+                    const refreshed = ctx.refreshDashboard ? await ctx.refreshDashboard() : true;
+                    if (refreshed !== false && ctx.initDashboardCharts && currentTab.value === 'dashboard') await ctx.initDashboardCharts();
+                }
                 if (isSmt) {
                     Promise.allSettled([
                         ctx.loadHistory && ctx.loadHistory(),

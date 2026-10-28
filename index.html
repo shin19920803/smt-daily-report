@@ -15,7 +15,7 @@
 
     <style>[v-cloak] { display: none !important; }</style>
 
-    <link rel="stylesheet" href="css/main.css?v=202608121530">
+    <link rel="stylesheet" href="css/main.css?v=20261028-auto-tester-v1">
 </head>
 <body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
 
@@ -52,7 +52,7 @@
             </div>
             <p class="text-[10px] text-slate-500 font-mono text-center mb-3">生產管理系統</p>
             <!-- 產線切換：各線資料完全獨立 -->
-            <div class="line-switch" role="group" aria-label="產線切換">
+            <div class="line-switch" :class="{'line-switch-four': visibleLines.length > 3}" role="group" aria-label="產線切換">
                 <button v-for="l in visibleLines" :key="l.id" @click="switchLine(l.id)"
                         :class="{ 'is-active': currentLine === l.id }"
                         :aria-pressed="currentLine === l.id" :title="l.label">
@@ -109,8 +109,10 @@
 
         <div class="p-4 md:p-6 max-w-6xl mx-auto">
 
+        <auto-tester-panel v-if="currentLine === 'AUTO_TESTER'" :view="currentTab"></auto-tester-panel>
+
         <!-- ==================== DASHBOARD ==================== -->
-        <div v-if="currentTab === 'dashboard'" class="space-y-6 animate-fade-in">
+        <div v-if="currentTab === 'dashboard' && currentLine !== 'AUTO_TESTER'" class="space-y-6 animate-fade-in">
             <div v-if="currentLine === 'ASSY'" class="space-y-6">
                 <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                     <div>
@@ -255,7 +257,7 @@
         </div>
 
         <!-- ==================== REPORT ==================== -->
-        <div v-if="currentTab === 'report'" class="space-y-4 md:space-y-6 animate-fade-in">
+        <div v-if="currentTab === 'report' && currentLine !== 'AUTO_TESTER'" class="space-y-4 md:space-y-6 animate-fade-in">
             <div class="flex items-center gap-2"><button v-if="currentLine === 'SMT'" @click="backFromReport" class="btn-ghost text-sm"><i class="fas fa-arrow-left mr-1"></i>返回工單管理</button><h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>每日生產日報表</h2></div>
             <div v-if="currentLine === 'ASSY'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4 md:p-6 border-l-4 border-orange-500">
@@ -1041,7 +1043,7 @@
         </div>
 
         <!-- ==================== STATS ==================== -->
-        <div v-if="currentTab === 'stats'" class="animate-fade-in">
+        <div v-if="currentTab === 'stats' && currentLine !== 'AUTO_TESTER'" class="animate-fade-in">
             <div class="page-header mb-6">
                 <div class="flex items-center gap-3">
                     <div class="w-1 h-6 rounded bg-blue-600"></div>
@@ -1916,6 +1918,7 @@
 <script src="js/stats.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/equipment.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/settings.js?v=20261008-neutral-entry-v1"></script>
-<script src="js/app.js?v=20261015-access-v1"></script>
+<script src="js/auto-tester.js?v=20261028-auto-tester-v1"></script>
+<script src="js/app.js?v=20261028-auto-tester-v1"></script>
 </body>
 </html>

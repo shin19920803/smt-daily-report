@@ -303,6 +303,7 @@ SMT.dashboard = function (ctx) {
         const refreshDashboard = async ({ force = false, deferDetails = false } = {}) => {
             const requestId = ++dashboardRefreshId;
             const line = currentLine.value;
+            if (line === 'AUTO_TESTER') return false;
             let availableDates = await loadDashboardAvailableDates(line, force);
             if (requestId !== dashboardRefreshId || line !== currentLine.value) return false;
             if (line === 'TEST' && !force && availableDates.length && !availableDates.includes(dashDate.value)) {
@@ -623,6 +624,15 @@ SMT.dashboard = function (ctx) {
             const requestId = ++dashboardChartRequestId;
             const line = currentLine.value;
             if (currentTab.value !== 'dashboard') return;
+            if (line === 'AUTO_TESTER') {
+                dashYieldChartInst = disposeChart(dashYieldChartInst);
+                dashInputChartInst = disposeChart(dashInputChartInst);
+                dashAssemblyDowntimeChartInst = disposeChart(dashAssemblyDowntimeChartInst);
+                dashAssemblyReasonChartInst = disposeChart(dashAssemblyReasonChartInst);
+                dashDafDailyChartInst = disposeChart(dashDafDailyChartInst);
+                dashDafReasonChartInst = disposeChart(dashDafReasonChartInst);
+                return;
+            }
             if (line === 'ASSY') {
                 dashYieldChartInst = disposeChart(dashYieldChartInst);
                 dashInputChartInst = disposeChart(dashInputChartInst);
@@ -685,6 +695,7 @@ SMT.dashboard = function (ctx) {
             [dashYieldChartInst, dashInputChartInst, dashAssemblyDowntimeChartInst, dashAssemblyReasonChartInst, dashDafDailyChartInst, dashDafReasonChartInst].forEach(inst => { if (inst) inst.resize(); });
         };
         const refreshDashboardAndCharts = async () => {
+            if (currentLine.value === 'AUTO_TESTER') return false;
             if (currentLine.value === 'TEST' && loadDafData) await loadDafData({ force: true });
             if (currentLine.value === 'ASSY' && loadAssemblyData) await loadAssemblyData({ force: true });
             const refreshed = await refreshDashboard({ force: true });

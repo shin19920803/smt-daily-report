@@ -12,23 +12,29 @@ const app = createApp({
             try {
                 ctx.loadFpyTargets();
                 const isSmt = ctx.currentLine.value === 'SMT';
-                // 首屏只等待基本設定與畫面資料；歷史資料在背景同步，避免資料量拖住整個頁面。
-                const tasks = [
-                    ctx.loadBaseData(),
-                    ctx.loadAssemblyData({ background: true }),
-                    ctx.loadDafData({ background: true })
-                ];
-                await Promise.all(tasks);
-                const refreshed = await ctx.refreshDashboard();
-                ctx.renderAssemblyReportChart();
-                ctx.renderAssemblyStatsCharts();
-                if (refreshed !== false) await ctx.initDashboardCharts();
-                if (isSmt) {
-                    // 這些資料只在切到對應功能時使用，不阻塞首頁顯示。
-                    Promise.allSettled([
-                        ctx.loadHistory(), ctx.loadFpyHistory(), ctx.loadOocHistory(), ctx.loadEqData(),
-                        ctx.loadFeeders(), ctx.loadNozzleLogs()
-                    ]).catch(error => console.warn('SMT 背景資料同步失敗', error));
+                const isAutoTester = ctx.currentLine.value === 'AUTO_TESTER';
+                if (isAutoTester) {
+                    // 此站使用獨立摘要 RPC；啟動時不得預載 SMT、Mylar 或五站資料。
+                    ctx.data.value = { workOrders: [], models: [], defectTypes: [], defectLocations: [], machines: [], oocCauses: [] };
+                } else {
+                    // 首屏只等待基本設定與畫面資料；歷史資料在背景同步，避免資料量拖住整個頁面。
+                    const tasks = [
+                        ctx.loadBaseData(),
+                        ctx.loadAssemblyData({ background: true }),
+                        ctx.loadDafData({ background: true })
+                    ];
+                    await Promise.all(tasks);
+                    const refreshed = await ctx.refreshDashboard();
+                    ctx.renderAssemblyReportChart();
+                    ctx.renderAssemblyStatsCharts();
+                    if (refreshed !== false) await ctx.initDashboardCharts();
+                    if (isSmt) {
+                        // 這些資料只在切到對應功能時使用，不阻塞首頁顯示。
+                        Promise.allSettled([
+                            ctx.loadHistory(), ctx.loadFpyHistory(), ctx.loadOocHistory(), ctx.loadEqData(),
+                            ctx.loadFeeders(), ctx.loadNozzleLogs()
+                        ]).catch(error => console.warn('SMT 背景資料同步失敗', error));
+                    }
                 }
                 const today = window.getTaiwanDate();
                 ctx.rawExportFilter.value.end = today;
@@ -65,4 +71,5 @@ app.component('break-list', {
 });
 
 app.component('account-manager', window.DashboardAuth.accountComponent);
+app.component('auto-tester-panel', SMT.AutoTesterPanel);
 window.DashboardAuth.mountLogin(() => app.mount('#app'));

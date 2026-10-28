@@ -185,6 +185,9 @@ button:disabled, .btn-primary:disabled, .btn-success:disabled, .btn-danger:disab
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.09);
     border-radius: var(--r-md); padding: 3px;
 }
+.line-switch-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.line-switch-four button { min-height: 50px; font-size: 0.58rem; }
+.line-switch-four button span { white-space: normal; text-align: center; overflow-wrap: anywhere; }
 .line-switch button {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
     min-height: 44px; padding: 6px 2px; border-radius: var(--r-sm);

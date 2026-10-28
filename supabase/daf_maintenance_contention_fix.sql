@@ -99,7 +99,8 @@ begin
 end;
 $$;
 
--- Maintenance invokes these functions inside the seven-second wrapper above.
+-- A function-level SET cannot arm the timer for an already-started SELECT.
+-- The cron command below sets its real deadline before invoking the wrapper.
 -- Administrative callers retain their own session-level timeout.
 alter function public.daf_compact_expired_log_batch(date, integer)
     reset statement_timeout;
@@ -115,6 +116,9 @@ declare
     v_job_id bigint;
     v_legacy_job_name text := chr(107) || chr(111) || chr(121) || chr(97) || '-daf-log-maintenance';
 begin
+    if coalesce(current_setting('cron.use_background_workers',true),'off')<>'off' then
+        raise exception '排程時限需要 pg_cron libpq 模式，拒絕安裝無法保證時限的排程';
+    end if;
     for v_job_id in
         select jobid from cron.job
         where jobname in ('production-daf-log-maintenance', v_legacy_job_name)
@@ -124,7 +128,7 @@ begin
     perform cron.schedule(
         'production-daf-log-maintenance',
         '*/3 * * * *',
-        'select public.daf_run_log_maintenance_batch();'
+        'set statement_timeout = ''7s''; set lock_timeout = ''1s''; select public.daf_run_log_maintenance_batch();'
     );
 end;
 $$;

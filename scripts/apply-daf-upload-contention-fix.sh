@@ -45,6 +45,10 @@ bash "$db_wrapper" psql --no-psqlrc --no-password --set=ON_ERROR_STOP=1 --set=QU
     if (select count(*) from cron.job where jobname='production-daf-log-maintenance' and active) <> 1 then
       raise exception 'maintenance schedule missing or duplicated';
     end if;
+    if not exists (select 1 from cron.job where jobname='production-daf-log-maintenance' and active
+      and command='set statement_timeout = ''7s''; set lock_timeout = ''1s''; select public.daf_run_log_maintenance_batch();') then
+      raise exception 'maintenance deadline must be set before the SELECT, not only inside the function';
+    end if;
   end \$\$;"
 
 printf 'DAF 上傳逾時修正與線上設定驗證完成。\n備份：%s\n' "$backup_path"

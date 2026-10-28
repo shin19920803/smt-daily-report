@@ -112,6 +112,13 @@ restore_cron_jobs() {
   [[ "$cron_paused" == 1 ]] || return 0
   while IFS='|' read -r saved_job_name saved_schedule saved_command; do
     [[ -n "$saved_job_name" ]] || continue
+    # A checkpoint made before the deadline fix may still contain a bare SELECT.
+    # Restoring that snapshot must not bring back unbounded maintenance jobs.
+    case "$saved_command" in
+      'select public.daf_run_log_maintenance_batch();'|'select public.daf_prune_failed_log_imports();')
+        saved_command="set statement_timeout = '7s'; set lock_timeout = '1s'; $saved_command"
+        ;;
+    esac
     if [[ "$cron_schedule_updated" == 1 && "$saved_job_name" != "$failed_import_cleanup_job" ]]; then
       continue
     fi

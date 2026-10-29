@@ -772,7 +772,10 @@ SMT.daf = function (ctx) {
         try {
             return await dafImportRetry(
                 signal => _supabase.rpc(rpcName, args).abortSignal(signal),
-                label, retries, timeoutMs, 250
+                // Publication holds process locks and rebuilds winners. Never queue
+                // another expensive publication behind an ambiguously timed-out one;
+                // the caller checks job status/atomic abort before reporting failure.
+                label, rpcName === 'daf_finalize_log_import' ? 1 : retries, timeoutMs, 250
             );
         } catch (error) {
             const message = String(error?.message || error || `${label}失敗`);

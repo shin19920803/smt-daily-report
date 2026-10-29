@@ -17,7 +17,8 @@ printf '備份封存檢查通過。\n'
 
 bash "$db_wrapper" psql --no-psqlrc --no-password --set=ON_ERROR_STOP=1 \
   --file="$repo_root/supabase/daf_upload_contention_fix.sql" \
-  --file="$repo_root/supabase/daf_maintenance_contention_fix.sql"
+  --file="$repo_root/supabase/daf_maintenance_contention_fix.sql" \
+  --file="$repo_root/supabase/daf_finalize_plan_fix.sql"
 
 bash "$db_wrapper" psql --no-psqlrc --no-password --set=ON_ERROR_STOP=1 --set=QUIET=1 \
   --command="do \$\$ begin

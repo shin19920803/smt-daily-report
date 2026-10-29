@@ -220,6 +220,7 @@ psql_exec -v ON_ERROR_STOP=1 --file="$migration_path"
 printf '套用加權歷史摘要相容層（逐批搬移前仍同時讀取舊表）…\n'
 psql_exec -v ON_ERROR_STOP=1 --file="$payload_path"
 psql_exec -v ON_ERROR_STOP=1 --file="$aggregate_path"
+psql_exec -v ON_ERROR_STOP=1 --file="$repo_root/supabase/daf_finalize_plan_fix.sql"
 printf '套用機台分類索引查詢修正並移除不再需要的表達式索引…\n'
 psql_exec -v ON_ERROR_STOP=1 --file="$machine_index_path"
 

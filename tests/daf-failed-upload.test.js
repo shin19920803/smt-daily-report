@@ -5,6 +5,7 @@ const vm = require('node:vm');
 
 function harness(handler, initial = {}) {
     const calls = [];
+    const retryRequests = [];
     const storage = new Map(Object.entries(initial));
     let serial = 0;
     const context = {
@@ -14,7 +15,8 @@ function harness(handler, initial = {}) {
             calls.push({ name, args });
             return handler(name, args);
         } }) },
-        dafImportRetry: async callback => {
+        dafImportRetry: async (callback, label, retries) => {
+            retryRequests.push({ label, retries });
             const result = await callback(new AbortController().signal);
             if (result.error) throw result.error;
             return result.data;
@@ -31,7 +33,7 @@ function harness(handler, initial = {}) {
     const source = fs.readFileSync(require.resolve('../js/daf.js'), 'utf8');
     const block = source.slice(source.indexOf('    const runDafImportRequest ='), source.indexOf('    const saveRemote = async'));
     vm.runInNewContext(`${block}\nthis.upload = uploadDafBatchesStaged;`, context);
-    return { upload: context.upload, calls, storage };
+    return { upload: context.upload, calls, storage, retryRequests };
 }
 const file = { name: 'test.xlsx', size: 12, lastModified: 34 };
 const batches = [{ line: 'DAF', records: [{ dedupKey: 'E' }] }];
@@ -44,6 +46,8 @@ test('each selection starts a fresh job rather than resuming previous chunks', a
     await h.upload(file, batches);
     const jobs = h.calls.filter(call => call.name === 'daf_start_log_import').map(call => call.args.p_job_id);
     assert.deepEqual(jobs, ['fresh-1', 'fresh-2']);
+    assert(h.retryRequests.filter(request => request.label === '發布上傳資料').every(request => request.retries === 1),
+        'publication must not blindly retry expensive work after an ambiguous timeout');
 });
 test('failed chunks are cleared and reported instead of silently resuming', async () => {
     const h = harness(name => name === 'daf_stage_log_import_chunk'

@@ -189,7 +189,9 @@ test('auto tester overview trend shows only nonzero production dates within the 
         { date: '2026-10-15', count: 2 },
         { date: '2026-10-28', count: 5 }
     ]);
-    assert.match(AutoTesterPanel.template, /近 14 日投入量/);
+    assert.match(AutoTesterPanel.template, /每日產能趨勢/);
+    assert.match(AutoTesterPanel.template, /近 14 日投入量｜僅顯示有數據日期/);
+    assert.match(AutoTesterPanel.template, /近 14 日每日產能直條圖/);
 });
 
 const csvFile = (name, rows) => {

@@ -500,15 +500,26 @@
                     <div class="kpi-card"><div class="kpi-icon purple"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ formatCount(monthCount) }}</div><div class="kpi-label">本月產能</div></div>
                 </div>
                 <section class="section-card p-4 md:p-5">
-                    <div class="flex items-center justify-between mb-4"><h3 class="font-black text-gray-800">近 14 日投入量</h3><span class="text-xs text-gray-400">僅顯示有數據日期</span></div>
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h3 class="font-black text-gray-800">每日產能趨勢</h3><span class="text-xs text-gray-400">近 14 日投入量｜僅顯示有數據日期</span></div>
                     <div v-if="loading && dashboardRows.length === 0" class="empty-state py-10"><i class="fas fa-spinner fa-spin"></i><div class="hint">載入每日摘要…</div></div>
-                    <div v-else-if="trendDays.length" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-                        <div v-for="day in trendDays" :key="day.date" class="rounded-lg bg-gray-50 px-3 py-3 min-w-0" :title="day.date + '：' + formatCount(day.count) + ' 件'">
-                            <div class="text-[11px] text-gray-500 font-mono">{{ day.date.slice(5) }}</div>
-                            <div class="mt-2 h-2 rounded-full bg-gray-200 overflow-hidden"><div class="h-full rounded-full bg-cyan-500" :style="{width: (day.count / trendMax * 100) + '%'}"></div></div>
-                            <div class="mt-2 text-sm font-black text-gray-800">{{ formatCount(day.count) }} 件投入</div>
+                    <template v-else-if="trendDays.length">
+                        <div class="overflow-x-auto pb-3" role="img" aria-label="近 14 日每日產能直條圖">
+                            <div class="flex items-end justify-center gap-2 min-w-[560px] h-52 border-b border-gray-200 px-2">
+                                <div v-for="day in trendDays" :key="'bar-' + day.date" class="flex-1 min-w-[32px] h-full flex flex-col items-center justify-end gap-1" :title="day.date + '：' + formatCount(day.count) + ' 件'">
+                                    <span class="text-[10px] font-bold text-gray-600">{{ formatCount(day.count) }}</span>
+                                    <div class="w-full max-w-12 flex-1 max-h-36 flex items-end"><div class="w-full rounded-t-md bg-cyan-500" :style="{height: Math.max(6, day.count / trendMax * 100) + '%'}"></div></div>
+                                    <span class="text-[10px] text-gray-500 font-mono">{{ day.date.slice(5) }}</span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                        <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                            <div v-for="day in trendDays" :key="day.date" class="rounded-lg bg-gray-50 px-3 py-3 min-w-0" :title="day.date + '：' + formatCount(day.count) + ' 件'">
+                                <div class="text-[11px] text-gray-500 font-mono">{{ day.date }}</div>
+                                <div class="mt-2 h-2 rounded-full bg-gray-200 overflow-hidden"><div class="h-full rounded-full bg-cyan-500" :style="{width: (day.count / trendMax * 100) + '%'}"></div></div>
+                                <div class="mt-2 text-sm font-black text-gray-800">{{ formatCount(day.count) }} 件</div>
+                            </div>
+                        </div>
+                    </template>
                     <div v-else class="empty-state py-10"><i class="fas fa-inbox"></i><div class="hint">近 14 日沒有投入量資料</div></div>
                 </section>
             </template>

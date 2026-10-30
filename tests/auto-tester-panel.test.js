@@ -27,6 +27,7 @@ globalThis.Vue = {
     ref: value => ({ value }),
     computed: getter => Object.defineProperty({}, 'value', { get: getter }),
     watch: () => {},
+    nextTick: () => Promise.resolve(),
     onMounted: callback => { mountHook = callback; },
     onBeforeUnmount: () => {}
 };
@@ -144,6 +145,51 @@ test('missing Supabase client shows an actionable error and always clears loadin
         if (previousClient === undefined) delete globalThis._supabase;
         else globalThis._supabase = previousClient;
     }
+});
+
+test('auto tester statistics quick ranges set Taiwan-date day, previous Sunday-Saturday week, and previous month without loading', async () => {
+    const calls = [];
+    globalThis._supabase = { async rpc(name) {
+        calls.push(name);
+        if (name === 'auto_tester_get_state') return { data: { revision: 1 }, error: null };
+        if (name === 'auto_tester_get_summary') return { data: { revision: 1, daily: [] }, error: null };
+        throw new Error(`Unexpected RPC ${name}`);
+    } };
+    const panel = AutoTesterPanel.setup({ view: 'stats' });
+
+    await panel.setStatsQuickMode('day');
+    assert.equal(panel.statsStart.value, '2026-10-28');
+    assert.equal(panel.statsEnd.value, '2026-10-28');
+    assert.equal(panel.statsQuickLabel.value, '2026-10-28 (週三)');
+    assert.equal(panel.statsQuickRelative.value, '本日');
+    await panel.shiftStatsQuick(-1);
+    assert.equal(panel.statsStart.value, '2026-10-27');
+
+    await panel.setStatsQuickMode('week');
+    assert.equal(panel.statsStart.value, '2026-10-18');
+    assert.equal(panel.statsEnd.value, '2026-10-24');
+    assert.equal(panel.statsQuickLabel.value, '2026-10-18 ~ 10-24');
+    await panel.setStatsQuickMode('month');
+    assert.equal(panel.statsStart.value, '2026-09-01');
+    assert.equal(panel.statsEnd.value, '2026-09-30');
+    assert.equal(panel.statsQuickLabel.value, '2026 年 9 月');
+    assert.deepEqual(calls, [], 'choosing or shifting a quick range does not request statistics automatically');
+    assert.match(AutoTesterPanel.template, /自動測試機快捷統計區間/);
+});
+
+test('auto tester overview trend shows only nonzero production dates within the latest 14 days', () => {
+    const panel = AutoTesterPanel.setup({ view: 'dashboard' });
+    panel.dashboardRows.value = [
+        { report_date: '2026-10-14', daily_count: 9 },
+        { report_date: '2026-10-15', daily_count: 2 },
+        { report_date: '2026-10-21', daily_count: 0 },
+        { report_date: '2026-10-28', daily_count: 5 }
+    ];
+    assert.deepEqual(panel.trendDays.value, [
+        { date: '2026-10-15', count: 2 },
+        { date: '2026-10-28', count: 5 }
+    ]);
+    assert.match(AutoTesterPanel.template, /近 14 日投入量/);
 });
 
 const csvFile = (name, rows) => {

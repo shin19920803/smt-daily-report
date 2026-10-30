@@ -104,6 +104,9 @@
             const dashboardDate = ref(today);
             const statsStart = ref(dateShift(today, -6));
             const statsEnd = ref(today);
+            const statsQuickMode = ref(null);
+            const statsQuickOffset = ref(-1);
+            let applyingStatsQuick = false;
             const dashboardRows = ref([]);
             const statsRows = ref([]);
             const files = ref([]);
@@ -256,7 +259,8 @@
                 const days = [];
                 for (let offset = 13; offset >= 0; offset--) {
                     const date = dateShift(dashboardDate.value, -offset);
-                    days.push({ date, count: dailyCount(date) });
+                    const count = dailyCount(date);
+                    if (count > 0) days.push({ date, count });
                 }
                 return days;
             });
@@ -267,6 +271,64 @@
             const formattedUploadedAt = value => root.formatTaiwanDateTime(value) || '—';
 
             const loadStats = async () => loadCurrentView({ force: true });
+            const statsQuickRange = (mode, offset) => {
+                const todayDate = new Date(`${todayTaiwan()}T00:00:00Z`);
+                if (mode === 'day') {
+                    const date = new Date(todayDate);
+                    date.setUTCDate(date.getUTCDate() + offset);
+                    const value = date.toISOString().slice(0, 10);
+                    return { start: value, end: value };
+                }
+                if (mode === 'week') {
+                    const start = new Date(todayDate);
+                    start.setUTCDate(start.getUTCDate() - start.getUTCDay() + offset * 7);
+                    const end = new Date(start);
+                    end.setUTCDate(end.getUTCDate() + 6);
+                    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+                }
+                const start = new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth() + offset, 1));
+                const end = new Date(Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth() + offset + 1, 0));
+                return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+            };
+            const statsQuickLabel = computed(() => {
+                if (!statsQuickMode.value) return '';
+                const { start, end } = statsQuickRange(statsQuickMode.value, statsQuickOffset.value);
+                if (statsQuickMode.value === 'day') {
+                    const weekday = ['日', '一', '二', '三', '四', '五', '六'][new Date(`${start}T00:00:00Z`).getUTCDay()];
+                    return `${start} (週${weekday})`;
+                }
+                if (statsQuickMode.value === 'week') return `${start} ~ ${start.slice(0, 4) === end.slice(0, 4) ? end.slice(5) : end}`;
+                const [year, month] = start.split('-');
+                return `${year} 年 ${Number(month)} 月`;
+            });
+            const statsQuickRelative = computed(() => {
+                if (!statsQuickMode.value) return '';
+                const offset = statsQuickOffset.value;
+                const unit = { day: '日', week: '週', month: '月' }[statsQuickMode.value];
+                if (offset === 0) return `本${unit}`;
+                if (offset === -1) return `上一${unit}`;
+                if (offset === 1) return `下一${unit}`;
+                return offset < 0 ? `${Math.abs(offset)} ${unit}前` : `${offset} ${unit}後`;
+            });
+            const applyStatsQuick = async () => {
+                const range = statsQuickRange(statsQuickMode.value, statsQuickOffset.value);
+                applyingStatsQuick = true;
+                statsStart.value = range.start;
+                statsEnd.value = range.end;
+                await root.Vue.nextTick();
+                applyingStatsQuick = false;
+            };
+            const setStatsQuickMode = mode => {
+                if (!['day', 'week', 'month'].includes(mode)) return;
+                statsQuickMode.value = mode;
+                statsQuickOffset.value = { day: 0, week: -1, month: -1 }[mode];
+                return applyStatsQuick();
+            };
+            const shiftStatsQuick = delta => {
+                if (!statsQuickMode.value) return;
+                statsQuickOffset.value += Number(delta) || 0;
+                return applyStatsQuick();
+            };
             const openFilePicker = () => {
                 if (!uploadBusy.value && !pendingReplacement.value) uploadInput.value?.click();
             };
@@ -387,6 +449,7 @@
             watch(dashboardDate, () => { if (props.view === 'dashboard') void loadCurrentView(); });
             watch([statsStart, statsEnd], () => {
                 if (props.view !== 'stats') return;
+                if (!applyingStatsQuick) statsQuickMode.value = null;
                 requestSequence++;
                 statsLoading.value = false;
                 statsRows.value = [];
@@ -404,10 +467,10 @@
             });
 
             return {
-                dashboardDate, statsStart, statsEnd, dashboardRows, statsRows, files, fileTotal, loading, statsLoading, uploadBusy,
+                dashboardDate, statsStart, statsEnd, statsQuickMode, statsQuickLabel, statsQuickRelative, dashboardRows, statsRows, files, fileTotal, loading, statsLoading, uploadBusy,
                 error, notice, uploadInput, pendingReplacement, deleteTarget, today, todayCount, lastSevenCount, monthCount,
                 trendDays, trendMax, statsTotal, hasMoreFiles, filePageLabel, formattedUploadedAt,
-                refresh, loadStats, openFilePicker, handleUpload, confirmReplacement, skipReplacement, askDelete, confirmDelete, changeFilePage,
+                refresh, loadStats, setStatsQuickMode, shiftStatsQuick, openFilePicker, handleUpload, confirmReplacement, skipReplacement, askDelete, confirmDelete, changeFilePage,
                 previousDay: () => { dashboardDate.value = dateShift(dashboardDate.value, -1); },
                 nextDay: () => { dashboardDate.value = dateShift(dashboardDate.value, 1); },
                 setToday: () => { dashboardDate.value = todayTaiwan(); },
@@ -437,15 +500,16 @@
                     <div class="kpi-card"><div class="kpi-icon purple"><i class="fas fa-calendar-days"></i></div><div class="kpi-value">{{ formatCount(monthCount) }}</div><div class="kpi-label">本月產能</div></div>
                 </div>
                 <section class="section-card p-4 md:p-5">
-                    <div class="flex items-center justify-between mb-4"><h3 class="font-black text-gray-800">每日產能趨勢</h3><span class="text-xs text-gray-400">近 14 日</span></div>
+                    <div class="flex items-center justify-between mb-4"><h3 class="font-black text-gray-800">近 14 日投入量</h3><span class="text-xs text-gray-400">僅顯示有數據日期</span></div>
                     <div v-if="loading && dashboardRows.length === 0" class="empty-state py-10"><i class="fas fa-spinner fa-spin"></i><div class="hint">載入每日摘要…</div></div>
-                    <div v-else class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                    <div v-else-if="trendDays.length" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                         <div v-for="day in trendDays" :key="day.date" class="rounded-lg bg-gray-50 px-3 py-3 min-w-0" :title="day.date + '：' + formatCount(day.count) + ' 件'">
                             <div class="text-[11px] text-gray-500 font-mono">{{ day.date.slice(5) }}</div>
                             <div class="mt-2 h-2 rounded-full bg-gray-200 overflow-hidden"><div class="h-full rounded-full bg-cyan-500" :style="{width: (day.count / trendMax * 100) + '%'}"></div></div>
-                            <div class="mt-2 text-sm font-black text-gray-800">{{ formatCount(day.count) }} 件</div>
+                            <div class="mt-2 text-sm font-black text-gray-800">{{ formatCount(day.count) }} 件投入</div>
                         </div>
                     </div>
+                    <div v-else class="empty-state py-10"><i class="fas fa-inbox"></i><div class="hint">近 14 日沒有投入量資料</div></div>
                 </section>
             </template>
 
@@ -479,6 +543,20 @@
             <template v-else>
                 <header><h2 class="text-xl md:text-2xl font-black text-gray-900"><span class="inline-block w-1 h-6 rounded bg-cyan-600 mr-2 align-middle"></span>自動測試機數據統計</h2><p class="text-sm text-gray-400 mt-1">每日以不同 QR CODE 數量計算；日期區間以每日產能加總。</p></header>
                 <section class="section-card p-4">
+                    <div class="quick-bar">
+                        <span class="quick-bar-label"><i class="fas fa-bolt"></i>快捷區間</span>
+                        <div class="quick-seg" role="group" aria-label="自動測試機快捷統計區間">
+                            <button @click="setStatsQuickMode('day')" :class="{ 'is-active': statsQuickMode === 'day' }" :aria-pressed="statsQuickMode === 'day'">日</button>
+                            <button @click="setStatsQuickMode('week')" :class="{ 'is-active': statsQuickMode === 'week' }" :aria-pressed="statsQuickMode === 'week'">週</button>
+                            <button @click="setStatsQuickMode('month')" :class="{ 'is-active': statsQuickMode === 'month' }" :aria-pressed="statsQuickMode === 'month'">月</button>
+                        </div>
+                        <div v-if="statsQuickMode" class="quick-nav">
+                            <button @click="shiftStatsQuick(-1)" class="quick-arrow" :title="'上一' + (statsQuickMode === 'day' ? '日' : statsQuickMode === 'week' ? '週' : '月')" aria-label="上一期"><i class="fas fa-chevron-left"></i></button>
+                            <div class="quick-range"><span class="quick-range-text font-mono">{{ statsQuickLabel }}</span><span class="quick-range-rel">{{ statsQuickRelative }}</span></div>
+                            <button @click="shiftStatsQuick(1)" class="quick-arrow" :title="'下一' + (statsQuickMode === 'day' ? '日' : statsQuickMode === 'week' ? '週' : '月')" aria-label="下一期"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                        <span v-else class="quick-hint">選擇後可用 <i class="fas fa-chevron-left mx-0.5"></i><i class="fas fa-chevron-right mx-0.5"></i> 快速切換期間</span>
+                    </div>
                     <div class="flex flex-col sm:flex-row flex-wrap gap-3 items-end">
                         <label class="flex-1 min-w-[170px] text-xs font-bold text-gray-500">開始日期<input v-model="statsStart" type="date" class="mt-1 w-full border border-gray-200 rounded-lg bg-white p-2 text-sm"></label>
                         <label class="flex-1 min-w-[170px] text-xs font-bold text-gray-500">結束日期<input v-model="statsEnd" type="date" class="mt-1 w-full border border-gray-200 rounded-lg bg-white p-2 text-sm"></label>

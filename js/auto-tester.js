@@ -124,6 +124,8 @@
             let summaryCache = null;
             let filesLoaded = false;
             let filesRevision = null;
+            let uploadQueue = [];
+            let uploadBatch = null;
 
             const callRpc = async (name, args = {}) => {
                 // `_supabase` is a global lexical binding created by supabase-client.js;
@@ -265,7 +267,9 @@
             const formattedUploadedAt = value => root.formatTaiwanDateTime(value) || '—';
 
             const loadStats = async () => loadCurrentView({ force: true });
-            const openFilePicker = () => uploadInput.value?.click();
+            const openFilePicker = () => {
+                if (!uploadBusy.value && !pendingReplacement.value) uploadInput.value?.click();
+            };
             const publishPayload = async (payload, replaceFileId = null) => {
                 const result = await callRpc('auto_tester_publish_file', {
                     p_file_name: payload.fileName,
@@ -275,37 +279,82 @@
                 });
                 return result;
             };
-            const completeUpload = async (payload, replaceFileId = null) => {
-                const result = await publishPayload(payload, replaceFileId);
+            const recordUpload = (payload, result) => {
+                if (!['published', 'duplicate'].includes(result?.status)) throw new Error('無法確認上傳結果，請重新上傳此檔案確認。');
+                if (result.status === 'duplicate') uploadBatch.duplicates++;
+                else uploadBatch.published++;
+                uploadBatch.contributions.set(payload.fileName.trim().toLowerCase(), payload.entries);
+            };
+            const finishUploadBatch = async () => {
+                const batch = uploadBatch;
+                uploadBatch = null;
+                uploadQueue = [];
+                if (!batch || disposed) return;
+                const combinedKeys = new Set();
+                batch.contributions.forEach(entries => entries.forEach(entry => combinedKeys.add(`${entry.report_date}\u0000${entry.qr_hash}`)));
+                if (batch.published || batch.duplicates) {
+                    summaryCache = null;
+                    await loadCurrentView({ force: true });
+                }
+                if (batch.total === 1 && batch.published) notice.value = `上傳完成：${combinedKeys.size.toLocaleString()} 筆 QR CODE，依日期去重。`;
+                else if (batch.total === 1 && batch.duplicates) notice.value = '相同檔案已存在，未重複寫入。';
+                else if (batch.total === 1 && batch.skipped) notice.value = '已取消此檔案的上傳，原資料保留。';
+                else if (batch.total > 1) notice.value = `批次處理完成：上傳 ${batch.published} 個、重複 ${batch.duplicates} 個、略過 ${batch.skipped} 個、失敗 ${batch.failures.length} 個；本次成功檔案合併後 ${combinedKeys.size.toLocaleString()} 筆 QR CODE（同日去重）。`;
+                if (batch.failures.length) error.value = [error.value, ...batch.failures].filter(Boolean).join('；');
+            };
+            const acceptUpload = (payload, result) => {
                 if (result?.status === 'confirmation_required') {
                     pendingReplacement.value = { payload, existingFileId: result.existing_file_id };
-                    return;
+                    return false;
                 }
+                recordUpload(payload, result);
                 pendingReplacement.value = null;
-                summaryCache = null;
-                if (result?.status === 'duplicate') notice.value = '相同檔案已存在，未重複寫入。';
-                else notice.value = `上傳完成：${payload.uniqueCount.toLocaleString()} 筆 QR CODE，依日期去重。`;
-                await loadCurrentView({ force: true });
+                return true;
+            };
+            const drainUploadQueue = async () => {
+                uploadBusy.value = true;
+                try {
+                    while (uploadQueue.length && !disposed) {
+                        const file = uploadQueue.shift();
+                        try {
+                            const payload = await buildUploadPayload(file);
+                            if (disposed) return;
+                            if (!acceptUpload(payload, await publishPayload(payload))) return;
+                        } catch (uploadError) {
+                            uploadBatch.failures.push(`${file.name}：${uploadError.message || '未能確認上傳結果，請重試此檔案'}`);
+                        }
+                    }
+                    await finishUploadBatch();
+                } finally {
+                    uploadBusy.value = false;
+                    if (disposed) { uploadQueue = []; uploadBatch = null; }
+                }
             };
             const handleUpload = async event => {
-                const file = event.target.files?.[0];
+                const selectedFiles = Array.from(event.target.files || []);
                 event.target.value = '';
-                if (!file) return;
-                uploadBusy.value = true; error.value = ''; notice.value = '';
-                try {
-                    const payload = await buildUploadPayload(file);
-                    await completeUpload(payload);
-                } catch (uploadError) {
-                    error.value = uploadError.message || '檔案處理失敗，資料未寫入。';
-                } finally { uploadBusy.value = false; }
+                if (!selectedFiles.length || uploadBusy.value || pendingReplacement.value || disposed) return;
+                error.value = ''; notice.value = '';
+                uploadQueue = selectedFiles;
+                uploadBatch = { total: selectedFiles.length, published: 0, duplicates: 0, skipped: 0, failures: [], contributions: new Map() };
+                await drainUploadQueue();
             };
             const confirmReplacement = async () => {
                 const pending = pendingReplacement.value;
                 if (!pending || uploadBusy.value) return;
                 uploadBusy.value = true; error.value = '';
-                try { await completeUpload(pending.payload, pending.existingFileId); }
+                try {
+                    if (acceptUpload(pending.payload, await publishPayload(pending.payload, pending.existingFileId))) await drainUploadQueue();
+                }
                 catch (uploadError) { error.value = uploadError.message || '檔案取代失敗，原資料仍保留。'; }
                 finally { uploadBusy.value = false; }
+            };
+            const skipReplacement = async () => {
+                if (!pendingReplacement.value || uploadBusy.value) return;
+                pendingReplacement.value = null;
+                error.value = '';
+                uploadBatch.skipped++;
+                await drainUploadQueue();
             };
             const askDelete = file => { deleteTarget.value = file; error.value = ''; };
             const confirmDelete = async () => {
@@ -358,7 +407,7 @@
                 dashboardDate, statsStart, statsEnd, dashboardRows, statsRows, files, fileTotal, loading, statsLoading, uploadBusy,
                 error, notice, uploadInput, pendingReplacement, deleteTarget, today, todayCount, lastSevenCount, monthCount,
                 trendDays, trendMax, statsTotal, hasMoreFiles, filePageLabel, formattedUploadedAt,
-                refresh, loadStats, openFilePicker, handleUpload, confirmReplacement, askDelete, confirmDelete, changeFilePage,
+                refresh, loadStats, openFilePicker, handleUpload, confirmReplacement, skipReplacement, askDelete, confirmDelete, changeFilePage,
                 previousDay: () => { dashboardDate.value = dateShift(dashboardDate.value, -1); },
                 nextDay: () => { dashboardDate.value = dateShift(dashboardDate.value, 1); },
                 setToday: () => { dashboardDate.value = todayTaiwan(); },
@@ -407,9 +456,9 @@
                         <div><h3 class="font-black text-cyan-800"><i class="fas fa-file-arrow-up mr-2"></i>檔案上傳</h3><p class="text-xs text-gray-500 mt-1">同一天跨檔案 QR CODE 會一起去重，只保存雜湊、檔案關聯與每日數量。</p></div>
                         <span class="badge-hint text-green-700"><i class="fas fa-cloud"></i>共用資料庫</span>
                     </div>
-                    <input ref="uploadInput" type="file" accept=".csv,text/csv" class="hidden" @change="handleUpload">
+                    <input ref="uploadInput" type="file" accept=".csv,text/csv" multiple class="hidden" @change="handleUpload">
                     <div class="mt-4 flex flex-wrap gap-2">
-                        <button @click="openFilePicker" :disabled="uploadBusy" class="btn-primary disabled:opacity-50"><i class="fas" :class="uploadBusy ? 'fa-spinner fa-spin' : 'fa-upload'"></i><span class="ml-2">{{ uploadBusy ? '處理中…' : '選擇 CSV 檔案' }}</span></button>
+                        <button @click="openFilePicker" :disabled="uploadBusy || !!pendingReplacement" class="btn-primary disabled:opacity-50"><i class="fas" :class="uploadBusy ? 'fa-spinner fa-spin' : 'fa-upload'"></i><span class="ml-2">{{ uploadBusy ? '處理中…' : '選擇 CSV 檔案（可多選）' }}</span></button>
                         <button @click="refresh" :disabled="loading || uploadBusy" class="btn-ghost disabled:opacity-50"><i class="fas fa-sync-alt" :class="loading ? 'fa-spin' : ''"></i><span class="ml-2">重新整理清單</span></button>
                     </div>
                     <p class="text-xs text-gray-400 mt-3">B 欄 QR CODE 去除前後空白後計算 SHA-256。F 欄時間格式需為 YYYYMMDD-HHmmss。空白 QR CODE 不計入；有 QR CODE 但時間無效時整份檔案會拒絕上傳。</p>
@@ -447,7 +496,7 @@
             </template>
 
             <div v-if="pendingReplacement" class="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="auto-replace-title">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"><h3 id="auto-replace-title" class="text-lg font-black text-gray-900"><i class="fas fa-triangle-exclamation text-amber-500 mr-2"></i>同名檔案已存在</h3><p class="text-sm text-gray-600 mt-3">{{ pendingReplacement.payload.fileName }} 的內容與已保存檔案不同。確認取代後，系統會在同一筆資料庫交易中重算受影響日期；若失敗，舊資料會完整保留。</p><div class="flex justify-end gap-2 mt-6"><button @click="pendingReplacement=null" :disabled="uploadBusy" class="btn-ghost">取消</button><button @click="confirmReplacement" :disabled="uploadBusy" class="btn-primary bg-amber-600 hover:bg-amber-700 disabled:opacity-50">{{ uploadBusy ? '處理中…' : '確認取代' }}</button></div></div>
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"><h3 id="auto-replace-title" class="text-lg font-black text-gray-900"><i class="fas fa-triangle-exclamation text-amber-500 mr-2"></i>同名檔案已存在</h3><p class="text-sm text-gray-600 mt-3">{{ pendingReplacement.payload.fileName }} 的內容與已保存檔案不同。確認取代後，系統會在同一筆資料庫交易中重算受影響日期；若失敗，舊資料會完整保留。</p><div class="flex justify-end gap-2 mt-6"><button @click="skipReplacement" :disabled="uploadBusy" class="btn-ghost">略過此檔</button><button @click="confirmReplacement" :disabled="uploadBusy" class="btn-primary bg-amber-600 hover:bg-amber-700 disabled:opacity-50">{{ uploadBusy ? '處理中…' : '確認取代' }}</button></div></div>
             </div>
             <div v-if="deleteTarget" class="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="auto-delete-title">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"><h3 id="auto-delete-title" class="text-lg font-black text-gray-900"><i class="fas fa-trash-can text-red-600 mr-2"></i>刪除上傳檔案</h3><p class="text-sm text-gray-600 mt-3">確定刪除「{{ deleteTarget.file_name }}」？每日產能會依剩餘檔案重新計算；若其他檔案含有相同 QR CODE，該筆仍會保留在當日去重數量中。</p><div class="flex justify-end gap-2 mt-6"><button @click="deleteTarget=null" :disabled="uploadBusy" class="btn-ghost">取消</button><button @click="confirmDelete" :disabled="uploadBusy" class="btn-primary bg-red-600 hover:bg-red-700 disabled:opacity-50">{{ uploadBusy ? '處理中…' : '確認刪除' }}</button></div></div>

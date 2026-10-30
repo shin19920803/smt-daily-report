@@ -177,8 +177,9 @@ test('auto tester statistics quick ranges set Taiwan-date day, previous Sunday-S
     assert.match(AutoTesterPanel.template, /自動測試機快捷統計區間/);
 });
 
-test('auto tester overview trend shows only nonzero production dates within the latest 14 days', () => {
+test('auto tester overview trend uses latest production dates regardless of selected KPI date', () => {
     const panel = AutoTesterPanel.setup({ view: 'dashboard' });
+    panel.dashboardDate.value = '2026-10-20';
     panel.dashboardRows.value = [
         { report_date: '2026-10-14', daily_count: 9 },
         { report_date: '2026-10-15', daily_count: 2 },
@@ -186,12 +187,57 @@ test('auto tester overview trend shows only nonzero production dates within the 
         { report_date: '2026-10-28', daily_count: 5 }
     ];
     assert.deepEqual(panel.trendDays.value, [
+        { date: '2026-10-14', count: 9 },
         { date: '2026-10-15', count: 2 },
         { date: '2026-10-28', count: 5 }
     ]);
     assert.match(AutoTesterPanel.template, /每日產能趨勢/);
-    assert.match(AutoTesterPanel.template, /近 14 日投入量｜僅顯示有數據日期/);
+    assert.match(AutoTesterPanel.template, /最近 14 個有數據日期｜不足 14 日全數顯示/);
     assert.match(AutoTesterPanel.template, /近 14 日每日產能直條圖/);
+    assert.match(AutoTesterPanel.template, /QR CODE 數量刻度/);
+    assert(panel.trendTicks.value.length >= 2);
+    assert.equal(panel.trendTicks.value.at(-1), 0);
+    assert(panel.trendTicks.value.every(Number.isInteger), 'quantity axis ticks use whole units');
+});
+
+test('auto tester overview keeps the latest 14 production dates rather than calendar dates', () => {
+    const panel = AutoTesterPanel.setup({ view: 'dashboard' });
+    panel.dashboardRows.value = Array.from({ length: 18 }, (_, index) => {
+        const date = new Date(Date.UTC(2026, 9, 1 + index));
+        return {
+            report_date: date.toISOString().slice(0, 10),
+            daily_count: index === 2 || index === 7 ? 0 : index + 1
+        };
+    });
+    const visibleDays = panel.trendDays.value;
+    assert.equal(visibleDays.length, 14);
+    assert.equal(visibleDays[0].date, '2026-10-04');
+    assert.equal(visibleDays.at(-1).date, '2026-10-18');
+    assert(visibleDays.every(day => day.count > 0));
+});
+
+test('auto tester dashboard requests a stable recent summary range independent of the selected date', async () => {
+    const summaryArgs = [];
+    globalThis._supabase = { async rpc(name, args = {}) {
+        if (name === 'auto_tester_get_state') return { data: { revision: 1 }, error: null };
+        if (name === 'auto_tester_get_summary') {
+            summaryArgs.push(args);
+            return { data: { revision: 1, daily: [] }, error: null };
+        }
+        throw new Error(`Unexpected RPC ${name}`);
+    } };
+    const panel = AutoTesterPanel.setup({ view: 'dashboard' });
+
+    await panel.refresh();
+    panel.dashboardDate.value = '2026-10-20';
+    await panel.refresh();
+
+    assert.equal(summaryArgs.length, 2);
+    assert.deepEqual(summaryArgs[0], {
+        p_start: globalThis.shiftDateByDays('2026-10-28', -3660),
+        p_end: '2026-10-28'
+    });
+    assert.deepEqual(summaryArgs[1], summaryArgs[0], 'changing the selected KPI date does not shift the latest-data query');
 });
 
 const csvFile = (name, rows) => {

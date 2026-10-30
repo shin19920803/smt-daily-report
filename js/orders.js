@@ -32,7 +32,7 @@ SMT.orders = function (ctx) {
             for (let i = 1; i <= daysInMonth; i++) {
                 const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
                 const dailyProds = [];
-                data.value.workOrders.forEach(wo => { const prod = wo.daily_production.find(dp => dp.production_date === dStr); if (prod && prod.input_quantity > 0) dailyProds.push({ id: prod.id, wo_id: wo.id, wo_number: wo.wo_number, model_name: wo.models.name, qty: prod.input_quantity }); });
+                data.value.workOrders.forEach(wo => { const prod = wo.daily_production.find(dp => dp.production_date === dStr); if (prod && prod.input_quantity > 0) dailyProds.push({ id: prod.id, wo_id: wo.id, wo_number: wo.wo_number, model_name: wo.models.name, qty: prod.input_quantity, production_date: dStr }); });
                 days.push({ dayNum: i, dateStr: dStr, productions: dailyProds });
             } return days;
         });
@@ -47,6 +47,17 @@ SMT.orders = function (ctx) {
             if (ctx.prepareDailyReport) ctx.prepareDailyReport();
             currentTab.value = 'report';
             if (selected && ctx.selectReportWo) ctx.selectReportWo(selected.wo_number, selected.id);
+        };
+        const openCalendarReport = async (production) => {
+            if (!production?.id || !production?.wo_id) return toast("找不到這筆生產紀錄，請重新整理後再試", "error");
+            const productionDate = dayDetailModal.value.date;
+            dayDetailModal.value.show = false;
+            currentTab.value = 'report';
+            if (ctx.openCalendarProduction) {
+                await ctx.openCalendarProduction({ ...production, production_date: production.production_date || productionDate });
+            } else {
+                toast("每日報工尚未就緒，請重新整理頁面後再試", "error");
+            }
         };
         const saveWorkOrder = async () => { const { id, number, modelId, selectedModelIds, targetQty } = woForm.value; if (!number || !targetQty) return toast("請填寫工單號碼與數量", "warning"); loading.value = true; try { if (isEditingWo.value && id) { if (!modelId) return toast("請選擇機種", "warning"); await _supabase.from('work_orders').update({ wo_number: number, model_id: modelId, target_quantity: targetQty }).eq('id', id); } else { if (selectedModelIds.length === 0) return toast("請至少勾選一個機種", "warning"); for (const mId of selectedModelIds) { const isDuplicate = data.value.workOrders.some(w => w.wo_number === number && w.model_id === mId); if (!isDuplicate) await _supabase.from('work_orders').insert({ wo_number: number, model_id: mId, target_quantity: targetQty, is_closed: false, line: currentLine.value }); } } showWoModal.value = false; loadBaseData(); toast(isEditingWo.value ? "更新成功" : "工單已建立"); } catch (e) { toast("操作失敗", "error"); } finally { loading.value = false; } };
         const deleteWorkOrder = async (id) => { if(!confirm("⚠️ 警告：刪除工單將會移除所有相關數據！")) return; loading.value = true; await _supabase.from('work_orders').delete().eq('id', id); loadBaseData(); loading.value = false; toast("工單已刪除", "info"); };
@@ -99,7 +110,7 @@ SMT.orders = function (ctx) {
             woForm, isEditingWo, orderSearch, selectedWoId, dayDetailModal, closeWoConfirm,
             processedWorkOrders, calendarYear, calendarMonth, calendarDays, calendarPadding,
             changeMonth, isToday, selectWoForCalendar, openDayDetail,
-            openWoModal, openDailyReport, saveWorkOrder, deleteWorkOrder, openCloseWoConfirm, cancelCloseWo, closeWorkOrder,
+            openWoModal, openDailyReport, openCalendarReport, saveWorkOrder, deleteWorkOrder, openCloseWoConfirm, cancelCloseWo, closeWorkOrder,
             modelGroups, toggleModelGroup
         };
 };

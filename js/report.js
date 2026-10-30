@@ -73,8 +73,20 @@ SMT.report = function (ctx) {
             report.value.selectedWoNumber = null;
         };
         const loadHistory = async () => { const { data: list } = await _supabase.from('daily_production').select('*, work_orders(wo_number, models(name)), defect_logs(quantity)').eq('line', currentLine.value).order('production_date', { ascending: false }).limit(50); if (list) historyList.value = list.map(item => ({ ...item, defect_count: item.defect_logs.reduce((s, d) => s + (d.quantity || 0), 0) })); ctx.invalidateDashboardDateCache?.(); };
-        const loadRecordForEdit = async (rec) => { report.value.date = rec.production_date; report.value.originalDate = rec.production_date; report.value.selectedWoNumber = rec.work_orders.wo_number; report.value.wo_id = rec.wo_id; report.value.isEditing = true; await fetchDailyRecord(); };
-        const fetchDailyRecord = async () => { if (!report.value.wo_id || !report.value.date) return; loading.value = true; report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; const queryDate = report.value.isEditing && report.value.originalDate ? report.value.originalDate : report.value.date; try { const { data: prod } = await _supabase.from('daily_production').select('id, input_quantity').eq('wo_id', report.value.wo_id).eq('production_date', queryDate).maybeSingle(); if (prod) { report.value.currentId = prod.id; report.value.inputQty = prod.input_quantity; const { data: logs } = await _supabase.from('defect_logs').select('*, defect_types(name), defect_locations(code)').eq('production_id', prod.id).order('created_at', { ascending: false }); report.value.logs = logs || []; } } catch (e) { console.error(e); } finally { loading.value = false; } };
+        const loadRecordForEdit = async (rec) => { report.value.date = rec.production_date; report.value.originalDate = rec.production_date; report.value.selectedWoNumber = rec.work_orders.wo_number; report.value.wo_id = rec.wo_id; report.value.currentId = rec.id || null; report.value.isEditing = true; await fetchDailyRecord(rec.id || null); };
+        const openCalendarProduction = async (production) => {
+            if (!production?.id || !production?.wo_id || !production?.production_date || !production?.wo_number) {
+                return toast("生產紀錄資料不完整，無法開啟每日報工", "error");
+            }
+            currentTab.value = 'report';
+            await loadRecordForEdit({
+                id: production.id,
+                production_date: production.production_date,
+                wo_id: production.wo_id,
+                work_orders: { wo_number: production.wo_number }
+            });
+        };
+        const fetchDailyRecord = async (recordId = report.value.currentId) => { if (!report.value.wo_id || !report.value.date) return; loading.value = true; report.value.currentId = null; report.value.logs = []; report.value.inputQty = 0; const queryDate = report.value.isEditing && report.value.originalDate ? report.value.originalDate : report.value.date; try { let query = _supabase.from('daily_production').select('id, input_quantity').eq('wo_id', report.value.wo_id).eq('production_date', queryDate); if (recordId) query = query.eq('id', recordId); const { data: prod } = await query.maybeSingle(); if (prod) { report.value.currentId = prod.id; report.value.inputQty = prod.input_quantity; const { data: logs } = await _supabase.from('defect_logs').select('*, defect_types(name), defect_locations(code)').eq('production_id', prod.id).order('created_at', { ascending: false }); report.value.logs = logs || []; } } catch (e) { console.error(e); } finally { loading.value = false; } };
         
         const saveDailyInput = async () => { 
             if (!report.value.wo_id) return toast("請先選擇工單與機種", "warning"); 
@@ -225,7 +237,7 @@ SMT.report = function (ctx) {
         return {
             report, defectForm, historyList, reportHistoryList, rawExportFilter,
             availableModelsForSelectedWo, reportWoList, onWoNumberChange, selectReportWo, backToWoList, backFromReport,
-            onDateChange, cancelEdit, prepareDailyReport, loadHistory, loadRecordForEdit, fetchDailyRecord,
+            onDateChange, cancelEdit, prepareDailyReport, loadHistory, loadRecordForEdit, openCalendarProduction, fetchDailyRecord,
             saveDailyInput, addDefect, deleteDefect, importDefectCsv,
             editingDefect, startEditDefect, saveEditDefect, deleteDailyRecord, exportRawData
         };

@@ -974,10 +974,10 @@
                 <div class="bg-white p-6 rounded-xl shadow-2xl w-[95%] md:w-96 animate-fade-in">
                     <h3 class="text-xl font-black mb-4 text-center border-b pb-2">{{ dayDetailModal.date }} 生產明細</h3>
                     <div class="space-y-3 max-h-64 overflow-y-auto">
-                        <div v-for="p in dayDetailModal.list" :key="p.id" class="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <button v-for="p in dayDetailModal.list" :key="p.id" type="button" @click="openCalendarReport(p)" class="w-full text-left p-3 bg-gray-50 rounded-lg border border-gray-200 hover:bg-blue-50 hover:border-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition">
                             <div class="flex justify-between font-bold text-blue-600"><span class="font-mono">{{ p.wo_number }}</span><span class="font-mono">{{ p.qty }} pcs</span></div>
-                            <div class="text-sm text-gray-500 mt-1">{{ p.model_name }}</div>
-                        </div>
+                            <div class="flex justify-between items-center mt-1"><span class="text-sm text-gray-500">{{ p.model_name }}</span><span class="text-xs font-bold text-blue-500"><i class="fas fa-arrow-right mr-1"></i>查看／編輯報工</span></div>
+                        </button>
                         <div v-if="dayDetailModal.list.length === 0" class="empty-state py-4"><i class="fas fa-calendar-times" style="font-size:1.5rem"></i><div class="hint">本日無生產紀錄</div></div>
                     </div>
                     <div class="mt-4 text-center"><button @click="dayDetailModal.show = false" class="btn-ghost">關閉</button></div>
@@ -1907,8 +1907,8 @@
 <script src="js/supabase-client.js?v=20261015-access-v1"></script>
 <script src="js/core.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/smt-import-validation.js?v=20261016-workorder-guard-v2"></script>
-<script src="js/orders.js?v=20261008-neutral-entry-v1"></script>
-<script src="js/report.js?v=20261016-workorder-guard-v2"></script>
+<script src="js/orders.js?v=20261030-calendar-report-link-v1"></script>
+<script src="js/report.js?v=20261030-calendar-report-link-v1"></script>
 <script src="js/assembly.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/daf-upload-utils.js?v=20261027-fp-model-codes-v1"></script>
 <script src="js/daf.js?v=20261029-finalize-plan-v1"></script>

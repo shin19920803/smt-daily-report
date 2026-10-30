@@ -32,7 +32,7 @@ SMT.orders = function (ctx) {
             for (let i = 1; i <= daysInMonth; i++) {
                 const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
                 const dailyProds = [];
-                data.value.workOrders.forEach(wo => { const prod = wo.daily_production.find(dp => dp.production_date === dStr); if (prod && prod.input_quantity > 0) dailyProds.push({ id: prod.id, wo_id: wo.id, wo_number: wo.wo_number, model_name: wo.models.name, qty: prod.input_quantity, production_date: dStr }); });
+                data.value.workOrders.forEach(wo => { wo.daily_production.filter(prod => prod.production_date === dStr && prod.input_quantity > 0).forEach(prod => dailyProds.push({ id: prod.id, wo_id: wo.id, wo_number: wo.wo_number, model_name: wo.models.name, qty: prod.input_quantity, production_date: dStr })); });
                 days.push({ dayNum: i, dateStr: dStr, productions: dailyProds });
             } return days;
         });
@@ -46,13 +46,15 @@ SMT.orders = function (ctx) {
             const selected = data.value.workOrders.find(wo => wo.id === selectedWoId.value);
             if (ctx.prepareDailyReport) ctx.prepareDailyReport();
             currentTab.value = 'report';
-            if (selected && ctx.selectReportWo) ctx.selectReportWo(selected.wo_number, selected.id);
+            if (ctx.loadSmtUploadHistory) ctx.loadSmtUploadHistory();
+            if (currentLine.value !== 'SMT' && selected && ctx.selectReportWo) ctx.selectReportWo(selected.wo_number, selected.id);
         };
         const openCalendarReport = async (production) => {
             if (!production?.id || !production?.wo_id) return toast("找不到這筆生產紀錄，請重新整理後再試", "error");
             const productionDate = dayDetailModal.value.date;
             dayDetailModal.value.show = false;
             currentTab.value = 'report';
+            if (ctx.loadSmtUploadHistory) ctx.loadSmtUploadHistory();
             if (ctx.openCalendarProduction) {
                 await ctx.openCalendarProduction({ ...production, production_date: production.production_date || productionDate });
             } else {

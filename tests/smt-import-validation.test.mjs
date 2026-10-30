@@ -76,7 +76,7 @@ test('SMT files cannot cross the two upload entry points; rejection performs zer
     const fp = harness(); const fpyEvent = fp.event(defects);
     await fp.fp.importFpyFile(fpyEvent);
     assert.deepEqual(fp.queries, []); assert.deepEqual(fp.writes, []);
-    assert.match(fp.messages[0].message, /工單管理 → 每日報工/);
+    assert.match(fp.messages[0].message, /工單管理 → 檔案上傳/);
     assert.equal(fpyEvent.target.value, ''); assert.equal(fp.ctx.loading.value, false);
 });
 

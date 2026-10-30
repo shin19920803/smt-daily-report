@@ -258,7 +258,7 @@
 
         <!-- ==================== REPORT ==================== -->
         <div v-if="currentTab === 'report' && currentLine !== 'AUTO_TESTER'" class="space-y-4 md:space-y-6 animate-fade-in">
-            <div class="flex items-center gap-2"><button v-if="currentLine === 'SMT'" @click="backFromReport" class="btn-ghost text-sm"><i class="fas fa-arrow-left mr-1"></i>返回工單管理</button><h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>每日生產日報表</h2></div>
+            <div class="flex items-center gap-2"><button v-if="currentLine === 'SMT'" @click="backFromReport" class="btn-ghost text-sm"><i class="fas fa-arrow-left mr-1"></i>返回工單管理</button><h2 class="text-xl md:text-2xl font-black text-gray-800"><i class="fas fa-edit mr-2 text-blue-500"></i>{{ currentLine === 'SMT' ? '檔案上傳' : '每日生產日報表' }}</h2></div>
             <div v-if="currentLine === 'ASSY'" class="space-y-4 animate-fade-in">
                 <div class="section-card p-4 md:p-6 border-l-4 border-orange-500">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -564,7 +564,40 @@
             </div>
 
             <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 space-y-6">
+                <section v-if="currentLine === 'SMT'" class="section-card p-4 md:p-6 border-l-4 border-indigo-500 lg:col-span-3 space-y-4">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div><h3 class="font-bold text-lg text-indigo-800"><i class="fas fa-file-arrow-up mr-2"></i>SMT 每日報工檔案上傳</h3><p class="text-xs text-gray-500 mt-1">只讀取 Excel 的 Data 分頁；A 欄判斷 TOP／BOT，B 欄連結工單，E＋F 欄逐列建立報工。其他分頁忽略，原始檔案不會上傳保存。</p></div>
+                        <button @click="loadSmtUploadHistory" class="btn-ghost text-sm"><i class="fas fa-sync-alt mr-1"></i>重新整理清單</button>
+                    </div>
+                    <div class="flex flex-col sm:flex-row sm:items-end gap-3">
+                        <label class="flex-1 sm:max-w-xs"><span class="block text-xs font-bold text-gray-500 mb-1">生產日期（會依檔名日期預填，請確認）</span><input type="date" v-model="smtUploadDate" @change="recheckSmtUpload" class="w-full border border-gray-200 p-2 rounded-lg"></label>
+                        <label class="btn-primary cursor-pointer text-center" :class="smtUploadBusy ? 'opacity-50 pointer-events-none' : ''"><i class="fas fa-upload mr-1"></i>選擇每日報工 Excel<input type="file" accept=".xlsx,.xls" @change="parseSmtReportFile" class="hidden" :disabled="smtUploadBusy"></label>
+                        <button v-if="smtUploadDraft" @click="publishSmtReportUpload" :disabled="smtUploadBusy || smtUploadDraft.issues.length > 0 || smtUploadDraft.rows.some(row => row.ng_qty > 0 && !row.defect_file_name)" class="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"><i class="fas fa-cloud-arrow-up mr-1"></i>{{ smtUploadBusy ? '處理中…' : `確認上傳 ${smtUploadDraft.rows.length} 筆` }}</button>
+                    </div>
+                    <div v-if="smtUploadError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{{ smtUploadError }}</div>
+                    <div v-if="smtUploadDraft" class="rounded-xl border border-indigo-100 overflow-hidden">
+                        <div class="flex flex-wrap items-center justify-between gap-2 bg-indigo-50 px-3 py-2 text-sm"><span class="font-bold text-indigo-900"><i class="fas fa-file-excel mr-2"></i>{{ smtUploadDraft.file_name }}</span><span class="text-gray-600">日期 {{ smtUploadDate }} ・ {{ smtUploadDraft.rows.length }} 筆獨立報工<span v-if="smtUploadDraft.excluded"> ・ 忽略非 AOI 列 {{ smtUploadDraft.excluded }} 筆</span></span></div>
+                        <div class="overflow-x-auto"><table class="w-full min-w-[760px] text-sm"><thead class="bg-gray-50 text-gray-500"><tr><th class="p-2 text-left">來源列</th><th class="p-2 text-left">工單／機種</th><th class="p-2">面別</th><th class="p-2 text-right">良品 E</th><th class="p-2 text-right">不良 F</th><th class="p-2 text-right">投入 E＋F</th><th class="p-2">不良明細 CSV</th></tr></thead><tbody>
+                            <tr v-for="row in smtUploadDraft.rows" :key="row.source_row" class="border-t"><td class="p-2 font-mono">{{ row.source_row }}</td><td class="p-2"><div class="font-mono font-bold">{{ row.wo_number }}</div><div v-if="row.model_name" class="text-xs text-gray-500">{{ row.model_name }}</div></td><td class="p-2 text-center">{{ row.side }}</td><td class="p-2 text-right font-mono text-green-700">{{ row.good_qty.toLocaleString() }}</td><td class="p-2 text-right font-mono text-red-600">{{ row.ng_qty.toLocaleString() }}</td><td class="p-2 text-right font-mono font-bold">{{ row.input_qty.toLocaleString() }}</td><td class="p-2 text-center">
+                                <label v-if="row.ng_qty > 0" class="inline-flex max-w-64 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1 text-xs" :class="row.defect_file_name ? 'border-green-200 bg-green-50 text-green-700' : 'border-orange-200 bg-orange-50 text-orange-700'"><i :class="row.defect_file_name ? 'fas fa-circle-check' : 'fas fa-file-csv'"></i><span class="max-w-44 truncate">{{ row.defect_file_name || '選擇不良 CSV' }}</span><input type="file" accept=".csv" @change="parseSmtDefectFile($event,row)" class="hidden"></label><span v-else class="text-xs text-gray-400">無不良</span>
+                            </td></tr>
+                        </tbody></table></div>
+                        <div v-if="smtUploadDraft.issues.length" class="flex flex-wrap items-center justify-between gap-2 border-t border-red-100 bg-red-50 px-3 py-2"><span class="text-sm font-bold text-red-700"><i class="fas fa-triangle-exclamation mr-1"></i>有 {{ smtUploadDraft.issues.length }} 項需先處理，尚未寫入資料</span><button @click="recheckSmtUpload" class="btn-ghost text-xs">重新檢查工單</button></div>
+                    </div>
+                    <div class="border-t pt-4">
+                        <h4 class="mb-2 text-sm font-bold text-gray-600"><i class="fas fa-clock-rotate-left mr-1 text-indigo-500"></i>已上傳檔案與逐筆報工</h4>
+                        <div v-if="smtUploadHistory.length" class="space-y-3">
+                            <article v-for="batch in smtUploadHistory" :key="batch.id" class="rounded-xl border border-gray-200 bg-white">
+                                <div class="flex flex-wrap items-center gap-2 border-b bg-gray-50 px-3 py-2 text-sm"><span class="min-w-0 flex-1 truncate font-bold">{{ batch.file_name }}</span><span class="text-gray-500">{{ batch.production_date }} ・ {{ batch.row_manifest?.length || 0 }} 筆</span><button @click="deleteSmtUpload(batch)" class="rounded-lg border border-red-100 px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-50"><i class="fas fa-trash-alt mr-1"></i>刪除檔案資料</button></div>
+                                <div class="divide-y">
+                                    <button v-for="row in batch.row_manifest || []" :key="row.production_id" @click="openSmtImportedRecord(batch,row)" class="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-xs hover:bg-indigo-50"><span class="font-mono text-gray-400">第 {{ row.source_row }} 列</span><span class="font-mono font-bold text-blue-700">{{ row.wo_number }}</span><span class="text-gray-500">{{ row.model_name }}／{{ row.side }}</span><span class="ml-auto">投入 <b>{{ row.input_qty?.toLocaleString() }}</b></span><span class="text-red-600">NG {{ row.ng_qty }}</span><span v-if="row.defect_file_name" class="max-w-40 truncate text-gray-400">{{ row.defect_file_name }}</span><i class="fas fa-pen-to-square text-gray-400"></i></button>
+                                </div>
+                            </article>
+                        </div>
+                        <div v-else class="rounded-lg bg-gray-50 py-6 text-center text-sm text-gray-400">尚無檔案上傳紀錄</div>
+                    </div>
+                </section>
+                <div v-if="currentLine !== 'SMT' || report.currentId" class="lg:col-span-2 space-y-6">
                     <!-- Step 1 -->
                     <div class="section-card p-4 md:p-6 border-l-4 border-blue-500 relative">
                         <div class="flex items-center gap-2 mb-4">
@@ -674,7 +707,7 @@
                     </div>
                 </div>
                 <!-- History Panel -->
-                <div class="section-card flex flex-col h-[400px] md:h-[600px]">
+                <div class="section-card flex flex-col h-[400px] md:h-[600px]" :class="currentLine === 'SMT' && !report.currentId ? 'lg:col-span-3' : ''">
                     <div class="p-4 bg-gray-50/50 border-b font-bold text-gray-600 flex justify-between items-center text-sm"><span><i class="fas fa-history mr-2 text-blue-500"></i>近期生產紀錄</span><button @click="loadHistory" class="text-blue-600 text-xs hover:underline"><i class="fas fa-sync"></i></button></div>
                     <div class="overflow-y-auto flex-1 p-2 space-y-2">
                         <div v-for="rec in reportHistoryList" :key="rec.id" @click="loadRecordForEdit(rec)" class="p-3 border rounded-lg cursor-pointer hover:shadow-sm transition text-sm group relative" :class="report.currentId === rec.id ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-400' : 'bg-white border-gray-100'">
@@ -694,6 +727,13 @@
                             <div class="hint">完成步驟 1 後紀錄會出現在這裡</div>
                         </div>
                     </div>
+                </div>
+            </div>
+            <div v-if="currentLine === 'SMT' && smtUploadValidationOpen && smtUploadDraft?.issues?.length" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="工單資料檢查">
+                <div class="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+                    <div class="flex items-start justify-between border-b p-4"><div><h3 class="font-black text-red-700"><i class="fas fa-triangle-exclamation mr-2"></i>檔案尚未上傳：請先完成工單設定</h3><p class="mt-1 text-xs text-gray-500">下列問題修正前，不會寫入任何報工資料。</p></div><button @click="smtUploadValidationOpen = false" class="btn-ghost">關閉</button></div>
+                    <ul class="max-h-[60vh] space-y-2 overflow-y-auto p-4"><li v-for="(issue,index) in smtUploadDraft.issues" :key="index" class="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">{{ issue }}</li></ul>
+                    <div class="flex justify-end border-t p-4"><button @click="smtUploadValidationOpen = false; currentTab = 'orders'" class="btn-ghost">前往工單管理</button><button @click="smtUploadValidationOpen = false; recheckSmtUpload()" class="btn-primary ml-2">重新檢查</button></div>
                 </div>
             </div>
             <!-- Raw Export -->
@@ -879,7 +919,7 @@
                 <h2 class="text-xl md:text-2xl font-black text-gray-800 self-start md:self-center"><i class="fas fa-clipboard-list mr-2 text-indigo-500"></i>工單管理</h2>
                 <div class="flex gap-2 w-full md:w-auto">
                     <div class="relative flex-1 md:w-64"><i class="fas fa-search absolute left-3 top-3 text-gray-300"></i><input v-model="orderSearch" placeholder="搜尋工單號或機種..." class="w-full border border-gray-200 p-2 pl-10 rounded-lg shadow-sm text-sm"></div>
-                    <div class="flex gap-2"><button v-if="currentLine === 'SMT'" @click="openDailyReport" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-edit mr-1"></i> 每日報工</button><button @click="openWoModal()" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-plus mr-1"></i> 新增工單</button></div>
+                    <div class="flex gap-2"><button v-if="currentLine === 'SMT'" @click="openDailyReport" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-file-arrow-up mr-1"></i> 檔案上傳</button><button @click="openWoModal()" class="btn-primary whitespace-nowrap text-sm"><i class="fas fa-plus mr-1"></i> 新增工單</button></div>
                 </div>
             </div>
             <div class="section-card overflow-x-auto max-h-[400px] overflow-y-auto">
@@ -1907,8 +1947,9 @@
 <script src="js/supabase-client.js?v=20261015-access-v1"></script>
 <script src="js/core.js?v=20261030-calendar-production-id-v1"></script>
 <script src="js/smt-import-validation.js?v=20261016-workorder-guard-v2"></script>
-<script src="js/orders.js?v=20261030-calendar-report-link-v1"></script>
+<script src="js/orders.js?v=20261030-smt-upload-entry-v1"></script>
 <script src="js/report.js?v=20261030-calendar-report-link-v1"></script>
+<script src="js/smt-report-upload.js?v=20261030-smt-daily-excel-upload-v1"></script>
 <script src="js/assembly.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/daf-upload-utils.js?v=20261027-fp-model-codes-v1"></script>
 <script src="js/daf.js?v=20261029-finalize-plan-v1"></script>
@@ -1919,6 +1960,6 @@
 <script src="js/equipment.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/settings.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/auto-tester.js?v=20261030-auto-tester-latest-production-days"></script>
-<script src="js/app.js?v=20261028-auto-tester-v1"></script>
+<script src="js/app.js?v=20261030-smt-daily-upload-v1"></script>
 </body>
 </html>

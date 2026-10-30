@@ -108,6 +108,16 @@ test('calendar item opens the exact SMT daily-production record and its defect e
     assert.equal(queries.find(query => query.table === 'defect_logs').filters.production_id, production.id);
 });
 
+test('calendar preserves multiple same-day production rows for one work order as separate entries', () => {
+    const { ctx, production } = createHarness();
+    ctx.data.value.workOrders[0].daily_production.push({
+        id: 'production-2', production_date: production.production_date, input_quantity: 13
+    });
+    const day = ctx.calendarDays.value.find(item => item.dateStr === production.production_date);
+    assert.deepEqual(Array.from(day.productions, item => item.id), ['production-1', 'production-2']);
+    assert.deepEqual(Array.from(day.productions, item => item.qty), [42, 13]);
+});
+
 test('calendar entries expose a keyboard-accessible action and use the existing report editor', () => {
     const html = read('index.html');
     assert.match(html, /<button v-for="p in dayDetailModal\.list"[^>]*@click="openCalendarReport\(p\)"/);

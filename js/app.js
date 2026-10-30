@@ -4,7 +4,7 @@ const app = createApp({
         ctx.authUser = window.DashboardAuth.user;
         ctx.accessManagerOpen = ref(false);
         ctx.logoutUser = window.DashboardAuth.logout;
-        [SMT.core, SMT.orders, SMT.report, SMT.assembly, SMT.daf, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
+        [SMT.core, SMT.orders, SMT.report, SMT.reportUpload, SMT.assembly, SMT.daf, SMT.fpy, SMT.ooc, SMT.dashboard, SMT.stats, SMT.equipment, SMT.settings]
             .forEach(mod => Object.assign(ctx, mod(ctx)));
 
         onMounted(async () => {

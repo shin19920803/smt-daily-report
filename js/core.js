@@ -121,7 +121,7 @@ SMT.core = function (ctx) {
                 return;
             }
             const [wo, mo, dt, dl, mac, oc] = await Promise.all([
-                _supabase.from('work_orders').select('*, models(name), daily_production(production_date, input_quantity)').eq('line', L).order('created_at', {ascending: false}),
+                _supabase.from('work_orders').select('*, models(name), daily_production(id, production_date, input_quantity)').eq('line', L).order('created_at', {ascending: false}),
                 _supabase.from('models').select('*').eq('line', L),
                 _supabase.from('defect_types').select('*').eq('line', L),
                 _supabase.from('defect_locations').select('*').eq('line', L),

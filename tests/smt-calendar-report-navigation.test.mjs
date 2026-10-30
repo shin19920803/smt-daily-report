@@ -5,6 +5,37 @@ import test from 'node:test';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
+test('SMT base data requests production IDs used by the calendar action', async () => {
+    const selections = [];
+    const window = { SMT: {}, getTaiwanDate: () => '2026-10-30' };
+    const sandbox = vm.createContext({ window, console, setTimeout,
+        localStorage: { getItem: () => 'SMT' }, watch: () => {},
+        ref: value => ({ value }), computed: getter => ({ get value() { return getter(); } }),
+        _supabase: { from(table) {
+            let fields = '';
+            const chain = {
+                select(value) { fields = value; selections.push({ table, fields }); return chain; },
+                eq() { return chain; }, order() { return chain; },
+                then(resolve, reject) {
+                    const hasId = /daily_production\(\s*id\s*,/.test(fields);
+                    const data = table === 'work_orders' ? [{
+                        id: 'wo-1', daily_production: [{ ...(hasId ? { id: 'production-1' } : {}), production_date: '2026-10-22', input_quantity: 42 }]
+                    }] : [];
+                    return Promise.resolve({ data, error: null }).then(resolve, reject);
+                }
+            };
+            return chain;
+        } }
+    });
+    sandbox.SMT = window.SMT;
+    vm.runInContext(read('js/core.js'), sandbox);
+    const core = window.SMT.core({});
+    await core.loadBaseData();
+    assert.match(selections.find(item => item.table === 'work_orders').fields, /daily_production\(\s*id\s*,/);
+    assert.equal(core.data.value.workOrders[0].daily_production[0].id, 'production-1');
+    assert.equal(core.data.value.workOrders[0].current_input, 42);
+});
+
 function createHarness() {
     const production = {
         id: 'production-1', wo_id: 'wo-1', production_date: '2026-10-22',

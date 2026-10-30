@@ -48,8 +48,8 @@ SMT.reportUpload = function (ctx) {
     const smtUploadDate = ref(window.getTaiwanDate());
     const smtUploadDraft = ref(null);
     const smtUploadHistory = ref([]);
-    const smtUploadError = ref('');
-    const smtUploadValidationOpen = ref(false);
+    const smtUploadHistoryError = ref('');
+    const smtUploadFailure = ref(null);
     const smtUploadBusy = ref(false);
 
     const inferDateFromFilename = fileName => {
@@ -71,6 +71,15 @@ SMT.reportUpload = function (ctx) {
     };
     const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
         .map(value => value.toString(16).padStart(2, '0')).join('');
+    const failSmtUpload = (fileName, productionDate, reason) => {
+        smtUploadDraft.value = null;
+        smtUploadFailure.value = {
+            file_name: String(fileName || '未命名檔案'),
+            production_date: String(productionDate || smtUploadDate.value || window.getTaiwanDate()),
+            reason: String(reason || '檔案處理失敗')
+        };
+    };
+    const closeSmtUploadFailure = () => { smtUploadFailure.value = null; };
 
     const fetchWorkOrders = async rows => {
         const numbers = [...new Set(rows.map(row => row.wo_number))];
@@ -127,10 +136,10 @@ SMT.reportUpload = function (ctx) {
                 }
             }
         }
+        if (issues.length) throw new Error(issues.join('\n'));
         draft.rows = resolved;
-        draft.issues = issues;
+        draft.issues = [];
         smtUploadDraft.value = draft;
-        smtUploadValidationOpen.value = issues.length > 0;
         return draft;
     };
     const loadSmtUploadHistory = async () => {
@@ -139,42 +148,42 @@ SMT.reportUpload = function (ctx) {
             const { data: batches, error } = await _supabase.rpc('smt_list_report_uploads', { p_limit: 100, p_offset: 0 });
             if (error) throw error;
             smtUploadHistory.value = batches || [];
-            smtUploadError.value = '';
+            smtUploadHistoryError.value = '';
         } catch (error) {
-            smtUploadError.value = `讀取上傳清單失敗：${error.message}`;
+            smtUploadHistoryError.value = `讀取上傳清單失敗：${error.message}`;
         }
     };
     const parseSmtReportFile = async event => {
         const file = event.target.files?.[0];
         event.target.value = '';
-        smtUploadError.value = '';
         if (!file) return;
+        smtUploadDraft.value = null;
+        smtUploadFailure.value = null;
+        const productionDate = inferDateFromFilename(file.name);
+        smtUploadDate.value = productionDate;
         if (!/\.xlsx?$/i.test(file.name)) {
-            smtUploadError.value = '每日報工只接受 Excel 檔案（.xlsx／.xls）';
-            return toast(smtUploadError.value, 'error');
+            return failSmtUpload(file.name, productionDate, '每日報工只接受 Excel 檔案（.xlsx／.xls）');
         }
         loading.value = true;
         try {
             const bytes = new Uint8Array(await file.arrayBuffer());
+            const contentHash = await digest(bytes);
             const book = XLSX.read(bytes, { type: 'array', cellDates: false });
             const sheet = book.Sheets.Data;
-            if (!sheet) throw new Error('找不到名稱為 Data 的分頁，未寫入任何資料');
+            if (!sheet) throw new Error('找不到名稱為 Data 的分頁');
             const parsed = SMT.parseSmtDailyReportData(XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' }));
-            const productionDate = inferDateFromFilename(file.name);
-            smtUploadDate.value = productionDate;
-            const draft = { file_name: file.name, bytes, rows: parsed.rows, excluded: parsed.excluded,
+            const draft = { file_name: file.name, content_hash: contentHash, rows: parsed.rows, excluded: parsed.excluded,
                 production_date: productionDate, issues: [] };
             await resolveRows(draft);
         } catch (error) {
-            smtUploadDraft.value = null;
-            smtUploadError.value = error.message || 'Excel 解析失敗';
-            toast(smtUploadError.value, 'error');
+            failSmtUpload(file.name, productionDate, error.message || 'Excel 解析失敗');
         } finally { loading.value = false; }
     };
     const parseSmtDefectFile = async (event, target) => {
         const file = event.target.files?.[0];
         event.target.value = '';
         if (!file || !smtUploadDraft.value) return;
+        const draft = smtUploadDraft.value;
         loading.value = true;
         try {
             SMT.validateSmtReportFilename(file.name, target.wo_number);
@@ -214,8 +223,8 @@ SMT.reportUpload = function (ctx) {
             smtUploadDraft.value = { ...smtUploadDraft.value, rows };
             toast(`第 ${target.source_row} 列不良明細已驗證`);
         } catch (error) {
-            smtUploadError.value = error.message || '不良明細解析失敗';
-            toast(smtUploadError.value, 'error');
+            failSmtUpload(draft.file_name, draft.production_date,
+                `${file.name}：${error.message || '不良明細解析失敗'}`);
         } finally { loading.value = false; }
     };
     const recheckSmtUpload = async () => {
@@ -225,21 +234,21 @@ SMT.reportUpload = function (ctx) {
             smtUploadDraft.value.production_date = smtUploadDate.value;
             await resolveRows(smtUploadDraft.value);
         } catch (error) {
-            smtUploadError.value = `工單檢查失敗：${error.message}`;
-            toast(smtUploadError.value, 'error');
+            const draft = smtUploadDraft.value;
+            failSmtUpload(draft?.file_name, smtUploadDate.value, `工單檢查失敗：${error.message}`);
         } finally { loading.value = false; }
     };
     const publishSmtReportUpload = async () => {
         const draft = smtUploadDraft.value;
-        if (currentLine.value !== 'SMT' || !draft || draft.issues?.length) return toast('請先完成工單／機種檢查', 'error');
-        if (draft.production_date !== smtUploadDate.value) return toast('日期已變更，請重新檢查工單', 'warning');
+        if (currentLine.value !== 'SMT' || !draft) return;
+        if (draft.issues?.length) return failSmtUpload(draft.file_name, draft.production_date, draft.issues.join('\n'));
+        if (draft.production_date !== smtUploadDate.value) return failSmtUpload(draft.file_name, smtUploadDate.value, '生產日期已變更，請重新選擇檔案並檢查');
         const missing = draft.rows.filter(row => row.ng_qty > 0 && !row.defect_file_name);
-        if (missing.length) return toast(`尚有 ${missing.length} 筆不良資料未上傳明細`, 'warning');
+        if (missing.length) return failSmtUpload(draft.file_name, draft.production_date, `尚有 ${missing.length} 筆不良資料未選擇不良 CSV`);
         loading.value = true;
         smtUploadBusy.value = true;
         try {
-            const excelHash = await digest(draft.bytes);
-            const canonical = JSON.stringify({ date: smtUploadDate.value, excelHash,
+            const canonical = JSON.stringify({ date: smtUploadDate.value, excelHash: draft.content_hash,
                 defectHashes: draft.rows.map(row => [row.source_row, row._defect_file_hash || null]) });
             const hash = await digest(new TextEncoder().encode(canonical));
             const rows = draft.rows.map(({ source_row, wo_id, wo_number, side, model_name, good_qty, ng_qty,
@@ -253,14 +262,18 @@ SMT.reportUpload = function (ctx) {
             if (error) throw error;
             if (!result?.ok) throw new Error('資料庫未確認發佈成功');
             smtUploadDraft.value = null;
-            smtUploadValidationOpen.value = false;
-            await window.invalidateDataCache?.();
-            await Promise.all([loadSmtUploadHistory(), ctx.loadHistory(), ctx.loadBaseData()]);
-            await ctx.refreshDashboard?.({ force: true });
+            smtUploadFailure.value = null;
+            try {
+                await window.invalidateDataCache?.();
+                await Promise.all([loadSmtUploadHistory(), ctx.loadHistory(), ctx.loadBaseData()]);
+                await ctx.refreshDashboard?.({ force: true });
+            } catch (syncError) {
+                toast(`資料已成功寫入；畫面同步失敗，請重新整理，勿重複上傳。${syncError.message || ''}`, 'warning');
+                return;
+            }
             toast(result.duplicate ? '相同檔案已上傳，未重複計入' : `上傳完成，共 ${result.row_count} 筆獨立報工`);
         } catch (error) {
-            smtUploadError.value = `上傳失敗：${error.message}`;
-            toast(smtUploadError.value, 'error');
+            failSmtUpload(draft.file_name, draft.production_date, error.message || '資料處理失敗，資料庫交易已取消');
         } finally { loading.value = false; smtUploadBusy.value = false; }
     };
     const deleteSmtUpload = async batch => {
@@ -286,7 +299,7 @@ SMT.reportUpload = function (ctx) {
             production_date: batch.production_date,
             work_orders: { wo_number: row.wo_number } });
     };
-    return { smtUploadDate, smtUploadDraft, smtUploadHistory, smtUploadError, smtUploadValidationOpen,
+    return { smtUploadDate, smtUploadDraft, smtUploadHistory, smtUploadHistoryError, smtUploadFailure,
         smtUploadBusy, parseSmtReportFile, parseSmtDefectFile, publishSmtReportUpload,
-        loadSmtUploadHistory, deleteSmtUpload, openSmtImportedRecord, recheckSmtUpload };
+        loadSmtUploadHistory, deleteSmtUpload, openSmtImportedRecord, recheckSmtUpload, closeSmtUploadFailure };
 };

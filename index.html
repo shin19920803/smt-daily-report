@@ -574,7 +574,7 @@
                         <label class="btn-primary cursor-pointer text-center" :class="smtUploadBusy ? 'opacity-50 pointer-events-none' : ''"><i class="fas fa-upload mr-1"></i>選擇每日報工 Excel<input type="file" accept=".xlsx,.xls" @change="parseSmtReportFile" class="hidden" :disabled="smtUploadBusy"></label>
                         <button v-if="smtUploadDraft" @click="publishSmtReportUpload" :disabled="smtUploadBusy || smtUploadDraft.issues.length > 0 || smtUploadDraft.rows.some(row => row.ng_qty > 0 && !row.defect_file_name)" class="btn-primary bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"><i class="fas fa-cloud-arrow-up mr-1"></i>{{ smtUploadBusy ? '處理中…' : `確認上傳 ${smtUploadDraft.rows.length} 筆` }}</button>
                     </div>
-                    <div v-if="smtUploadError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{{ smtUploadError }}</div>
+                    <div v-if="smtUploadHistoryError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{{ smtUploadHistoryError }}</div>
                     <div v-if="smtUploadDraft" class="rounded-xl border border-indigo-100 overflow-hidden">
                         <div class="flex flex-wrap items-center justify-between gap-2 bg-indigo-50 px-3 py-2 text-sm"><span class="font-bold text-indigo-900"><i class="fas fa-file-excel mr-2"></i>{{ smtUploadDraft.file_name }}</span><span class="text-gray-600">日期 {{ smtUploadDate }} ・ {{ smtUploadDraft.rows.length }} 筆獨立報工<span v-if="smtUploadDraft.excluded"> ・ 忽略非 AOI 列 {{ smtUploadDraft.excluded }} 筆</span></span></div>
                         <div class="overflow-x-auto"><table class="w-full min-w-[760px] text-sm"><thead class="bg-gray-50 text-gray-500"><tr><th class="p-2 text-left">來源列</th><th class="p-2 text-left">工單／機種</th><th class="p-2">面別</th><th class="p-2 text-right">良品 E</th><th class="p-2 text-right">不良 F</th><th class="p-2 text-right">投入 E＋F</th><th class="p-2">不良明細 CSV</th></tr></thead><tbody>
@@ -729,11 +729,15 @@
                     </div>
                 </div>
             </div>
-            <div v-if="currentLine === 'SMT' && smtUploadValidationOpen && smtUploadDraft?.issues?.length" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="工單資料檢查">
-                <div class="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-                    <div class="flex items-start justify-between border-b p-4"><div><h3 class="font-black text-red-700"><i class="fas fa-triangle-exclamation mr-2"></i>檔案尚未上傳：請先完成工單設定</h3><p class="mt-1 text-xs text-gray-500">下列問題修正前，不會寫入任何報工資料。</p></div><button @click="smtUploadValidationOpen = false" class="btn-ghost">關閉</button></div>
-                    <ul class="max-h-[60vh] space-y-2 overflow-y-auto p-4"><li v-for="(issue,index) in smtUploadDraft.issues" :key="index" class="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">{{ issue }}</li></ul>
-                    <div class="flex justify-end border-t p-4"><button @click="smtUploadValidationOpen = false; currentTab = 'orders'" class="btn-ghost">前往工單管理</button><button @click="smtUploadValidationOpen = false; recheckSmtUpload()" class="btn-primary ml-2">重新檢查</button></div>
+            <div v-if="currentLine === 'SMT' && smtUploadFailure" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-labelledby="smt-upload-failure-title">
+                <div class="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+                    <div class="border-b p-5"><h3 id="smt-upload-failure-title" class="text-xl font-black text-red-700"><i class="fas fa-circle-exclamation mr-2"></i>檔案未完成上傳</h3></div>
+                    <div class="space-y-3 p-5 text-sm">
+                        <div><span class="font-bold text-gray-500">檔案名稱：</span><span class="break-all font-semibold">{{ smtUploadFailure.file_name }}</span></div>
+                        <div><span class="font-bold text-gray-500">日期：</span><span class="font-mono">{{ smtUploadFailure.production_date }}</span></div>
+                        <div><span class="font-bold text-gray-500">錯誤原因：</span><div class="mt-1 whitespace-pre-wrap break-words text-red-700">{{ smtUploadFailure.reason }}</div></div>
+                    </div>
+                    <div class="flex justify-end border-t p-4"><button @click="closeSmtUploadFailure" class="btn-primary">關閉</button></div>
                 </div>
             </div>
             <!-- Raw Export -->
@@ -1949,7 +1953,7 @@
 <script src="js/smt-import-validation.js?v=20261016-workorder-guard-v2"></script>
 <script src="js/orders.js?v=20261030-smt-upload-entry-v1"></script>
 <script src="js/report.js?v=20261030-calendar-report-link-v1"></script>
-<script src="js/smt-report-upload.js?v=20261030-smt-daily-excel-upload-v1"></script>
+<script src="js/smt-report-upload.js?v=20261030-smt-daily-excel-upload-v2"></script>
 <script src="js/assembly.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/daf-upload-utils.js?v=20261027-fp-model-codes-v1"></script>
 <script src="js/daf.js?v=20261029-finalize-plan-v1"></script>

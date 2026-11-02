@@ -16,7 +16,8 @@ const sourceRows = [
     ['2D','626100107','P1','M1',99,0]
 ];
 
-function createHarness({ missingOrder = null, rows = sourceRows, publishError = null } = {}) {
+function createHarness({ missingOrder = null, rows = sourceRows, publishError = null,
+    defectRows = [['瑕疵項目','C1'],['缺件',18]] } = {}) {
     const woKeys = [...new Set(rows.slice(1).filter(row => row[0] === 'Back AOI' || row[0] === 'Front AOI').map(row => `${row[1]}-${row[0] === 'Back AOI' ? 'BOT' : 'TOP'}`))];
     const orders = woKeys.map((key, index) => {
         const [wo_number, side] = key.split('-');
@@ -34,7 +35,7 @@ function createHarness({ missingOrder = null, rows = sourceRows, publishError = 
     const xlsx = { read(bytes) {
         if (bytes[0] === 1) return { Sheets: { Data: { tag: 'data' } }, SheetNames: ['Data','2D','Detail'] };
         return { Sheets: { CSV: { tag: 'defects' } }, SheetNames: ['CSV'] };
-    }, utils: { sheet_to_json(sheet) { return sheet.tag === 'data' ? rows : [['瑕疵項目','C1'],['缺件',18]]; } } };
+    }, utils: { sheet_to_json(sheet) { return sheet.tag === 'data' ? rows : defectRows; } } };
     const sandbox = vm.createContext({ window, console, XLSX: xlsx, crypto: webcrypto, TextEncoder,
         ref: value => ({ value }), computed: getter => ({ get value() { return getter(); } }),
         confirm: () => true,
@@ -165,6 +166,32 @@ test('valid file publishes six separate report rows with exact E+F inputs and de
     assert.equal(ctx.smtUploadDraft.value, null);
 });
 
+test('CSV defect quantity is authoritative even when it differs from Excel F; CSV remains mandatory for NG rows', async () => {
+    const rows = sourceRows.map(row => [...row]);
+    rows[4][5] = 340;
+    const { ctx, calls } = createHarness({ rows, defectRows: [['瑕疵項目','C1'],['缺件',85]] });
+    const file = { name: '1030-SMT.xlsx', async arrayBuffer() { return Uint8Array.of(1).buffer; } };
+    await ctx.parseSmtReportFile({ target: { files: [file], value: '' } });
+    const ngRow = ctx.smtUploadDraft.value.rows.find(row => row.ng_qty > 0);
+    assert.equal(ngRow.ng_qty, 340);
+    assert.equal(ngRow.input_qty, 1874);
+    await ctx.publishSmtReportUpload();
+    assert.equal(calls.rpc.some(call => call.name === 'smt_publish_report_upload'), false);
+    assert.equal(ctx.smtUploadDraft.value, null);
+    assert.match(ctx.smtUploadFailure.value.reason, /未選擇不良 CSV/);
+
+    await ctx.parseSmtReportFile({ target: { files: [file], value: '' } });
+    const retryNgRow = ctx.smtUploadDraft.value.rows.find(row => row.ng_qty > 0);
+    const defectFile = { name: `20261030_${retryNgRow.wo_number}.csv`, async arrayBuffer() { return Uint8Array.of(2).buffer; } };
+    await ctx.parseSmtDefectFile({ target: { files: [defectFile], value: '' } }, retryNgRow);
+    await ctx.publishSmtReportUpload();
+    const published = calls.rpc.find(call => call.name === 'smt_publish_report_upload');
+    assert.ok(published);
+    assert.equal(published.args.p_rows[3].ng_qty, 340);
+    assert.equal(published.args.p_rows[3].input_qty, 1874);
+    assert.equal(published.args.p_rows[3].defects.reduce((sum, defect) => sum + defect.quantity, 0), 85);
+});
+
 test('database publish failure discards draft and displays only file name, date and error cause', async () => {
     const { ctx, calls } = createHarness({ publishError: 'statement timeout' });
     const file = { name: '1029-SMT.xlsx', async arrayBuffer() { return Uint8Array.of(1).buffer; } };
@@ -192,6 +219,9 @@ test('migration uses bigint production IDs, one insert per Excel row, and guards
     assert.match(sql, /current_account_id\(\)/);
     assert.match(sql, /Refuse to remove a batch if any production\/defect row has been edited or removed/);
     assert.match(sql, /production_date, content_hash/);
+    assert.doesNotMatch(sql, /不良明細合計與 F 欄不符|sum\(\(d->>'quantity'\)::integer\).*<> v_ng/s);
+    assert.match(sql, /v_ng > 0 and coalesce\(btrim\(v_row->>'defect_file_name'\), ''\) = ''/);
+    assert.match(sql, /不良 CSV/);
     assert.ok(sql.indexOf('Validate every report row') < sql.indexOf('insert into public.smt_report_upload_batches'));
     assert.ok(sql.indexOf('insert into public.smt_report_upload_batches') < sql.indexOf('insert into public.daily_production'));
 });

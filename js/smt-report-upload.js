@@ -215,8 +215,6 @@ SMT.reportUpload = function (ctx) {
                         location_id: String(location.id), location_code: location.code, quantity });
                 }
             }
-            const sum = defects.reduce((total, item) => total + item.quantity, 0);
-            if (sum !== target.ng_qty) throw new Error(`不良明細合計 ${sum} 與此列 F 欄 ${target.ng_qty} 不符`);
             const fileHash = await digest(bytes);
             const rows = smtUploadDraft.value.rows.map(row => row.source_row === target.source_row
                 ? { ...row, defects, defect_file_name: file.name, _defect_file_hash: fileHash } : row);

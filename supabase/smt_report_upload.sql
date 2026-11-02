@@ -78,6 +78,9 @@ begin
             raise exception 'Excel 來源列重複，請重新選擇原始檔案';
         end if;
         v_seen_rows := pg_catalog.array_append(v_seen_rows, v_row_number);
+        if v_ng > 0 and coalesce(btrim(v_row->>'defect_file_name'), '') = '' then
+            raise exception 'Excel 第 % 列有不良，必須附上不良 CSV', v_row_number;
+        end if;
 
         select w.id, w.wo_number, w.target_quantity, m.name as model_name
           into v_wo
@@ -107,10 +110,8 @@ begin
             raise exception '工單 % 在 % 已有報工紀錄，為避免重複請先檢查既有資料',
                 v_wo.wo_number, p_production_date;
         end if;
-        if pg_catalog.jsonb_typeof(coalesce(v_row->'defects', '[]'::jsonb)) <> 'array'
-           or coalesce((select pg_catalog.sum((d->>'quantity')::integer)
-                 from pg_catalog.jsonb_array_elements(coalesce(v_row->'defects','[]'::jsonb)) d), 0) <> v_ng then
-            raise exception 'Excel 第 % 列不良明細合計與 F 欄不符', v_row_number;
+        if pg_catalog.jsonb_typeof(coalesce(v_row->'defects', '[]'::jsonb)) <> 'array' then
+            raise exception 'Excel 第 % 列不良 CSV 格式不合法', v_row_number;
         end if;
         for v_defect in select value from pg_catalog.jsonb_array_elements(coalesce(v_row->'defects','[]'::jsonb)) loop
             v_qty := (v_defect->>'quantity')::integer;

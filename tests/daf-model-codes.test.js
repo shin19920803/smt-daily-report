@@ -22,6 +22,20 @@ test('all three non-FP exceptions retain recognition', () => {
     }
 });
 
+test('contains and exact model rules normalize consistently and report cross-model conflicts', () => {
+    const rules = utils.normalizeModelMatchRules([
+        { id:'r1', match_type:'contains', match_text:' abc-123 ', model_name:'Model-A' },
+        { id:'r2', match_type:'exact', match_text:'OTHER-9', model_name:'Model-B' }
+    ]);
+    assert.equal(utils.matchModelRules('PACKAGE,ABC-123,V1', rules).model, 'MODEL-A');
+    assert.equal(utils.matchModelRules('abc-123', rules).model, 'MODEL-A');
+    assert.equal(utils.matchModelRules('xOTHER-9', rules).model, '');
+    assert.equal(utils.matchModelRules('OTHER-9', rules).model, 'MODEL-B');
+    assert.equal(utils.matchModelRules('ABC-123-OTHER-9', [...rules,
+        {id:'r3',matchType:'contains',matchText:'OTHER-9',model:'MODEL-C'}]).conflict, true);
+    assert.equal(utils.normalizeProductCode('noise'), '', 'legacy FP parser behavior remains unchanged');
+});
+
 test('alias memories collapse and the two user-confirmed overrides win over stale names', () => {
     const mappings = utils.normalizeModelMappings([
         ['RFPCBA,DAF,FP-D01321BE11', 'A01-ELAN'], ['FP-D01321BE11,6J75M', 'B24-ELAN'],
@@ -40,13 +54,15 @@ function harness(initial = {}) {
         currentDafMappingStorageKey:() => 'current', LEGACY_MODEL_MAPPING_STORAGE_KEYS:['legacy'],
         MODEL_MAPPING_REMOTE_PREFIX:'__PROCESS_MODEL_MAPPING__', MODEL_MAPPING_REMOTE_LINE:'__PROCESS_MODEL_MAPPING__',
         LEGACY_MODEL_MAPPING_REMOTE_LINE:'old', REMOTE_TABLE:'daf_log_batches', _supabase:null,
+        MODEL_MATCH_RULES_TABLE:'daf_model_match_rules',
         dafModelMappings:{value:{}}, MODEL_MAPPING:{'FP-D01607MB11':'TK14-GOODIX','MS3633-T07':'HP-C-Deck'},
+        dafModelMatchRules:{value:[]},
         localStorage:{ getItem:key => storage.get(key), setItem:(key,value) => storage.set(key,value), removeItem:key => storage.delete(key) },
         console
     };
     vm.createContext(context);
     vm.runInContext(source.slice(source.indexOf('    const normalizeText ='),source.indexOf('    let dafModelMappingsReadyPromise')) +
-        '\nthis.read=readModelMappings;this.persist=persistModelMappings;this.row=modelMappingRemoteRow;', context);
+        '\nthis.read=readModelMappings;this.persist=persistModelMappings;this.row=modelMappingRemoteRow;this.saveRule=saveDafModelMatchRule;', context);
     vm.runInContext(source.slice(source.indexOf('    const findDafModelMatch ='),source.indexOf('    const detectDateRange =')) +
         '\nthis.match=findDafModelMatch;this.detect=detectModel;',context);
     return {context,storage};
@@ -76,7 +92,18 @@ test('actual model detection coalesces noisy aliases and keeps work orders for u
     assert.equal(detected.unknownProductCodes.length, 1);
     assert.equal(detected.unknownProductCodes[0], 'FP-D09999MB11');
     assert.deepEqual(Array.from(detected.unknownProductDetails[0].workOrders),['WO1','WO2']);
-    assert.throws(() => c.detect([['','WO','','FP-A,FP-B']]), /產品代號無法辨識/);
+    assert.throws(() => c.detect([['','WO','','FP-A,FP-B']]), /產品代號欄包含多個/);
+});
+
+test('non-FP identifiers are offered for classification without changing the legacy normalizer', () => {
+    const {context:c} = harness();
+    c.currentDafColumns = () => ({productCode:3,workOrder:1});
+    const detected = c.detect([['','WO1','','VENDOR,ABC-123,REV-A'],['','WO2','','VENDOR,ABC-123,REV-A']]);
+    assert.equal(detected.unknownProductCodes.length, 1);
+    assert.equal(detected.unknownProductDetails[0].rawCode, 'VENDOR,ABC-123,REV-A');
+    assert.deepEqual(Array.from(detected.unknownProductDetails[0].workOrders), ['WO1','WO2']);
+    c.dafModelMatchRules.value = [{id:'r1',matchType:'contains',matchText:'ABC-123',model:'MODEL-A'}];
+    assert.equal(c.detect([['','WO1','','VENDOR,ABC-123,REV-A']]).model, 'MODEL-A');
 });
 
 test('five-process actual analysis retains earliest-E dedup, counts and machines while storing only FP codes', async () => {
@@ -137,4 +164,32 @@ test('unknown-model flow saves canonical memory remotely before continuing; save
     assert.equal(saved.product_code,'FP-D09999MB11');
     assert.equal(c.dafUnknownModelModal.value.currentIndex,1);
     assert.equal(c.match('FP-D09999MB11,ANOTHER-SUFFIX')[1],'NEW-MODEL');
+});
+
+test('contains rule is saved remotely and automatically skips other unknown codes it now covers', async () => {
+    const {context:c} = harness();
+    c.dafModelMatchRules = {value:[]};
+    c.dafUnknownModelModal = {value:{items:[
+        {code:'RAW-A',rawCode:'VENDOR,ABC-123,REV-A'},
+        {code:'RAW-B',rawCode:'OTHER,ABC-123,REV-B'},
+        {code:'RAW-C',rawCode:'OTHER,XYZ-9,REV-C'}
+    ],currentIndex:0,selectedModel:'MODEL-A',newModel:'',matchText:'ABC-123'}};
+    c.pendingDafUpload = {value:{index:0}};
+    c.toast = () => {};
+    c.window = {confirm:() => true};
+    let written;
+    c._supabase = {from:table => {
+        assert.equal(table,'daf_model_match_rules');
+        return {upsert:row => {
+            written=row;
+            return {select:() => ({maybeSingle:async () => ({data:{...row}})})};
+        }};
+    }};
+    vm.runInContext(source.slice(source.indexOf('    const captureDafModelRuleText ='),source.indexOf('    const cancelDafUnknownModel ='))+
+        '\nthis.resolve=resolveDafUnknownModel;',c);
+    await c.resolve();
+    assert.equal(written.match_type,'contains');
+    assert.equal(written.match_text,'ABC-123');
+    assert.equal(c.dafModelMatchRules.value.length,1);
+    assert.equal(c.dafUnknownModelModal.value.currentIndex,2,'the rule should auto-resolve another matching code');
 });

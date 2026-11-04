@@ -533,7 +533,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
                                     <div class="text-xs font-bold text-gray-400 mb-1">未識別產品代號</div>
-                                    <div class="bg-gray-900 text-green-300 rounded-lg p-3 font-mono text-sm break-all">{{ dafUnknownModelModal.items[dafUnknownModelModal.currentIndex]?.code }}</div>
+                                    <textarea readonly @mouseup="captureDafModelRuleText($event)" @keyup="captureDafModelRuleText($event)" class="w-full min-h-[72px] bg-gray-900 text-green-300 rounded-lg p-3 font-mono text-sm break-all resize-y" :value="dafUnknownModelModal.items[dafUnknownModelModal.currentIndex]?.rawCode || dafUnknownModelModal.items[dafUnknownModelModal.currentIndex]?.code"></textarea>
                                 </div>
                                 <div>
                                     <div class="text-xs font-bold text-gray-400 mb-1">相關工單</div>
@@ -548,6 +548,12 @@
                                     <option value="">-- 選擇既有機種 --</option>
                                     <option v-for="model in dafModelOptions" :key="model" :value="model">{{ model }}</option>
                                 </select>
+                            </div>
+                            <div class="text-center text-xs text-gray-400">或</div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-400 mb-1">未來辨識依據（選填）</label>
+                                <input v-model="dafUnknownModelModal.matchText" class="w-full border border-gray-200 p-2 rounded-lg" placeholder="留空＝完整代號精確記憶；輸入片段＝包含此字串就套用機種">
+                                <p class="mt-1 text-xs text-gray-500">可在上方產品代號反白一段文字後自動帶入，也可手動輸入；規則會同步保存到共用資料庫。</p>
                             </div>
                             <div class="text-center text-xs text-gray-400">或</div>
                             <div>

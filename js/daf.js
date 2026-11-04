@@ -4,6 +4,7 @@ window.SMT = window.SMT || {};
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentLineMeta, currentTab, data, loadBaseData } = ctx;
     const REMOTE_TABLE = 'daf_log_batches';
+    const MODEL_MATCH_RULES_TABLE = 'daf_model_match_rules';
     const LEGACY_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
     const SHARED_STATS_STATE_ID = '__shared_production_daf_stats_state_v1__';
     const LEGACY_SHARED_STATS_STATE_ID = `__${LEGACY_NAMESPACE}_shared_daf_stats_state_v1__`;
@@ -276,7 +277,8 @@ SMT.daf = function (ctx) {
     const dafUploadProgress = ref({ visible: false, fileName: '', stage: '', completed: 0, total: 0, percent: 0 });
     const dafUploadErrorDetail = ref({ show: false, items: [] });
     const dafModelMappings = ref({});
-    const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' });
+    const dafModelMatchRules = ref([]);
+    const dafUnknownModelModal = ref({ show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '', matchText: '' });
     const pendingDafUpload = ref(null);
     const dafDefectDetail = ref({ show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [], dailyTrend: [] });
     const dafModelDetail = ref({ show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] });
@@ -320,6 +322,13 @@ SMT.daf = function (ctx) {
     const normalizeText = (value) => cleanText(value).toUpperCase();
     const normalizeModelName = value => normalizeText(value) || '未識別機種';
     const normalizeDafProductCode = value => SMT_DAF_UPLOAD_UTILS.normalizeProductCode(value);
+    const normalizeDafProductIdentity = value => {
+        const exact = normalizeDafProductCode(value);
+        if (exact) return exact;
+        const text = SMT_DAF_UPLOAD_UTILS.normalizeMatchText(value);
+        if (!text || /FP-[A-Z0-9]+/.test(text)) return '';
+        return text;
+    };
     const readModelMappings = () => {
         const entries = [];
         [currentDafMappingStorageKey(), ...LEGACY_MODEL_MAPPING_STORAGE_KEYS].forEach(key => {
@@ -368,6 +377,25 @@ SMT.daf = function (ctx) {
         }
         return true;
     };
+    const dafModelMatchRuleId = (matchText, matchType) => `DAF_MODEL_RULE_${matchType}_${encodeURIComponent(SMT_DAF_UPLOAD_UTILS.normalizeMatchText(matchText))}`;
+    const saveDafModelMatchRule = async (matchText, model, matchType) => {
+        const normalizedText = SMT_DAF_UPLOAD_UTILS.normalizeMatchText(matchText);
+        const normalizedModel = normalizeModelName(model);
+        if (!normalizedText || normalizedModel === '未識別機種' || !['exact', 'contains'].includes(matchType) || !_supabase) return false;
+        const id = dafModelMatchRuleId(normalizedText, matchType);
+        const { data, error } = await _supabase.from(MODEL_MATCH_RULES_TABLE).upsert({
+            id, match_type: matchType, match_text: normalizedText, model_name: normalizedModel,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'id' }).select('id,match_text,match_type,model_name').maybeSingle();
+        if (error || data?.id !== id) {
+            console.warn('產品代號辨識規則寫入 Supabase 失敗', error || '未確認寫入');
+            return false;
+        }
+        dafModelMatchRules.value = SMT_DAF_UPLOAD_UTILS.normalizeModelMatchRules([
+            ...(dafModelMatchRules.value || []).filter(rule => rule.id !== id), data
+        ]);
+        return true;
+    };
     const loadRemoteModelMappings = async () => {
         if (!_supabase) return false;
         const rows = [];
@@ -388,6 +416,13 @@ SMT.daf = function (ctx) {
             const record = Array.isArray(row.records) ? row.records[0] : row.records;
             return [row.product_code || record?.productCode, row.model_name || record?.model];
         }));
+        const { data: ruleRows, error: ruleError } = await _supabase.from(MODEL_MATCH_RULES_TABLE)
+            .select('id,match_text,match_type,model_name,updated_at').order('updated_at', { ascending: false });
+        if (ruleError) {
+            console.warn('產品代號辨識規則讀取 Supabase 失敗', ruleError);
+            return false;
+        }
+        dafModelMatchRules.value = SMT_DAF_UPLOAD_UTILS.normalizeModelMatchRules(ruleRows || []);
         const localMappings = readModelMappings();
         const merged = { ...localMappings, ...remoteMappings };
         dafModelMappings.value = merged;
@@ -401,7 +436,10 @@ SMT.daf = function (ctx) {
     let dafModelMappingsReadyPromise = null;
     const ensureDafModelMappingsReady = () => {
         if (!dafModelMappingsReadyPromise) {
-            dafModelMappingsReadyPromise = loadRemoteModelMappings().catch(error => {
+            dafModelMappingsReadyPromise = loadRemoteModelMappings().then(ready => {
+                if (!ready) dafModelMappingsReadyPromise = null;
+                return ready;
+            }).catch(error => {
                 dafModelMappingsReadyPromise = null;
                 console.warn('機種對應記憶初始化失敗，沿用本機既有設定', error);
                 return false;
@@ -469,7 +507,7 @@ SMT.daf = function (ctx) {
             : (parseDateTime(raw[columns.date])?.getTime() || null);
         return {
             ...record,
-            productCode: normalizeDafProductCode(record.productCode || raw[columns.productCode]),
+            productCode: normalizeDafProductIdentity(record.productCode || raw[columns.productCode]),
             model: mappedModel !== '未識別機種' ? mappedModel : normalizeModelName(record.model),
             machine: cleanText(record.machine),
             dedupKey: normalizeText(record.dedupKey || raw[columns.dedupKey] || ''),
@@ -544,7 +582,11 @@ SMT.daf = function (ctx) {
     const findDafModelMatch = value => {
         const code = normalizeDafProductCode(value);
         const model = code && (MODEL_MAPPING[code] || dafModelMappings.value[code]);
-        return model ? [code, model] : null;
+        if (model) return [code, model];
+        const match = SMT_DAF_UPLOAD_UTILS.matchModelRules(value, dafModelMatchRules.value);
+        if (match.conflict || !match.model) return null;
+        const identity = normalizeDafProductIdentity(value);
+        return identity ? [identity, match.model] : null;
     };
     const resolveDafModel = value => {
         const match = findDafModelMatch(value);
@@ -553,28 +595,28 @@ SMT.daf = function (ctx) {
     const detectModel = (rows) => {
         const columns = currentDafColumns();
         const rawValues = [...new Map(rows.map(row => {
-            const raw = cleanText(row[columns.productCode]);
-            if (!raw) return ['', ''];
-            const code = normalizeDafProductCode(raw);
-            if (!code && /產品|料號|product\s*code|part\s*number|型號|model/i.test(raw)) return ['', ''];
-            if (!code) throw new Error('產品代號無法辨識：每筆資料須包含一個 FP- 代號（或既有三項例外），請確認產品代號欄');
-            return [code, code];
+            const source = cleanText(row[columns.productCode]);
+            if (!source || /^(產品代號|料號|product\s*code|part\s*number|型號|model)\s*[:：]?$/i.test(source)) return ['', null];
+            const identity = normalizeDafProductIdentity(source);
+            if (!identity) throw new Error('產品代號欄包含多個或格式異常的 FP- 代號，請確認來源資料');
+            return [identity, { code: identity, source }];
         }).filter(([key]) => key)).values()];
         const matched = [];
         const unknownProductCodes = [];
-        rawValues.forEach(raw => {
-            const match = findDafModelMatch(raw);
-            if (match && !matched.some(item => item.productCode === match[0])) matched.push({ productCode: match[0], model: normalizeModelName(match[1]) });
-            if (!match) unknownProductCodes.push(raw);
+        rawValues.forEach(item => {
+            const match = findDafModelMatch(item.source);
+            if (match && !matched.some(existing => existing.productCode === match[0])) matched.push({ productCode: match[0], model: normalizeModelName(match[1]) });
+            if (!match) unknownProductCodes.push(item.code);
         });
         const unknownWorkOrders = new Map(unknownProductCodes.map(code => [normalizeText(code), new Set()]));
         rows.forEach(row => {
-            const code = normalizeDafProductCode(row[columns.productCode]);
+            const code = normalizeDafProductIdentity(row[columns.productCode]);
             const workOrder = cleanText(row[columns.workOrder]);
             if (unknownWorkOrders.has(code) && workOrder) unknownWorkOrders.get(code).add(workOrder);
         });
         const unknownProductDetails = unknownProductCodes.map(code => ({
             code,
+            rawCode: cleanText(rows.find(row => normalizeDafProductIdentity(row[columns.productCode]) === code)?.[columns.productCode] || code),
             workOrders: [...(unknownWorkOrders.get(normalizeText(code)) || [])]
         }));
         const models = [...new Set(matched.map(item => item.model).filter(Boolean))];
@@ -644,7 +686,7 @@ SMT.daf = function (ctx) {
                 if (processLine === 'DAF' && isDafMachineLabel(dafMachine)) matchedMachineReferenceKeys.add(dedupKey);
                 return {
                     workOrder: cleanText(row[columns.workOrder]) || '未識別工單',
-                    productCode: normalizeDafProductCode(row[columns.productCode]),
+                    productCode: normalizeDafProductIdentity(row[columns.productCode]),
                     dedupKey,
                     dedupTime: parsedDateTime ? parsedDateTime.getTime() : null,
                     date: parsedDate,
@@ -3183,7 +3225,8 @@ SMT.daf = function (ctx) {
         }
     };
     const processDafUploadQueue = async queue => {
-        await ensureDafModelMappingsReady();
+        if (!(await ensureDafRemoteConnection())) throw new Error(dafRemoteError.value || '共用資料庫連線失敗，未處理此次上傳');
+        if (!(await ensureDafModelMappingsReady())) throw new Error('共用機種記憶／辨識規則載入失敗，為避免錯誤分類，本次尚未處理上傳');
         const referenceState = await loadDafMachineReferences();
         const storedMachineReferences = referenceState.error ? new Map() : referenceState.map;
         if (referenceState.error) toast('待比對機台資料讀取失敗，本次僅使用目前檔案內的比對資料', 'warning');
@@ -3232,7 +3275,7 @@ SMT.daf = function (ctx) {
                     const items = unknownBatches.flatMap(batch => (batch.unknownProductDetails?.length
                         ? batch.unknownProductDetails
                         : batch.unknownProductCodes.map(code => ({ code, workOrders: [] }))));
-                    dafUnknownModelModal.value = { show: true, fileName: file.name, items, currentIndex: 0, selectedModel: '', newModel: '' };
+                    dafUnknownModelModal.value = { show: true, fileName: file.name, items, currentIndex: 0, selectedModel: '', newModel: '', matchText: '' };
                     toast(`發現 ${items.length} 個未識別機種代號，請先完成歸類`, 'warning');
                     return false;
                 }
@@ -3354,6 +3397,11 @@ SMT.daf = function (ctx) {
             event.target.value = '';
         }
     };
+    const captureDafModelRuleText = event => {
+        const target = event?.currentTarget;
+        if (!target || target.selectionStart === target.selectionEnd) return toast('請先在產品代號中反白要記憶的字串', 'warning');
+        dafUnknownModelModal.value = { ...dafUnknownModelModal.value, matchText: target.value.slice(target.selectionStart, target.selectionEnd) };
+    };
     const resolveDafUnknownModel = async () => {
         const modal = dafUnknownModelModal.value;
         const current = modal.items[modal.currentIndex];
@@ -3363,16 +3411,39 @@ SMT.daf = function (ctx) {
         if (selected && created) return toast('請選擇既有機種或新增機種其中一種', 'warning');
         if (!selected && !created) return toast('請選擇既有機種或輸入新的機種名稱', 'warning');
         const modelName = created || selected;
-        if (!(await saveRemoteModelMapping(code, modelName))) return toast('機種對照保存失敗，請重試；尚未繼續上傳', 'error');
-        dafModelMappings.value = { ...dafModelMappings.value, [normalizeDafProductCode(code)]: normalizeModelName(modelName) };
-        persistModelMappings();
-        if (modal.currentIndex < modal.items.length - 1) {
-            dafUnknownModelModal.value = { ...modal, currentIndex: modal.currentIndex + 1, selectedModel: '', newModel: '' };
+        const rawCode = cleanText(current?.rawCode || code);
+        const matchText = SMT_DAF_UPLOAD_UTILS.normalizeMatchText(modal.matchText);
+        if (matchText && !SMT_DAF_UPLOAD_UTILS.normalizeMatchText(rawCode).includes(matchText)) {
+            return toast('辨識字串必須是目前產品代號中連續存在的文字', 'warning');
+        }
+        const matchType = matchText ? 'contains' : 'exact';
+        const ruleText = matchText || rawCode;
+        const competing = SMT_DAF_UPLOAD_UTILS.matchModelRules(rawCode, dafModelMatchRules.value);
+        const sameRule = (dafModelMatchRules.value || []).find(rule => rule.matchType === matchType
+            && rule.matchText === SMT_DAF_UPLOAD_UTILS.normalizeMatchText(ruleText));
+        if (sameRule && sameRule.model !== normalizeModelName(modelName)
+            && !window.confirm(`辨識字串「${ruleText}」目前對應 ${sameRule.model}。確定改為 ${normalizeModelName(modelName)}？`)) return;
+        if (competing.matches.some(rule => rule.model !== normalizeModelName(modelName) && rule.id !== sameRule?.id)) {
+            return toast('此產品代號已符合另一個不同機種的辨識規則，請先處理規則衝突；尚未寫入或繼續上傳', 'error');
+        }
+        const isLegacyExact = !matchText && !!normalizeDafProductCode(rawCode);
+        const saved = isLegacyExact
+            ? await saveRemoteModelMapping(rawCode, modelName)
+            : await saveDafModelMatchRule(ruleText, modelName, matchType);
+        if (!saved) return toast('機種辨識記憶保存失敗，請重試；尚未繼續上傳', 'error');
+        if (isLegacyExact) {
+            dafModelMappings.value = { ...dafModelMappings.value, [normalizeDafProductCode(rawCode)]: normalizeModelName(modelName) };
+            persistModelMappings();
+        }
+        const nextIndex = modal.items.findIndex((item, index) => index > modal.currentIndex
+            && !findDafModelMatch(item?.rawCode || item?.code || item));
+        if (nextIndex >= 0) {
+            dafUnknownModelModal.value = { ...modal, currentIndex: nextIndex, selectedModel: '', newModel: '', matchText: '' };
             return;
         }
         const queue = pendingDafUpload.value;
         pendingDafUpload.value = null;
-        dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' };
+        dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '', matchText: '' };
         if (!queue) return;
         loading.value = true;
         try { await processDafUploadQueue(queue); }
@@ -3386,7 +3457,7 @@ SMT.daf = function (ctx) {
     };
     const cancelDafUnknownModel = () => {
         pendingDafUpload.value = null;
-        dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '' };
+        dafUnknownModelModal.value = { show: false, fileName: '', items: [], currentIndex: 0, selectedModel: '', newModel: '', matchText: '' };
         dafUploadInProgress = false;
         dafRemoteRefreshQueued = false;
         toast(`已取消此次 ${currentDafLabel()} 上傳`, 'info');
@@ -3515,7 +3586,7 @@ SMT.daf = function (ctx) {
         dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
-        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, openDafUploadErrorDetail, closeDafUploadErrorDetail,
+        uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, captureDafModelRuleText, openDafUploadErrorDetail, closeDafUploadErrorDetail,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, openDafTrendDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate, isDafDashboardDetailsLoaded, ensureDafDashboardDetails,
         renderDafCharts

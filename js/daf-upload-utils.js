@@ -25,6 +25,21 @@
         }
         return mappings;
     };
+    const normalizeMatchText = value => String(value ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toUpperCase();
+    const normalizeModelMatchRules = rows => (rows || []).map(row => ({
+        id: String(row?.id || ''),
+        matchText: normalizeMatchText(row?.matchText ?? row?.match_text),
+        matchType: ['exact', 'contains'].includes(row?.matchType ?? row?.match_type) ? (row.matchType ?? row.match_type) : 'exact',
+        model: String(row?.model ?? row?.model_name ?? '').trim().toUpperCase()
+    })).filter(rule => rule.id && rule.matchText && rule.model && rule.model !== '未識別機種');
+    const matchModelRules = (value, rows) => {
+        const text = normalizeMatchText(value);
+        if (!text) return { model: '', matches: [], conflict: false };
+        const matches = normalizeModelMatchRules(rows).filter(rule => rule.matchType === 'exact'
+            ? text === rule.matchText : text.includes(rule.matchText));
+        const models = [...new Set(matches.map(rule => rule.model))];
+        return { model: models.length === 1 ? models[0] : '', matches, conflict: models.length > 1 };
+    };
     const splitRecordsIntoChunks = (records, { maxRows = 500, maxBytes = 512 * 1024 } = {}) => {
         const encoder = new TextEncoder();
         const chunks = [];
@@ -96,7 +111,7 @@
     };
 
     const api = { splitRecordsIntoChunks, hashPayload, isRetryableUploadError, selectWorkbookSheet, readWorkbookRows,
-        normalizeProductCode, normalizeModelMappings, MODEL_CODE_OVERRIDES };
+        normalizeProductCode, normalizeModelMappings, normalizeMatchText, normalizeModelMatchRules, matchModelRules, MODEL_CODE_OVERRIDES };
     root.SMT_DAF_UPLOAD_UTILS = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

@@ -42,12 +42,15 @@ try {
     const migration = fileURLToPath(new URL('../supabase/daf_finalize_plan_fix.sql', import.meta.url));
     run('psql', [...args, '--file', migration]);
     run('psql', [...args, '--file', migration]);
+    const keyMigration = fileURLToPath(new URL('../supabase/daf_finalize_key_lookup_fix.sql', import.meta.url));
+    run('psql', [...args, '--file', keyMigration]);
+    run('psql', [...args, '--file', keyMigration]);
     run('psql', [...args, '--command', refresh]);
     assert.equal(run('psql', [...args, '--command', digest]), before, 'All summary fields must remain identical');
     run('psql', [...args, '--command', `do $$ declare i integer; payload jsonb; begin
       perform public.daf_start_log_import('99999999-0000-4000-8000-000000000001','plan-load.xlsx',
-        '[{"line":"DAF","date_start":"2026-10-28","date_end":"2026-10-28"}]'::jsonb,38);
-      for i in 0..37 loop
+        '[{"line":"DAF","date_start":"2026-10-28","date_end":"2026-10-28"}]'::jsonb,44);
+      for i in 0..43 loop
         select jsonb_agg(jsonb_build_object('dedupKey','LOAD-'||(i*500+n),'dedupTime',i*500+n,
           'date','2026-10-28','model','LOAD','workOrder','WO-LOAD','status','GOOD','inputIncluded',true))
           into payload from generate_series(1,500) n;
@@ -56,9 +59,9 @@ try {
     const startedAt = Date.now();
     const published = JSON.parse(run('psql', [...args, '--command',
         `select public.daf_finalize_log_import('99999999-0000-4000-8000-000000000001');`]));
-    assert.equal(published.accepted_count, 19000);
+    assert.equal(published.accepted_count, 22000);
     assert.equal(published.published, true);
-    console.log(`38-chunk / 19,000-row local publication: ${Date.now()-startedAt} ms`);
+    console.log(`44-chunk / 22,000-row local publication: ${Date.now()-startedAt} ms`);
     console.log('PASS: five-process publication fixtures and identical complete summary digest after idempotent plan migration');
 } finally {
     if (started) run('pg_ctl', ['-D', data, '-m', 'immediate', 'stop']);

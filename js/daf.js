@@ -259,7 +259,7 @@ SMT.daf = function (ctx) {
     const dafHistoricalDefectOptionsReady = computed(() => Boolean(dafHistoricalDefectOptionStateByLine.value[currentDafLine()]?.ready));
     const dafHistoricalDefectOptionsError = computed(() => dafHistoricalDefectOptionStateByLine.value[currentDafLine()]?.error || '');
     const dafHistoricalDefectOptionPromises = new Map();
-    const loadDafHistoricalDefectOptions = async (line = currentDafLine()) => {
+    const loadDafHistoricalDefectOptions = async (line = currentDafLine(), { force = false } = {}) => {
         if (!TEST_PROCESS_IDS.includes(line)) return;
         if (dafHistoricalDefectOptionPromises.has(line)) return dafHistoricalDefectOptionPromises.get(line);
         dafHistoricalDefectOptionStateByLine.value = {
@@ -270,11 +270,24 @@ SMT.daf = function (ctx) {
             try {
                 let rows;
                 if (window.fetchCachedJson) {
-                    rows = await window.fetchCachedJson(`/api/stats-defect-options?line=${encodeURIComponent(line)}`);
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 15000);
+                    try {
+                        rows = await window.fetchCachedJson(`/api/stats-defect-options?line=${encodeURIComponent(line)}`, { force, signal: controller.signal });
+                    } catch (cacheError) {
+                        if (/HTTP\s+(401|403)\b/.test(String(cacheError?.message || ''))) throw cacheError;
+                        if (typeof window.DashboardAuth?.readStatsDefectOptions !== 'function') throw cacheError;
+                        rows = await window.DashboardAuth.readStatsDefectOptions(line);
+                    } finally {
+                        clearTimeout(timeout);
+                    }
+                    if (rows == null && typeof window.DashboardAuth?.readStatsDefectOptions === 'function') {
+                        rows = await window.DashboardAuth.readStatsDefectOptions(line);
+                    }
+                } else if (typeof window.DashboardAuth?.readStatsDefectOptions === 'function') {
+                    rows = await window.DashboardAuth.readStatsDefectOptions(line);
                 } else {
-                    const response = await _supabase.rpc('dashboard_stats_defect_options', { p_line: line });
-                    if (response.error) throw response.error;
-                    rows = response.data;
+                    throw Object.assign(new Error('登入資料庫連線尚未就緒'), { code: 'AUTH_CLIENT_UNAVAILABLE' });
                 }
                 if (!Array.isArray(rows)) throw new Error('回傳格式無效');
                 const options = [...new Set(rows.map(row => String(row?.name || '').trim()).filter(Boolean))]
@@ -288,11 +301,20 @@ SMT.daf = function (ctx) {
                     dafStatsFilter.value.defectName = 'all';
                 }
             } catch (error) {
+                const code = String(error?.code || (error?.status ? `HTTP_${error.status}` : '')).replace(/[^A-Z0-9_-]/gi, '').slice(0, 32);
+                const prior = dafHistoricalDefectOptionStateByLine.value[line] || {};
+                const message = code === '57014'
+                    ? '資料庫查詢逾時'
+                    : code === 'HTTP_401' || code === 'HTTP_403'
+                        ? '登入驗證未通過'
+                        : code === 'AUTH_CLIENT_UNAVAILABLE'
+                            ? '登入連線尚未就緒'
+                            : '暫時無法連線';
                 dafHistoricalDefectOptionStateByLine.value = {
                     ...dafHistoricalDefectOptionStateByLine.value,
-                    [line]: { ...(dafHistoricalDefectOptionStateByLine.value[line] || {}), loading: false, error: '不良現象清單載入失敗，請重新整理後重試' }
+                    [line]: { ...prior, loading: false, ready: Boolean(prior.ready), error: `${message}${code ? `（${code}）` : ''}；可按「重試清單」` }
                 };
-                console.warn(`${processLabel(line)} 歷史不良現象載入失敗`, error);
+                console.warn(`${processLabel(line)} 歷史不良現象載入失敗`, code || 'UNKNOWN');
             } finally {
                 dafHistoricalDefectOptionPromises.delete(line);
             }
@@ -3675,7 +3697,7 @@ SMT.daf = function (ctx) {
     return {
         dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsDisplayResult, dafHistoricalDefectOptions, dafHistoricalDefectOptionsLoading, dafHistoricalDefectOptionsReady, dafHistoricalDefectOptionsError, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
-        dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
+        dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess, loadDafHistoricalDefectOptions,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, captureDafModelRuleText, openDafUploadErrorDetail, closeDafUploadErrorDetail,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, openDafTrendDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate, isDafDashboardDetailsLoaded, ensureDafDashboardDetails,

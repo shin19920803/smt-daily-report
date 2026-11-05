@@ -109,13 +109,13 @@ window.invalidateStatsStateCache = () => {
     return statsStateCacheInvalidationPromise;
 };
 
-window.fetchCachedJson = async (path, { force = false } = {}) => {
+window.fetchCachedJson = async (path, { force = false, signal } = {}) => {
     const base = String(window.DATA_CACHE_URL || '').replace(/\/$/, '');
     if (!base) return null;
     const url = new URL(`${base}${path}`);
     if (force) url.searchParams.set('refresh', '1');
     // 不使用瀏覽器本機 HTTP 快取；資料仍由 Cloudflare Worker 快取，避免跨電腦讀到舊清單。
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await fetch(url, { cache: 'no-store', signal });
     if (!response.ok) throw new Error(`Cloudflare HTTP ${response.status}`);
     return response.json();
 };

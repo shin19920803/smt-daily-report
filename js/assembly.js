@@ -1,5 +1,7 @@
 window.SMT = window.SMT || {};
 
+const sortAssemblyParetoRows = rows => [...(rows || [])].sort((a, b) => Number(b?.qty || 0) - Number(a?.qty || 0));
+
 // Mylar 機台 LOG：瀏覽器版的 Python LOG 自動統計工具
 SMT.assembly = function (ctx) {
     const { toast, loading, currentLine, currentTab, data, loadBaseData } = ctx;
@@ -1547,7 +1549,7 @@ SMT.assembly = function (ctx) {
                 previous = echarts.init(el);
                 setPrevious(previous);
             }
-            const rows = result.byType.slice(0, 12);
+            const rows = sortAssemblyParetoRows(result.byType).slice(0, 12);
             const names = rows.map(row => row.name);
             previous.setOption({
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -1585,7 +1587,7 @@ SMT.assembly = function (ctx) {
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
                 grid: { top: 12, right: 24, bottom: 24, left: 120 },
                 xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10, color: '#9ca3af' } },
-                yAxis: { type: 'category', data: rows.map(row => row.name), axisLabel: { fontSize: 10, color: '#6b7280' } },
+                yAxis: { type: 'category', inverse: true, data: rows.map(row => row.name), axisLabel: { fontSize: 10, color: '#6b7280' } },
                 series: [{ name: '停機／不良次數', type: 'bar', data: quantities, barMaxWidth: 18, itemStyle: { color: '#dc2626', borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right', fontSize: 10 } }]
             });
             if (previous.off) previous.off('click');

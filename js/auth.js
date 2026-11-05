@@ -78,6 +78,13 @@ window.DashboardAuth = (() => {
             throw failure;
         } finally { clearTimeout(timeoutId); }
     };
+    const readStatsDefectOptions = async line => {
+        const rows = await rpc('dashboard_stats_defect_options', { p_line: line }, { timeoutMs: 12000 });
+        if (!Array.isArray(rows) || rows.some(row => typeof row?.name !== 'string')) {
+            throw Object.assign(new Error('不良現象清單回傳格式錯誤'), { code: 'INVALID_DEFECT_OPTIONS' });
+        }
+        return rows;
+    };
     const logout = async () => {
         if (leaving) return;
         leaving = true;
@@ -196,5 +203,5 @@ window.DashboardAuth = (() => {
           </section>
         </div>`
     };
-    return { configure, mountLogin, logout, user, accountComponent };
+    return { configure, mountLogin, logout, user, accountComponent, readStatsDefectOptions };
 })();

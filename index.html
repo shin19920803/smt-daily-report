@@ -1220,7 +1220,7 @@
                     <div class="flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end">
                         <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">機種</label><select v-model="dafStatsFilter.model" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white"><option value="all">全部機種</option><option v-for="model in dafModelOptions" :key="model" :value="model">{{ model }}</option></select></div>
                         <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">工單</label><select v-model="dafStatsFilter.workOrder" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white"><option value="all">全部工單</option><option v-for="workOrder in dafWorkOrderOptions" :key="workOrder" :value="workOrder">{{ workOrder }}</option></select></div>
-                        <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">不良現象</label><select v-model="dafStatsFilter.defectName" :disabled="dafHistoricalDefectOptionsLoading || !dafHistoricalDefectOptionsReady" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white disabled:bg-gray-100"><option value="all">全部不良現象</option><option v-for="name in dafHistoricalDefectOptions" :key="name" :value="name">{{ name }}</option></select><p v-if="dafHistoricalDefectOptionsError" class="text-xs text-red-500 mt-1">{{ dafHistoricalDefectOptionsError }}</p></div>
+                        <div class="flex-1 min-w-[180px]"><label class="block text-xs font-bold text-gray-400 mb-1">不良現象</label><select v-model="dafStatsFilter.defectName" :disabled="dafHistoricalDefectOptionsLoading || !dafHistoricalDefectOptionsReady" class="w-full border border-gray-200 p-2 rounded-lg text-sm bg-white disabled:bg-gray-100"><option value="all">全部不良現象</option><option v-for="name in dafHistoricalDefectOptions" :key="name" :value="name">{{ name }}</option></select><p v-if="dafHistoricalDefectOptionsError" role="alert" class="text-xs text-red-500 mt-1">{{ dafHistoricalDefectOptionsError }} <button type="button" class="underline font-bold" :disabled="dafHistoricalDefectOptionsLoading" @click="loadDafHistoricalDefectOptions(dafProcess, { force: true })">重試清單</button></p></div>
                         <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"><button @click="calculateDafStats" :disabled="dafStatsLoading" class="btn-primary text-sm disabled:opacity-50 disabled:cursor-wait"><i class="fas fa-chart-column mr-1"></i>{{ dafStatsLoading ? '載入中…' : '執行統計' }}</button></div>
                     </div>
                     <p class="text-xs text-gray-400 mt-3"><i class="fas fa-info-circle mr-1"></i>不良現象篩選僅影響不良分析；投入、良品、不良總數與良率維持原統計。</p>
@@ -1965,16 +1965,16 @@
 
 </div>
 
-<script src="js/auth.js?v=20261027-login-timeout-v2"></script>
-<script src="js/supabase-client.js?v=20261015-access-v1"></script>
+<script src="js/auth.js?v=20261105-defect-options-retry-v1"></script>
+<script src="js/supabase-client.js?v=20261105-defect-options-retry-v1"></script>
 <script src="js/core.js?v=20261030-calendar-production-id-v1"></script>
 <script src="js/smt-import-validation.js?v=20261016-workorder-guard-v2"></script>
 <script src="js/orders.js?v=20261030-smt-upload-entry-v1"></script>
 <script src="js/report.js?v=20261030-calendar-report-link-v1"></script>
 <script src="js/smt-report-upload.js?v=20261102-smt-daily-excel-upload-v3"></script>
-<script src="js/assembly.js?v=20261105-stats-defect-filter-v1"></script>
+<script src="js/assembly.js?v=20261105-pareto-desc-v1"></script>
 <script src="js/daf-upload-utils.js?v=20261104-model-match-rules-v1"></script>
-<script src="js/daf.js?v=20261105-stats-defect-filter-v1"></script>
+<script src="js/daf.js?v=20261105-defect-options-retry-v1"></script>
 <script src="js/fpy.js?v=20261019-missing-order-guard-v1"></script>
 <script src="js/ooc.js?v=20261008-neutral-entry-v1"></script>
 <script src="js/dashboard.js?v=20261008-neutral-entry-v1"></script>

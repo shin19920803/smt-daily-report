@@ -1549,7 +1549,7 @@ SMT.assembly = function (ctx) {
                 previous = echarts.init(el);
                 setPrevious(previous);
             }
-            const rows = sortAssemblyParetoRows(result.byType).slice(0, 12);
+            const rows = result.byType.slice(0, 12);
             const names = rows.map(row => row.name);
             previous.setOption({
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -1580,7 +1580,7 @@ SMT.assembly = function (ctx) {
                 previous = echarts.init(el);
                 setPrevious(previous);
             }
-            const rows = result.byType.slice(0, 12);
+            const rows = sortAssemblyParetoRows(result.byType).slice(0, 12);
             const names = rows.map(row => row.name);
             const quantities = rows.map(row => row.qty);
             previous.setOption({

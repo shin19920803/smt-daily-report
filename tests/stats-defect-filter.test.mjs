@@ -54,7 +54,7 @@ test('Mylar Pareto 依數量降冪，第一筆顯示於最上方且不改原始�
     assert.deepEqual(result.map(row => row.name), ['多', '中', '少']);
     assert.deepEqual(source.map(row => row.name), ['少', '多', '中']);
     assert.match(assembly, /yAxis:\s*\{[^}]*inverse:\s*true/);
-    assert.match(assembly, /const rows = sortAssemblyParetoRows\(result\.byType\)\.slice\(0, 12\)/);
+    assert.match(assembly, /const renderParetoChart = \(id, result, previous, setPrevious, onClick\) => \{[\s\S]*?const rows = sortAssemblyParetoRows\(result\.byType\)\.slice\(0, 12\)/);
 });
 
 test('五站清單遇 Cloudflare 暫時錯誤時走登入 RPC 備援、可強制重試且保留舊成功資料', () => {

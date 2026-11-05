@@ -76,3 +76,26 @@ test('五站 FAIL 候選清單有窄範圍覆蓋索引，不要求改全域 time
     assert.match(defectIndex, /where status = 'FAIL'/i);
     assert.doesNotMatch(defectIndex, /record_json|alter role|set statement_timeout/i);
 });
+
+test('月區間切成不重疊的 7 天段，並將同檔案的分段明細合併且排除段外資料', () => {
+    const helperStart = daf.indexOf('const splitDafDateRange');
+    const helperSource = daf.slice(helperStart, daf.indexOf('// DAF／FT1／FT2／組裝檔案統計', helperStart));
+    const helpers = new Function(`${helperSource}\nreturn { splitDafDateRange, mergeDafDateSegmentRows };`)();
+    const ranges = helpers.splitDafDateRange('2026-08-01', '2026-08-31');
+    assert.deepEqual(ranges, [
+        { start: '2026-08-01', end: '2026-08-07' },
+        { start: '2026-08-08', end: '2026-08-14' },
+        { start: '2026-08-15', end: '2026-08-21' },
+        { start: '2026-08-22', end: '2026-08-28' },
+        { start: '2026-08-29', end: '2026-08-31' }
+    ]);
+    const merged = helpers.mergeDafDateSegmentRows([
+        { range: ranges[0], rows: [{ id: 'same-file', records: [{ date: '2026-08-01' }, { date: '2026-08-08' }] }] },
+        { range: ranges[1], rows: [{ id: 'same-file', records: [{ date: '2026-08-08' }, { date: '2026-08-14' }] }] }
+    ]);
+    assert.equal(merged.length, 1);
+    assert.deepEqual(merged[0].records.map(row => row.date), ['2026-08-01', '2026-08-08', '2026-08-14']);
+    assert.match(daf, /statsOnly \? splitDafDateRange\(start, end\)/);
+    assert.match(daf, /loadDafRemoteRows\(line, true, \{ force, \.\.\.range \}\)/);
+    assert.match(html, /dafStatsLoadingMessage/);
+});

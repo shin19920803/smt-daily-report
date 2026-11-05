@@ -1,5 +1,38 @@
 window.SMT = window.SMT || {};
 
+const splitDafDateRange = (start, end, chunkDays = 7) => {
+    if (!start || !end) return [{ start, end }];
+    const first = new Date(`${start}T00:00:00Z`);
+    const last = new Date(`${end}T00:00:00Z`);
+    if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime()) || first > last) return [{ start, end }];
+    const ranges = [];
+    for (let cursor = first; cursor <= last;) {
+        const chunkEnd = new Date(cursor);
+        chunkEnd.setUTCDate(chunkEnd.getUTCDate() + Math.max(1, chunkDays) - 1);
+        if (chunkEnd > last) chunkEnd.setTime(last.getTime());
+        ranges.push({ start: cursor.toISOString().slice(0, 10), end: chunkEnd.toISOString().slice(0, 10) });
+        cursor = new Date(chunkEnd);
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return ranges;
+};
+
+const mergeDafDateSegmentRows = segments => {
+    const batches = new Map();
+    for (const { range, rows = [] } of segments) {
+        for (const row of rows) {
+            const key = String(row.id || `${row.line || ''}|${row.file_name || ''}`);
+            const records = (Array.isArray(row.records) ? row.records : []).filter(record =>
+                record?.date && (!range.start || record.date >= range.start) && (!range.end || record.date <= range.end)
+            );
+            const previous = batches.get(key);
+            if (previous) previous.records.push(...records);
+            else batches.set(key, { ...row, records });
+        }
+    }
+    return [...batches.values()];
+};
+
 // DAF／FT1／FT2／組裝檔案統計：新上傳格式統一使用 B／D／E／F／H／I；舊批次保留原本的 C／E／F／G／I／J 解析結果。
 SMT.daf = function (ctx) {
     const { toast, loading, currentLine, currentLineMeta, currentTab, data, loadBaseData } = ctx;
@@ -339,6 +372,7 @@ SMT.daf = function (ctx) {
     // 已載入的大日期區間可涵蓋較小區間；切換日期或製程時直接重算，不重抓明細。
     const dafStatsRangeCache = new Map();
     const dafStatsLoading = ref(false);
+    const dafStatsLoadingMessage = ref('目前製程統計資料載入中，完成後才可切換製程…');
     const markDafStatsResult = result => Vue.markRaw ? Vue.markRaw(result) : result;
     let dafStatsLoadingCount = 0;
     let dafSharedStatsUpdatedAt = '';
@@ -2316,13 +2350,26 @@ SMT.daf = function (ctx) {
         let request = dafDetailLoadPromises.get(rangeKey);
         if (!request) {
             request = (async () => {
-            const result = await loadDafRemoteRows(line, true, { force, start, end });
-            if (!isCurrentLoad()) return false;
-            if (result.error) {
-                dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
-                onError?.(result.error);
-                return false;
+            const dateSegments = statsOnly ? splitDafDateRange(start, end) : [{ start, end }];
+            const loadedSegments = [];
+            for (let index = 0; index < dateSegments.length; index++) {
+                if (!isCurrentLoad()) return false;
+                const range = dateSegments[index];
+                if (statsOnly && dateSegments.length > 1) {
+                    dafStatsLoadingMessage.value = `${processLabel(line)} 統計資料載入中（${index + 1}/${dateSegments.length} 段，每段最多 7 天）…`;
+                }
+                const result = await loadDafRemoteRows(line, true, { force, ...range });
+                if (result.error) {
+                    dafRemoteError.value = `${processLabel(line)} 明細載入失敗：${result.error.message || '資料讀取失敗'}`;
+                    return false;
+                }
+                loadedSegments.push({ range, rows: result.data || [] });
             }
+            const result = {
+                data: dateSegments.length > 1 ? mergeDafDateSegmentRows(loadedSegments) : (loadedSegments[0]?.rows || []),
+                error: null
+            };
+            if (!isCurrentLoad()) return false;
             return { batches: filterGhostDafRows(result.data || []).map(fromRemote), generation: loadGeneration };
             })().finally(() => { if (dafDetailLoadPromises.get(rangeKey) === request) dafDetailLoadPromises.delete(rangeKey); });
             dafDetailLoadPromises.set(rangeKey, request);
@@ -3150,6 +3197,7 @@ SMT.daf = function (ctx) {
         } finally {
             dafStatsLoadingCount = Math.max(0, dafStatsLoadingCount - 1);
             dafStatsLoading.value = dafStatsLoadingCount > 0;
+            if (!dafStatsLoading.value) dafStatsLoadingMessage.value = '目前製程統計資料載入中，完成後才可切換製程…';
             if (!dafStatsLoading.value && dafSharedStatsForceQueued && !dafSharedStatsLoadPromise) {
                 dafSharedStatsForceQueued = false;
                 const queuedApplyFilter = dafSharedStatsQueuedApplyFilter;
@@ -3695,7 +3743,7 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsDisplayResult, dafHistoricalDefectOptions, dafHistoricalDefectOptionsLoading, dafHistoricalDefectOptionsReady, dafHistoricalDefectOptionsError, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
+        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsDisplayResult, dafHistoricalDefectOptions, dafHistoricalDefectOptionsLoading, dafHistoricalDefectOptionsReady, dafHistoricalDefectOptionsError, dafStatsLoading, dafStatsLoadingMessage, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess, loadDafHistoricalDefectOptions,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, captureDafModelRuleText, openDafUploadErrorDetail, closeDafUploadErrorDetail,

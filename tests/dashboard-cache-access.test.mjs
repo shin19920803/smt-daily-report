@@ -9,14 +9,16 @@ function harness() {
     const entries = new Map();
     const valid = new Set(['session-a', 'session-b']);
     const calls = [];
+    const cacheDeletedKeys = [];
     let cacheReads = 0;
     let cacheDeletes = 0;
     let validationOffline = false;
+    let defectOptionsOffline = false;
     const context = vm.createContext({ URL, Request, Response, Headers, TextEncoder, crypto: webcrypto,
         caches: { default: {
             async match(key) { cacheReads++; return entries.get(key.url)?.clone(); },
             async put(key, response) { entries.set(key.url, response.clone()); },
-            async delete(key) { cacheDeletes++; return entries.delete(key.url); }
+            async delete(key) { cacheDeletes++; cacheDeletedKeys.push(key.url); return entries.delete(key.url); }
         } },
         fetch: async (input, init) => {
             const url = new URL(String(input));
@@ -27,13 +29,20 @@ function harness() {
                 return Response.json({ required: true, valid: valid.has(token) });
             }
             assert(valid.has(token), 'Supabase loader must receive its authenticated request token');
+            if (url.pathname.endsWith('/dashboard_stats_defect_options')) {
+                if (defectOptionsOffline) return new Response('temporary failure', { status: 503 });
+                const line = JSON.parse(init.body).p_line;
+                return Response.json([{ name: `cause-${line}` }]);
+            }
             return Response.json([{ id: 'existing-report', line: url.searchParams.get('line') }]);
         }
     });
     vm.runInContext(source.replace('export default {', 'globalThis.worker = {'), context);
     return {
-        valid, calls, get cacheReads() { return cacheReads; }, get cacheDeletes() { return cacheDeletes; },
+        valid, calls, cacheDeletedKeys, get cacheReads() { return cacheReads; }, get cacheDeletes() { return cacheDeletes; },
         offline() { validationOffline = true; },
+        defectOptionsOffline() { defectOptionsOffline = true; },
+        defectOptionsOnline() { defectOptionsOffline = false; },
         request(path, token, method = 'GET') {
             return context.worker.fetch(new Request(`https://cache.example${path}`, {
                 method, headers: token ? { 'X-Dashboard-Session': token } : {}
@@ -84,4 +93,43 @@ test('validation outage fails closed before reading cached production data', asy
     assert.equal(h.cacheReads, 0);
     const options = await h.request('/api/daf-summary', null, 'OPTIONS');
     assert.match(options.headers.get('Access-Control-Allow-Headers'), /x-dashboard-session/);
+});
+
+test('defect options are cached per process and shared only after session validation', async () => {
+    const h = harness();
+    let response = await h.request('/api/stats-defect-options?line=DAF', 'session-a');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('X-Production-Cache'), 'MISS');
+    assert.deepEqual(await response.json(), [{ name: 'cause-DAF' }]);
+
+    response = await h.request('/api/stats-defect-options?line=FT1', 'session-a');
+    assert.equal(response.headers.get('X-Production-Cache'), 'MISS');
+    assert.deepEqual(await response.json(), [{ name: 'cause-FT1' }]);
+    response = await h.request('/api/stats-defect-options?line=DAF', 'session-b');
+    assert.equal(response.headers.get('X-Production-Cache'), 'HIT');
+    assert.deepEqual(await response.json(), [{ name: 'cause-DAF' }]);
+    assert.equal(h.calls.filter(call => call.path.endsWith('/dashboard_stats_defect_options')).length, 2);
+
+    const reads = h.cacheReads;
+    assert.equal((await h.request('/api/stats-defect-options?line=UNKNOWN', 'session-a')).status, 400);
+    assert.equal((await h.request('/api/stats-defect-options?line=DAF')).status, 401);
+    assert.equal(h.cacheReads, reads);
+});
+
+test('defect-option query failures are not cached and upload invalidation evicts every process option', async () => {
+    const h = harness();
+    h.defectOptionsOffline();
+    assert.equal((await h.request('/api/stats-defect-options?line=DAF', 'session-a')).status, 502);
+    h.defectOptionsOnline();
+    const response = await h.request('/api/stats-defect-options?line=DAF', 'session-a');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('X-Production-Cache'), 'MISS');
+
+    const before = h.cacheDeletes;
+    const invalidation = await h.request('/api/cache/invalidate', 'session-a', 'POST');
+    assert.equal(invalidation.status, 200);
+    const deletedOptionKeys = h.cacheDeletedKeys.slice(before).filter(key => new URL(key).pathname === '/api/stats-defect-options');
+    assert.equal(deletedOptionKeys.length, 7, 'invalidate all five test processes plus SMT and Mylar options');
+    const refreshed = await h.request('/api/stats-defect-options?line=DAF', 'session-a');
+    assert.equal(refreshed.headers.get('X-Production-Cache'), 'MISS');
 });

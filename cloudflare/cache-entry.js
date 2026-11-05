@@ -1,7 +1,7 @@
 const APP_ORIGIN = 'https://shin19920803.github.io';
 const ALLOWED_GET_ROUTES = new Set([
     '/api/daf-summary', '/api/daf-details', '/api/daf-version', '/api/daf-stats-state',
-    '/api/smt-data', '/api/assembly-data'
+    '/api/smt-data', '/api/assembly-data', '/api/stats-defect-options'
 ]);
 const ALLOWED_POST_ROUTES = new Set([
     '/api/cache/invalidate', '/api/daf-summary/invalidate', '/api/daf-stats-state/invalidate'
@@ -26,7 +26,7 @@ export default {
         const requestUrl = new URL(request.url);
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
         if (request.method === 'GET' && requestUrl.pathname === '/api/health') {
-            return jsonResponse({ ok: true, service: 'production-data-cache', cacheVersion: '20261008-neutral-entry-v1' });
+            return jsonResponse({ ok: true, service: 'production-data-cache', cacheVersion: '20261105-stats-defect-filter-v1' });
         }
         if (!(request.method === 'GET' && ALLOWED_GET_ROUTES.has(requestUrl.pathname))
             && !(request.method === 'POST' && ALLOWED_POST_ROUTES.has(requestUrl.pathname))) {

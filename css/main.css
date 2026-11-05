@@ -412,11 +412,17 @@ td { white-space: nowrap; }
 .quick-range-text { font-size: 0.82rem; font-weight: 700; color: var(--primary); white-space: nowrap; }
 .quick-range-rel { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 .quick-hint { font-size: 0.72rem; color: var(--text-muted); }
+.quick-date-fields { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; flex-wrap: wrap; }
+.quick-date-field { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text-muted); font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
+.quick-date-field input { min-width: 132px; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: 0.78rem; font-weight: 600; }
 
 @media (max-width: 640px) {
     .quick-bar { gap: var(--space-2); }
     .quick-nav { width: 100%; }
     .quick-range { flex: 1; justify-content: center; }
+    .quick-date-fields { width: 100%; margin-left: 0; }
+    .quick-date-field { flex: 1 1 150px; justify-content: space-between; }
+    .quick-date-field input { min-width: 0; width: 128px; }
 }
 
 /* ============================================================

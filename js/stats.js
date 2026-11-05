@@ -3,9 +3,46 @@ SMT.stats = function (ctx) {
         const { toast, loading, currentTab, fpyTargets, currentLine, currentLineMeta } = ctx;
 
         const yesterdayValue = window.shiftDateByDays(window.getTaiwanDate(), -1);
-        const statsFilter = ref({ start: yesterdayValue, end: yesterdayValue, modelId: 'all', woId: 'all' });
+        const statsFilter = ref({ start: yesterdayValue, end: yesterdayValue, modelId: 'all', woId: 'all', defectName: 'all' });
         const statsResult = ref(null);
         let smtStatsDataCache = null;
+        let smtStatsSource = null;
+        const historicalDefectOptions = ref([]);
+        const historicalDefectOptionsLoading = ref(false);
+        const historicalDefectOptionsReady = ref(false);
+        const historicalDefectOptionsError = ref('');
+        let historicalDefectOptionsPromise = null;
+
+        const loadHistoricalDefectOptions = async () => {
+            if (historicalDefectOptionsPromise) return historicalDefectOptionsPromise;
+            historicalDefectOptionsLoading.value = true;
+            historicalDefectOptionsError.value = '';
+            historicalDefectOptionsPromise = (async () => {
+                try {
+                    let rows;
+                    if (window.fetchCachedJson) {
+                        rows = await window.fetchCachedJson('/api/stats-defect-options?line=SMT');
+                    } else {
+                        const response = await _supabase.rpc('dashboard_stats_defect_options', { p_line: 'SMT' });
+                        if (response.error) throw response.error;
+                        rows = response.data;
+                    }
+                    if (!Array.isArray(rows)) throw new Error('回傳格式無效');
+                    historicalDefectOptions.value = [...new Set(rows.map(row => String(row?.name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+                    historicalDefectOptionsReady.value = true;
+                    if (statsFilter.value.defectName !== 'all' && !historicalDefectOptions.value.includes(statsFilter.value.defectName)) statsFilter.value.defectName = 'all';
+                } catch (error) {
+                    historicalDefectOptions.value = [];
+                    historicalDefectOptionsReady.value = false;
+                    historicalDefectOptionsError.value = '不良現象清單載入失敗，請重新整理後重試';
+                    console.warn('SMT 歷史不良現象載入失敗', error);
+                } finally {
+                    historicalDefectOptionsLoading.value = false;
+                    historicalDefectOptionsPromise = null;
+                }
+            })();
+            return historicalDefectOptionsPromise;
+        };
 
         // 本區間是否真的有不良資料（決定圖表要不要顯示，避免殘留上一次查詢結果）
         const hasDefects = computed(() => !!statsResult.value && statsResult.value.byType.length > 0);
@@ -198,12 +235,13 @@ SMT.stats = function (ctx) {
             }
             if (cur.kind === 'loc') {
                 const qty = (r.byLocation.find(x => x.code === cur.key) || {}).qty || 0;
+                const selected = r.selectedDefect && r.selectedDefect !== 'all' ? r.selectedDefect : null;
                 return { ...base, subtitle: `佔全區間不良 ${r.totalDefects ? (qty / r.totalDefects * 100).toFixed(1) : '0.0'}%`,
                     metrics: [{ label: '不良總數', value: qty, tone: 'red' }],
                     groups: [
                         { label: '不良現象分佈', icon: 'fa-bug',       pick: 'type',  items: mapToList(r.locTypeMap[cur.key]) },
-                        { label: '機種分佈',     icon: 'fa-microchip', pick: 'model', items: mapToList(r.locModelMap[cur.key]) },
-                        { label: '工單分佈',     icon: 'fa-file-alt',  pick: 'wo',    items: mapToList(r.locWoMap[cur.key]) }
+                        { label: '機種分佈',     icon: 'fa-microchip', pick: 'model', items: mapToList(selected ? r.typeLocModelMap[selected]?.[cur.key] : r.locModelMap[cur.key]) },
+                        { label: '工單分佈',     icon: 'fa-file-alt',  pick: 'wo',    items: mapToList(selected ? r.typeLocWoMap[selected]?.[cur.key] : r.locWoMap[cur.key]) }
                     ] };
             }
             if (cur.kind === 'model') {
@@ -261,12 +299,18 @@ SMT.stats = function (ctx) {
         };
 
         // --- 主統計 ---
-        const calculateStats = async (showToast = true, { refreshRemote = showToast } = {}) => {
+        const calculateStats = async (showToast = true, { refreshRemote = showToast, rebuildOnly = false } = {}) => {
             loading.value = true;
             try {
-                const sharedData = await loadSmtStatsData(refreshRemote);
+                const sharedData = rebuildOnly ? null : await loadSmtStatsData(refreshRemote);
                 let filtered;
-                if (sharedData) {
+                let cachedFpyRows = null;
+                if (rebuildOnly) {
+                    const sourceKey = [statsFilter.value.start, statsFilter.value.end, statsFilter.value.modelId, statsFilter.value.woId].join('|');
+                    if (!smtStatsSource || smtStatsSource.key !== sourceKey) return;
+                    filtered = smtStatsSource.production;
+                    cachedFpyRows = smtStatsSource.fpy;
+                } else if (sharedData) {
                     filtered = filterSmtRows(sharedData.production);
                 } else {
                     let query = _supabase.from('daily_production').select(`id, production_date, input_quantity, work_orders!inner (id, wo_number, model_id, models(name)), defect_logs (quantity, defect_types(name), defect_locations(code))`).eq('line', currentLine.value);
@@ -279,9 +323,12 @@ SMT.stats = function (ctx) {
                 }
 
                 let totalInput = 0, totalDefects = 0, typeMap = {}, locMap = {};
+                const selectedDefect = statsFilter.value.defectName || 'all';
                 const typeLocMap = {};   // { 現象: { 位置: qty } }
                 const typeModelMap = {}; // { 現象: { 機種: qty } }
                 const typeWoMap = {};    // { 現象: { 工單: qty } }
+                const typeLocModelMap = {}; // { 現象: { 位置: { 機種: qty } } }
+                const typeLocWoMap = {}; // { 現象: { 位置: { 工單: qty } } }
                 const locWoMap = {};     // { 位置: { 工單: qty } }
                 const locModelMap = {};  // { 位置: { 機種: qty } }
                 const locTypeMap = {};   // { 位置: { 現象: qty } }
@@ -306,8 +353,16 @@ SMT.stats = function (ctx) {
                         const q = log.quantity;
                         totalDefects += q;
                         const tName = log.defect_types?.name || 'Unknown';
-                        typeMap[tName] = (typeMap[tName] || 0) + q;
                         const lCode = log.defect_locations?.code || 'Unknown';
+
+                        if (!modelAgg[modelName]) modelAgg[modelName] = { input: 0, defects: 0, byType: {}, byLoc: {}, byWo: {} };
+                        if (!woAgg[woNum]) woAgg[woNum] = { models: new Set(), input: 0, defects: 0, byType: {}, byLoc: {} };
+                        modelAgg[modelName].defects += q;
+                        woAgg[woNum].defects += q;
+                        dayMap[day.production_date].defects += q;
+                        if (selectedDefect !== 'all' && tName !== selectedDefect) return;
+
+                        typeMap[tName] = (typeMap[tName] || 0) + q;
                         locMap[lCode] = (locMap[lCode] || 0) + q;
 
                         if (!typeLocMap[tName]) typeLocMap[tName] = {};
@@ -316,6 +371,12 @@ SMT.stats = function (ctx) {
                         typeModelMap[tName][modelName] = (typeModelMap[tName][modelName] || 0) + q;
                         if (!typeWoMap[tName]) typeWoMap[tName] = {};
                         typeWoMap[tName][woNum] = (typeWoMap[tName][woNum] || 0) + q;
+                        if (!typeLocModelMap[tName]) typeLocModelMap[tName] = {};
+                        if (!typeLocModelMap[tName][lCode]) typeLocModelMap[tName][lCode] = {};
+                        typeLocModelMap[tName][lCode][modelName] = (typeLocModelMap[tName][lCode][modelName] || 0) + q;
+                        if (!typeLocWoMap[tName]) typeLocWoMap[tName] = {};
+                        if (!typeLocWoMap[tName][lCode]) typeLocWoMap[tName][lCode] = {};
+                        typeLocWoMap[tName][lCode][woNum] = (typeLocWoMap[tName][lCode][woNum] || 0) + q;
 
                         if (!locWoMap[lCode]) locWoMap[lCode] = {};
                         locWoMap[lCode][woNum] = (locWoMap[lCode][woNum] || 0) + q;
@@ -324,15 +385,12 @@ SMT.stats = function (ctx) {
                         if (!locTypeMap[lCode]) locTypeMap[lCode] = {};
                         locTypeMap[lCode][tName] = (locTypeMap[lCode][tName] || 0) + q;
 
-                        modelAgg[modelName].defects += q;
                         modelAgg[modelName].byType[tName] = (modelAgg[modelName].byType[tName] || 0) + q;
                         modelAgg[modelName].byLoc[lCode] = (modelAgg[modelName].byLoc[lCode] || 0) + q;
                         modelAgg[modelName].byWo[woNum] = (modelAgg[modelName].byWo[woNum] || 0) + q;
-                        woAgg[woNum].defects += q;
                         woAgg[woNum].byType[tName] = (woAgg[woNum].byType[tName] || 0) + q;
                         woAgg[woNum].byLoc[lCode] = (woAgg[woNum].byLoc[lCode] || 0) + q;
 
-                        dayMap[day.production_date].defects += q;
                         dayMap[day.production_date].byType[tName] = (dayMap[day.production_date].byType[tName] || 0) + q;
 
                         if (!locAppearance[lCode]) locAppearance[lCode] = new Set();
@@ -371,10 +429,13 @@ SMT.stats = function (ctx) {
 
                 // --- FPY 趨勢 (每日平均 SPI/AOI) ---
                 let fpyTrend = [];
+                let fpyRowsForSource = [];
                 try {
                     let ff;
                     if (sharedData) {
                         ff = filterSmtRows(sharedData.fpy);
+                    } else if (rebuildOnly) {
+                        ff = cachedFpyRows || [];
                     } else {
                         let fq = _supabase.from('daily_fpy').select('production_date, spi_rate, aoi_rate, work_orders!inner(wo_number, model_id)').eq('line', currentLine.value);
                         if (statsFilter.value.start) fq = fq.gte('production_date', statsFilter.value.start);
@@ -384,6 +445,7 @@ SMT.stats = function (ctx) {
                         if (statsFilter.value.modelId !== 'all') ff = ff.filter(r => r.work_orders.model_id == statsFilter.value.modelId);
                         if (statsFilter.value.woId !== 'all') ff = ff.filter(r => r.work_orders.wo_number === statsFilter.value.woId);
                     }
+                    fpyRowsForSource = ff || [];
                     const fpyDayMap = {};
                     ff.forEach(r => {
                         if (!fpyDayMap[r.production_date]) fpyDayMap[r.production_date] = { spi: [], aoi: [] };
@@ -394,16 +456,20 @@ SMT.stats = function (ctx) {
                     fpyTrend = Object.keys(fpyDayMap).sort().map(d => ({ date: d, spi: avg(fpyDayMap[d].spi), aoi: avg(fpyDayMap[d].aoi) }));
                 } catch (e) { console.error('FPY 趨勢載入失敗', e); }
 
+                const sourceKey = [statsFilter.value.start, statsFilter.value.end, statsFilter.value.modelId, statsFilter.value.woId].join('|');
+                if (!rebuildOnly) smtStatsSource = { key: sourceKey, production: filtered, fpy: fpyRowsForSource };
                 closeDrill();
                 statsResult.value = {
                     totalInput, totalDefects,
+                    selectedDefect,
                     yieldRate: totalInput ? ((totalInput - totalDefects) / totalInput * 100).toFixed(2) : 100,
                     byType, byLocation, byModel, byWo,
-                    typeLocMap, typeModelMap, typeWoMap, locWoMap, locModelMap, locTypeMap,
+                    typeLocMap, typeModelMap, typeWoMap, typeLocModelMap, typeLocWoMap, locWoMap, locModelMap, locTypeMap,
                     modelAgg, woAgg,
                     topLocations, trend, topTypeNames, totalDays, fpyTrend
                 };
                 if (showToast) toast("統計完成");
+                if (!rebuildOnly) void loadHistoricalDefectOptions();
             } catch (e) { toast("統計失敗: " + e.message, "error"); } finally { loading.value = false; }
         };
 
@@ -673,17 +739,23 @@ SMT.stats = function (ctx) {
 
         watch(() => statsResult.value, (val) => { if (val && currentTab.value === 'stats') renderStatsCharts(); });
         watch(drillView, renderTypeTrendChart);
+        watch(() => statsFilter.value.defectName, () => {
+            if (smtStatsSource) void calculateStats(false, { refreshRemote: false, rebuildOnly: true });
+        });
         watch(currentTab, (tab) => {
             if (tab !== 'stats' || currentLine.value !== 'SMT') return;
+            void loadHistoricalDefectOptions();
             if (statsResult.value) renderStatsCharts();
         });
         watch(currentLine, line => {
-            if (line !== 'SMT') statsResult.value = null;
-            else statsResult.value = null;
+            statsResult.value = null;
+            smtStatsSource = null;
+            if (line === 'SMT' && currentTab.value === 'stats') void loadHistoricalDefectOptions();
         });
 
         return {
             statsFilter, statsResult, calculateStats, exportToExcel, hasDefects,
+            historicalDefectOptions, historicalDefectOptionsLoading, historicalDefectOptionsReady, historicalDefectOptionsError,
             quickMode, quickOffset, quickLabel, quickRelative, setQuickMode, shiftQuick,
             modelSort, woSort, trendSort, toggleSort, sortIcon, ariaSort,
             sortedByModel, sortedByWo, sortedTrend,

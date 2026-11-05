@@ -23,8 +23,13 @@ SMT.assembly = function (ctx) {
     const assemblyBatches = ref([]);
     const assemblyLastFile = ref('');
     const assemblyReportResult = ref(null);
-    const assemblyStatsFilter = ref({ start: previousDayValue, end: previousDayValue });
+    const assemblyStatsFilter = ref({ start: previousDayValue, end: previousDayValue, defectName: 'all' });
     const assemblyStatsResult = ref(null);
+    const assemblyHistoricalDefectOptions = ref([]);
+    const assemblyHistoricalDefectOptionsLoading = ref(false);
+    const assemblyHistoricalDefectOptionsReady = ref(false);
+    const assemblyHistoricalDefectOptionsError = ref('');
+    let assemblyHistoricalDefectOptionsPromise = null;
     const assemblyRemoteReady = ref(false);
     const assemblyRemoteError = ref('');
     const assemblyMappingRemoteReady = ref(false);
@@ -442,6 +447,50 @@ SMT.assembly = function (ctx) {
         if (/出標送料超時\s*[（(]\s*r\s*[）)]/i.test(category)) return ASSEMBLY_MACHINE_DEFECT;
         return category;
     };
+    const loadAssemblyHistoricalDefectOptions = async () => {
+        if (assemblyHistoricalDefectOptionsPromise) return assemblyHistoricalDefectOptionsPromise;
+        assemblyHistoricalDefectOptionsLoading.value = true;
+        assemblyHistoricalDefectOptionsError.value = '';
+        assemblyHistoricalDefectOptionsPromise = (async () => {
+            try {
+                let rows;
+                if (window.fetchCachedJson) {
+                    rows = await window.fetchCachedJson('/api/stats-defect-options?line=ASSY');
+                } else {
+                    const response = await _supabase.rpc('dashboard_stats_defect_options', { p_line: 'ASSY' });
+                    if (response.error) throw response.error;
+                    rows = response.data;
+                }
+                if (!Array.isArray(rows)) throw new Error('回傳格式無效');
+                const options = [...new Set(rows.map(row => normalizeAssemblyDefectCategory(row?.name)).filter(Boolean))]
+                    .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+                assemblyHistoricalDefectOptions.value = options;
+                assemblyHistoricalDefectOptionsReady.value = true;
+                if (assemblyStatsFilter.value.defectName !== 'all' && !options.includes(assemblyStatsFilter.value.defectName)) {
+                    assemblyStatsFilter.value.defectName = 'all';
+                }
+            } catch (error) {
+                assemblyHistoricalDefectOptionsReady.value = false;
+                assemblyHistoricalDefectOptionsError.value = '不良現象清單載入失敗，請重新整理後重試';
+                console.warn('Mylar 歷史不良現象載入失敗', error);
+            } finally {
+                assemblyHistoricalDefectOptionsLoading.value = false;
+                assemblyHistoricalDefectOptionsPromise = null;
+            }
+        })();
+        return assemblyHistoricalDefectOptionsPromise;
+    };
+    const assemblyStatsViewResult = computed(() => {
+        const result = assemblyStatsResult.value;
+        const selected = assemblyStatsFilter.value.defectName || 'all';
+        if (!result || selected === 'all') return result;
+        const byType = (result.byType || []).filter(row => row.name === selected);
+        const byModel = (result.byModel || []).map(row => ({
+            ...row,
+            byType: (row.byType || []).filter(item => item.name === selected)
+        }));
+        return { ...result, byType, byModel, topCause: byType[0] || null };
+    });
 
     const parseLogLine = (line, fallbackDate) => {
         const original = String(line || '').trim().replace(/\0/g, '');
@@ -1403,13 +1452,14 @@ SMT.assembly = function (ctx) {
     const openAssemblyDailyDetail = date => {
         const result = aggregate(assemblyBatches.value, date, date);
         const daily = result.daily.find(row => row.date === date);
+        const selectedDefect = assemblyStatsFilter.value.defectName || 'all';
         assemblyDailyDetail.value = {
             show: true,
             date,
             success: daily?.success || 0,
             ng: daily?.ng || 0,
             downtimeRate: daily?.downtimeRate || '0.00',
-            byType: result.byType || []
+            byType: selectedDefect === 'all' ? (result.byType || []) : (result.byType || []).filter(row => row.name === selectedDefect)
         };
     };
     const closeAssemblyDailyDetail = () => {
@@ -1547,7 +1597,7 @@ SMT.assembly = function (ctx) {
         });
     };
     const renderAssemblyStatsCharts = () => {
-        renderParetoChart('assemblyStatsChart', assemblyStatsResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
+        renderParetoChart('assemblyStatsChart', assemblyStatsViewResult.value, statsChart, value => { statsChart = value; }, openAssemblySourceDetail);
         Vue.nextTick(() => {
             const el = document.getElementById('assemblyDailyChart');
             const result = assemblyStatsResult.value;
@@ -1620,16 +1670,25 @@ SMT.assembly = function (ctx) {
         if (assemblyStatusNoteEditorOpen.value) syncAssemblyStatusNoteDraft();
     });
     watch(assemblyReportResult, renderAssemblyReportChart);
-    watch(assemblyStatsResult, renderAssemblyStatsCharts);
+    watch(assemblyStatsViewResult, renderAssemblyStatsCharts);
+    watch(() => assemblyStatsFilter.value.defectName, () => {
+        closeAssemblySourceDetail();
+        closeAssemblyDailyDetail();
+        closeAssemblyModelDetail();
+    });
     watch(assemblySourceDetail, renderAssemblySourceTrendChart);
     watch(currentTab, tab => {
         if (tab === 'report' && currentLine.value === 'ASSY') renderAssemblyReportChart();
-        if (tab === 'stats' && currentLine.value === 'ASSY') renderAssemblyStatsCharts();
+        if (tab === 'stats' && currentLine.value === 'ASSY') {
+            void loadAssemblyHistoricalDefectOptions();
+            renderAssemblyStatsCharts();
+        }
     });
     watch(currentLine, line => {
         if (line === 'ASSY') {
             refreshAssemblyReport();
             assemblyStatsResult.value = aggregate(assemblyBatches.value, assemblyStatsFilter.value.start, assemblyStatsFilter.value.end);
+            if (currentTab.value === 'stats') void loadAssemblyHistoricalDefectOptions();
         }
     });
     window.addEventListener('resize', () => {
@@ -1646,7 +1705,7 @@ SMT.assembly = function (ctx) {
         assemblyModelOptions, assemblyModelScheduleModal, assemblyModelScheduleForm, assemblyModelScheduleError,
         assemblyBatches, assemblyLastFile, assemblyReportResult, assemblySourceDetail, assemblyDailyDetail, assemblyModelDetail,
         assemblySuccessDivideByTwo, assemblyBucketSuccess,
-        assemblyStatsFilter, assemblyStatsResult, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
+        assemblyStatsFilter, assemblyStatsResult, assemblyStatsViewResult, assemblyHistoricalDefectOptions, assemblyHistoricalDefectOptionsLoading, assemblyHistoricalDefectOptionsReady, assemblyHistoricalDefectOptionsError, assemblyQuickMode, assemblyQuickOffset, assemblyQuickLabel, assemblyQuickRelative,
         assemblyDefectNotes, assemblyHourlyNotes, assemblyStatusNotes, assemblyStatusNoteHours, assemblyStatusNoteEditorOpen, assemblyStatusNoteHour, assemblyStatusNoteDraft, assemblyStatusNoteCurrent,
         assemblyDefectOptions, assemblyUnknownModal, assemblyUnknownCurrent,
         uploadAssemblyLog, refreshAssemblyReport, loadAssemblyData,

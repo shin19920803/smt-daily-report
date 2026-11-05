@@ -34,7 +34,7 @@ test('中性入口不代理未知路徑，健康檢查不需讀取資料', async
     const worker = loadWorker();
     const env = { CACHE_BACKEND: { fetch: async () => { calls += 1; return new Response('{}'); } } };
     const health = await worker.fetch(new Request('https://production-data-cache.example/api/health'), env);
-    assert.deepEqual(await health.json(), { ok: true, service: 'production-data-cache', cacheVersion: '20261008-neutral-entry-v1' });
+    assert.deepEqual(await health.json(), { ok: true, service: 'production-data-cache', cacheVersion: '20261105-stats-defect-filter-v1' });
     const missing = await worker.fetch(new Request('https://production-data-cache.example/private'), env);
     assert.equal(missing.status, 404);
     assert.equal(calls, 0);
@@ -49,6 +49,7 @@ test('中性入口保留全部 Dashboard API 路徑與 POST 失效請求內容',
         ['GET', '/api/daf-stats-state?line=DAF'],
         ['GET', '/api/smt-data'],
         ['GET', '/api/assembly-data'],
+        ['GET', '/api/stats-defect-options?line=DAF'],
         ['POST', '/api/cache/invalidate'],
         ['POST', '/api/daf-summary/invalidate'],
         ['POST', '/api/daf-stats-state/invalidate']

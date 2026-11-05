@@ -247,10 +247,73 @@ SMT.daf = function (ctx) {
     const dafBatches = ref([]);
     // 儀表板只使用 Supabase 摘要；完整 records 僅在統計／明細明確載入時放入 dafBatches。
     const dafSummaryBatches = ref([]);
-    const dafStatsFilter = ref({ start: '', end: '', model: 'all', workOrder: 'all' });
+    const dafDefectFilterByLine = ref(Object.fromEntries(TEST_PROCESS_IDS.map(line => [line, 'all'])));
+    const dafStatsFilter = ref({ start: '', end: '', model: 'all', workOrder: 'all', defectName: dafDefectFilterByLine.value[dafProcess.value] || 'all' });
     const DAF_STATS_STATE_KEY = 'production_test_stats_state_v1';
     const dafStatsResult = ref(null);
     const dafStatsResults = ref({});
+    const dafHistoricalDefectOptionsByLine = ref({});
+    const dafHistoricalDefectOptionStateByLine = ref({});
+    const dafHistoricalDefectOptions = computed(() => dafHistoricalDefectOptionsByLine.value[currentDafLine()] || []);
+    const dafHistoricalDefectOptionsLoading = computed(() => Boolean(dafHistoricalDefectOptionStateByLine.value[currentDafLine()]?.loading));
+    const dafHistoricalDefectOptionsReady = computed(() => Boolean(dafHistoricalDefectOptionStateByLine.value[currentDafLine()]?.ready));
+    const dafHistoricalDefectOptionsError = computed(() => dafHistoricalDefectOptionStateByLine.value[currentDafLine()]?.error || '');
+    const dafHistoricalDefectOptionPromises = new Map();
+    const loadDafHistoricalDefectOptions = async (line = currentDafLine()) => {
+        if (!TEST_PROCESS_IDS.includes(line)) return;
+        if (dafHistoricalDefectOptionPromises.has(line)) return dafHistoricalDefectOptionPromises.get(line);
+        dafHistoricalDefectOptionStateByLine.value = {
+            ...dafHistoricalDefectOptionStateByLine.value,
+            [line]: { ...(dafHistoricalDefectOptionStateByLine.value[line] || {}), loading: true, error: '' }
+        };
+        const request = (async () => {
+            try {
+                let rows;
+                if (window.fetchCachedJson) {
+                    rows = await window.fetchCachedJson(`/api/stats-defect-options?line=${encodeURIComponent(line)}`);
+                } else {
+                    const response = await _supabase.rpc('dashboard_stats_defect_options', { p_line: line });
+                    if (response.error) throw response.error;
+                    rows = response.data;
+                }
+                if (!Array.isArray(rows)) throw new Error('回傳格式無效');
+                const options = [...new Set(rows.map(row => String(row?.name || '').trim()).filter(Boolean))]
+                    .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+                dafHistoricalDefectOptionsByLine.value = { ...dafHistoricalDefectOptionsByLine.value, [line]: options };
+                dafHistoricalDefectOptionStateByLine.value = {
+                    ...dafHistoricalDefectOptionStateByLine.value,
+                    [line]: { loading: false, ready: true, error: '' }
+                };
+                if (currentDafLine() === line && dafStatsFilter.value.defectName !== 'all' && !options.includes(dafStatsFilter.value.defectName)) {
+                    dafStatsFilter.value.defectName = 'all';
+                }
+            } catch (error) {
+                dafHistoricalDefectOptionStateByLine.value = {
+                    ...dafHistoricalDefectOptionStateByLine.value,
+                    [line]: { ...(dafHistoricalDefectOptionStateByLine.value[line] || {}), loading: false, error: '不良現象清單載入失敗，請重新整理後重試' }
+                };
+                console.warn(`${processLabel(line)} 歷史不良現象載入失敗`, error);
+            } finally {
+                dafHistoricalDefectOptionPromises.delete(line);
+            }
+        })();
+        dafHistoricalDefectOptionPromises.set(line, request);
+        return request;
+    };
+    const filterDafDefectRows = (rows, selected) => selected === 'all' ? (rows || []) : (rows || []).filter(row => row.name === selected);
+    const dafStatsDisplayResult = computed(() => {
+        const result = dafStatsResult.value;
+        const selected = dafStatsFilter.value.defectName || 'all';
+        if (!result || selected === 'all') return result;
+        const byType = filterDafDefectRows(result.byType, selected);
+        const byModel = (result.byModel || []).map(row => ({ ...row, byType: filterDafDefectRows(row.byType, selected) }));
+        const byWorkOrder = (result.byWorkOrder || []).map(row => ({ ...row, byType: filterDafDefectRows(row.byType, selected) }));
+        const daily = (result.daily || []).map(day => ({
+            ...day,
+            byType: Object.fromEntries(Object.entries(day.byType || {}).filter(([name]) => name === selected))
+        }));
+        return { ...result, byType, byModel, byWorkOrder, daily, topTypeNames: byType.slice(0, 5).map(row => row.name) };
+    });
     // 已載入的大日期區間可涵蓋較小區間；切換日期或製程時直接重算，不重抓明細。
     const dafStatsRangeCache = new Map();
     const dafStatsLoading = ref(false);
@@ -299,16 +362,22 @@ SMT.daf = function (ctx) {
         } catch (e) { return {}; }
     };
     const dafStatsState = readDafStatsState();
+    if (dafStatsState.defectByLine && typeof dafStatsState.defectByLine === 'object') {
+        dafDefectFilterByLine.value = { ...dafDefectFilterByLine.value, ...dafStatsState.defectByLine };
+    } else if (dafStatsState.defectName) {
+        dafDefectFilterByLine.value = { ...dafDefectFilterByLine.value, [dafProcess.value]: dafStatsState.defectName };
+    }
     const getYesterday = () => {
         return window.shiftDateByDays(window.getTaiwanDate(), -1);
     };
     const saveDafStatsState = () => {
-        Object.assign(dafStatsState, { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0 });
+        dafDefectFilterByLine.value = { ...dafDefectFilterByLine.value, [currentDafLine()]: dafStatsFilter.value.defectName || 'all' };
+        Object.assign(dafStatsState, { start: dafStatsFilter.value.start || '', end: dafStatsFilter.value.end || '', quickMode: dafQuickMode.value || null, quickOffset: Number(dafQuickOffset.value) || 0, defectByLine: dafDefectFilterByLine.value });
         try { localStorage.setItem(DAF_STATS_STATE_KEY, JSON.stringify(dafStatsState)); } catch (e) {}
     };
     const restoreDafStatsState = () => {
         const yesterday = getYesterday();
-        dafStatsFilter.value = { start: dafStatsState.start || yesterday, end: dafStatsState.end || yesterday, model: 'all', workOrder: 'all' };
+        dafStatsFilter.value = { start: dafStatsState.start || yesterday, end: dafStatsState.end || yesterday, model: 'all', workOrder: 'all', defectName: dafDefectFilterByLine.value[currentDafLine()] || 'all' };
         dafQuickMode.value = ['day', 'week', 'month'].includes(dafStatsState.quickMode) ? dafStatsState.quickMode : 'day';
         dafQuickOffset.value = Number.isFinite(Number(dafStatsState.quickOffset)) ? Number(dafStatsState.quickOffset) : -1;
     };
@@ -1694,7 +1763,10 @@ SMT.daf = function (ctx) {
             dafSharedStatsActiveLine = currentDafLine();
             applyingDafSharedStats = true;
             if (applyFilter) {
-                dafStatsFilter.value = { start: state.start, end: state.end, model: state.model, workOrder: state.workOrder };
+                dafStatsFilter.value = {
+                    start: state.start, end: state.end, model: state.model, workOrder: state.workOrder,
+                    defectName: dafDefectFilterByLine.value[currentDafLine()] || 'all'
+                };
                 dafQuickMode.value = state.quickMode;
                 dafQuickOffset.value = state.quickOffset;
                 await Vue.nextTick();
@@ -3085,16 +3157,17 @@ SMT.daf = function (ctx) {
         }
     };
     const openDafDefectDetail = name => {
-        const row = (dafStatsResult.value?.byType || []).find(item => item.name === name);
+        const displayResult = dafStatsDisplayResult.value;
+        const row = (displayResult?.byType || []).find(item => item.name === name);
         dafDefectDetail.value = row
-            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [], byMachine: row.byMachine || [], dailyTrend: (dafStatsResult.value?.daily || []).map(day => ({ date: day.date, qty: day.byType?.[row.name] || 0, ratio: day.defects ? ((day.byType?.[row.name] || 0) / day.defects * 100).toFixed(2) : '0.00' })) }
+            ? { show: true, name: row.name, qty: row.qty, byModel: row.byModel || [], byWorkOrder: row.byWorkOrder || [], byMachine: row.byMachine || [], dailyTrend: (displayResult?.daily || []).map(day => ({ date: day.date, qty: day.byType?.[row.name] || 0, ratio: day.defects ? ((day.byType?.[row.name] || 0) / day.defects * 100).toFixed(2) : '0.00' })) }
             : { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [], dailyTrend: [] };
     };
     const closeDafDefectDetail = () => {
         dafDefectDetail.value = { show: false, name: '', qty: 0, byModel: [], byWorkOrder: [], byMachine: [], dailyTrend: [] };
     };
     const openDafModelStatsDetail = name => {
-        const row = (dafStatsResult.value?.byModel || []).find(item => item.name === name);
+        const row = (dafStatsDisplayResult.value?.byModel || []).find(item => item.name === name);
         dafModelDetail.value = row
             ? { show: true, name: row.name, input: row.input, good: row.good, defects: row.defects, yieldRate: row.yieldRate, byType: row.byType || [], byMachine: row.byMachine || [] }
             : { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] };
@@ -3103,7 +3176,7 @@ SMT.daf = function (ctx) {
         dafModelDetail.value = { show: false, name: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byMachine: [] };
     };
     const openDafWorkOrderStatsDetail = workOrder => {
-        const row = (dafStatsResult.value?.byWorkOrder || []).find(item => item.workOrder === workOrder);
+        const row = (dafStatsDisplayResult.value?.byWorkOrder || []).find(item => item.workOrder === workOrder);
         dafWorkOrderDetail.value = row
             ? { show: true, workOrder: row.workOrder, model: row.model, input: row.input, good: row.good, defects: row.defects, yieldRate: row.yieldRate, byType: row.byType || [], byModel: row.byModel || [], byMachine: row.byMachine || [] }
             : { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [], byMachine: [] };
@@ -3112,7 +3185,7 @@ SMT.daf = function (ctx) {
         dafWorkOrderDetail.value = { show: false, workOrder: '', model: '', input: 0, good: 0, defects: 0, yieldRate: '0.00', byType: [], byModel: [], byMachine: [] };
     };
     const openDafOutputDetail = () => {
-        const result = dafStatsResult.value;
+        const result = dafStatsDisplayResult.value;
         if (!result) return;
         dafOutputDetail.value = { show: true, title: `${currentDafLabel()} 產出與良率明細`, subtitle: '顯示目前篩選條件的總投入、良品、不良與良率', result };
     };
@@ -3505,7 +3578,7 @@ SMT.daf = function (ctx) {
     };
     const renderDafCharts = () => {
         Vue.nextTick(() => {
-            const result = dafStatsResult.value;
+            const result = dafStatsDisplayResult.value;
             const reasonEl = document.getElementById('dafReasonChart');
             const trendEl = document.getElementById('dafTrendChart');
             if (reasonEl && result?.byType?.length) {
@@ -3546,13 +3619,22 @@ SMT.daf = function (ctx) {
         dafStatsInteractionVersion += 1;
         activateDafCachedStats();
     });
+    watch(() => dafStatsFilter.value.defectName, value => {
+        dafDefectFilterByLine.value = { ...dafDefectFilterByLine.value, [currentDafLine()]: value || 'all' };
+        saveDafStatsState();
+        closeDafDefectDetail();
+        closeDafModelStatsDetail();
+        closeDafWorkOrderStatsDetail();
+        closeDafOutputDetail();
+    });
     watch(() => [dafQuickMode.value, dafQuickOffset.value], () => saveDafStatsState());
-    watch(() => dafStatsResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });
+    watch(() => dafStatsDisplayResult.value, () => { if (currentTab.value === 'stats' && isDafLikeLine()) renderDafCharts(); });
     watch(dafDefectDetail, renderDafDefectTrendChart);
     watch(currentTab, tab => {
         if (!isDafLikeLine()) return;
         if (tab === 'stats') {
             renderDafCharts();
+            void loadDafHistoricalDefectOptions();
             if (isUnifiedTestLine()) void loadSharedDafStatsState();
         }
         if (tab === 'report') renderDafCharts();
@@ -3565,14 +3647,22 @@ SMT.daf = function (ctx) {
             closeDafUploadErrorDetail();
             dafLastUpload.value = null;
             dafStatsResult.value = dafStatsResults.value[dafProcess.value] || null;
-            if (currentTab.value === 'stats') void loadSharedDafStatsState();
+            if (currentTab.value === 'stats') {
+                void loadDafHistoricalDefectOptions();
+                void loadSharedDafStatsState();
+            }
         }
     });
-    watch(dafProcess, () => {
+    watch(dafProcess, (line, previousLine) => {
+        if (previousLine && TEST_PROCESS_IDS.includes(previousLine)) {
+            dafDefectFilterByLine.value = { ...dafDefectFilterByLine.value, [previousLine]: dafStatsFilter.value.defectName || 'all' };
+        }
+        dafStatsFilter.value.defectName = dafDefectFilterByLine.value[line] || 'all';
         dafStatsInteractionVersion += 1;
         try { localStorage.setItem(TEST_PROCESS_STORAGE_KEY, dafProcess.value); } catch (e) {}
         dafDateIndexSource = null;
         dafDashboardCache.clear();
+        if (currentTab.value === 'stats') void loadDafHistoricalDefectOptions(line);
         const activated = activateDafCachedStats();
         dafStatsResult.value = dafStatsResults.value[dafProcess.value] || dafStatsResult.value || null;
         if (!activated && currentTab.value === 'stats' && isUnifiedTestLine()) void loadSharedDafStatsState({ force: true, applyFilter: false });
@@ -3583,7 +3673,7 @@ SMT.daf = function (ctx) {
     window.addEventListener('resize', () => { if (reasonChart) reasonChart.resize(); if (trendChart) trendChart.resize(); if (defectTrendChart) defectTrendChart.resize(); });
 
     return {
-        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
+        dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsDisplayResult, dafHistoricalDefectOptions, dafHistoricalDefectOptionsLoading, dafHistoricalDefectOptionsReady, dafHistoricalDefectOptionsError, dafStatsLoading, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
         dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, captureDafModelRuleText, openDafUploadErrorDetail, closeDafUploadErrorDetail,

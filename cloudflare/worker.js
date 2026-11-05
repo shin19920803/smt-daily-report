@@ -2,6 +2,7 @@ const SUPABASE_URL = 'https://ccwkcwriebxipndxkvyr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNjd2tjd3JpZWJ4aXBuZHhrdnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzODk4MTgsImV4cCI6MjA4NDk2NTgxOH0.fUHOdc7OZVTwv6XjkmYU7uSkJMIy83OTvM7rD1n81Ic';
 const APP_ORIGIN = 'https://shin19920803.github.io';
 const PROCESS_LINES = ['DAF', 'FT1', 'FT2', 'LIGHTING', 'ASSEMBLY'];
+const STATS_DEFECT_OPTION_LINES = ['SMT', 'ASSY', ...PROCESS_LINES];
 const LEGACY_NAMESPACE = String.fromCharCode(107, 111, 121, 97);
 const SHARED_STATS_STATE_ID = '__shared_production_daf_stats_state_v1__';
 const LEGACY_SHARED_STATS_STATE_ID = `__${LEGACY_NAMESPACE}_shared_daf_stats_state_v1__`;
@@ -158,6 +159,22 @@ const readDafStatsStateFromSupabase = async (line, headers) => {
     return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=0, s-maxage=60' });
 };
 
+const readStatsDefectOptionsFromSupabase = async (line, headers) => {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/dashboard_stats_defect_options`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_line: line })
+    });
+    if (!response.ok) {
+        return jsonResponse({ error: 'Supabase defect-option query failed', details: await response.text(), status: response.status }, 502);
+    }
+    const rows = await response.json();
+    if (!Array.isArray(rows) || rows.some(row => typeof row?.name !== 'string')) {
+        return jsonResponse({ error: 'Supabase defect-option response is invalid' }, 502);
+    }
+    return jsonResponse(rows, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=3600' });
+};
+
 const readSmtDataFromSupabase = async headers => {
     const production = await readSupabasePages('daily_production', url => {
         url.searchParams.set('select', '*,work_orders!inner(*,models(*)),defect_logs(*,defect_types(*),defect_locations(*))');
@@ -213,6 +230,7 @@ const invalidateCache = async requestUrl => {
     const keys = [
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-summary', line)),
         ...PROCESS_LINES.map(line => cacheKeyForLine(requestUrl, '/api/daf-details', line)),
+        ...STATS_DEFECT_OPTION_LINES.map(line => cacheKeyForLine(requestUrl, '/api/stats-defect-options', line)),
         cacheKey(requestUrl, '/api/daf-version', { lines: PROCESS_LINES.join(',') }),
         ...PROCESS_LINES.map(line => cacheKey(requestUrl, '/api/daf-stats-state', { line })),
         cacheKey(requestUrl, '/api/daf-stats-state'),
@@ -240,7 +258,7 @@ export default {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
         if (requestUrl.pathname === '/api/health' && request.method === 'GET') {
-            return jsonResponse({ ok: true, service: 'production-data-cache', cacheVersion: '20261008-neutral-brand-v1' });
+            return jsonResponse({ ok: true, service: 'production-data-cache', cacheVersion: '20261105-stats-defect-filter-v1' });
         }
 
         // Validate before even reading a shared cache entry. Each request keeps
@@ -289,6 +307,12 @@ export default {
             if (line && !PROCESS_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
             const params = line ? { line } : {};
             return withCache(requestUrl, '/api/daf-stats-state', params, requestUrl.searchParams.get('refresh') === '1', () => readDafStatsStateFromSupabase(line, dbHeaders));
+        }
+
+        if (request.method === 'GET' && requestUrl.pathname === '/api/stats-defect-options') {
+            const line = requestUrl.searchParams.get('line');
+            if (!STATS_DEFECT_OPTION_LINES.includes(line)) return jsonResponse({ error: 'Invalid process' }, 400);
+            return withCache(requestUrl, '/api/stats-defect-options', { line }, requestUrl.searchParams.get('refresh') === '1', () => readStatsDefectOptionsFromSupabase(line, dbHeaders));
         }
 
         if (request.method === 'GET' && requestUrl.pathname === '/api/smt-data') {

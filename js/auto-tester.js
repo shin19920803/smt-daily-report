@@ -590,10 +590,12 @@
                             <button @click="shiftStatsQuick(1)" class="quick-arrow" :title="'下一' + (statsQuickMode === 'day' ? '日' : statsQuickMode === 'week' ? '週' : '月')" aria-label="下一期"><i class="fas fa-chevron-right"></i></button>
                         </div>
                         <span v-else class="quick-hint">選擇後可用 <i class="fas fa-chevron-left mx-0.5"></i><i class="fas fa-chevron-right mx-0.5"></i> 快速切換期間</span>
+                        <div class="quick-date-fields">
+                            <label class="quick-date-field"><span>開始</span><input v-model="statsStart" type="date" aria-label="自動測試機統計開始日期"></label>
+                            <label class="quick-date-field"><span>結束</span><input v-model="statsEnd" type="date" aria-label="自動測試機統計結束日期"></label>
+                        </div>
                     </div>
                     <div class="flex flex-col sm:flex-row flex-wrap gap-3 items-end">
-                        <label class="flex-1 min-w-[170px] text-xs font-bold text-gray-500">開始日期<input v-model="statsStart" type="date" class="mt-1 w-full border border-gray-200 rounded-lg bg-white p-2 text-sm"></label>
-                        <label class="flex-1 min-w-[170px] text-xs font-bold text-gray-500">結束日期<input v-model="statsEnd" type="date" class="mt-1 w-full border border-gray-200 rounded-lg bg-white p-2 text-sm"></label>
                         <button @click="loadStats" :disabled="statsLoading" class="btn-primary disabled:opacity-50"><i class="fas" :class="statsLoading ? 'fa-spinner fa-spin' : 'fa-chart-column'"></i><span class="ml-2">{{ statsLoading ? '載入中…' : '執行統計' }}</span></button>
                         <button @click="refresh" :disabled="statsLoading" class="btn-ghost disabled:opacity-50" aria-label="重新整理"><i class="fas fa-sync-alt" :class="statsLoading ? 'fa-spin' : ''"></i></button>
                     </div>

@@ -45,6 +45,9 @@ try {
     const keyMigration = fileURLToPath(new URL('../supabase/daf_finalize_key_lookup_fix.sql', import.meta.url));
     run('psql', [...args, '--file', keyMigration]);
     run('psql', [...args, '--file', keyMigration]);
+    const fileMigration = fileURLToPath(new URL('../supabase/daf_finalize_file_scope_fix.sql', import.meta.url));
+    run('psql', [...args, '--file', fileMigration]);
+    run('psql', [...args, '--file', fileMigration]);
     run('psql', [...args, '--command', refresh]);
     assert.equal(run('psql', [...args, '--command', digest]), before, 'All summary fields must remain identical');
     run('psql', [...args, '--command', `do $$ declare i integer; payload jsonb; begin

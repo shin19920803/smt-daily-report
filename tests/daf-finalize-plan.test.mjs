@@ -65,6 +65,40 @@ try {
     assert.equal(published.accepted_count, 22000);
     assert.equal(published.published, true);
     console.log(`44-chunk / 22,000-row local publication: ${Date.now()-startedAt} ms`);
+    const originalDelete = run('psql', [...args, '--command',
+        `begin; select public.daf_delete_log_file('plan-load.xlsx'); ${digest} rollback;`]).trim().split('\n').filter(Boolean);
+    const deleteMigration = fileURLToPath(new URL('../supabase/daf_delete_file_performance_fix.sql', import.meta.url));
+    const beforeDeleteMigration = run('psql', [...args, '--command', digest]);
+    run('psql', [...args, '--file', deleteMigration]);
+    run('psql', [...args, '--file', deleteMigration]);
+    assert.equal(run('psql', [...args, '--command', digest]), beforeDeleteMigration, 'Delete migration must not change data');
+    const optimizedDelete = run('psql', [...args, '--command',
+        `begin; select public.daf_delete_log_file('plan-load.xlsx'); ${digest} rollback;`]).trim().split('\n').filter(Boolean);
+    assert.deepEqual(optimizedDelete, originalDelete, 'Deletion must preserve complete summary results');
+    run('psql', [...args, '--command', `select public.daf_delete_log_file('plan-load.xlsx');`]);
+    assert.equal(run('psql', [...args, '--command', `select count(*) from public.daf_log_active_file_processes where file_name='plan-load.xlsx';`]).trim(), '0');
+    run('psql', [...args, '--command', `select public.daf_delete_log_file('plan-load.xlsx');`]);
+    assert.equal(run('psql', [...args, '--command', digest]).trim(), before.trim(), 'Repeated deletion must return to pre-upload data');
+    for (const [suffix, time] of [['1', 10], ['2', 20]]) {
+        run('psql', [...args, '--command', `
+            select public.daf_start_log_import('88888888-0000-4000-8000-00000000000${suffix}', 'delete-${suffix}.xlsx',
+                '[{"line":"DAF","date_start":"2026-10-28","date_end":"2026-10-28"}]'::jsonb,1);
+            select public.daf_stage_log_import_chunk('88888888-0000-4000-8000-00000000000${suffix}','DAF',0,'test',
+                '[{"dedupKey":"DELETE-SHARED","dedupTime":${time},"date":"2026-10-28","status":"GOOD","inputIncluded":true},
+                  {"date":"2026-10-28","status":"FAIL","defect":"test","inputIncluded":true}]'::jsonb);
+            select public.daf_finalize_log_import('88888888-0000-4000-8000-00000000000${suffix}');`]);
+    }
+    run('psql', [...args, '--command', `select public.daf_delete_log_file('delete-1.xlsx');`]);
+    assert.equal(run('psql', [...args, '--command', `select file_name from public.daf_log_winners where line='DAF' and dedup_key='DELETE-SHARED';`]).trim(), 'delete-2.xlsx', 'Next earliest candidate must win after deleting the first file');
+    assert.equal(run('psql', [...args, '--command', `select count(*) from public.daf_log_winners where file_name='delete-1.xlsx';`]).trim(), '0', 'Blank E rows of deleted file must also disappear');
+    const beforeArchiveDelete = run('psql', [...args, '--command', digest]);
+    run('psql', [...args, '--command', `insert into public.daf_log_compacted_files(line,file_name) values ('DAF','delete-2.xlsx');`]);
+    assert.throws(() => run('psql', [...args, '--command', `select public.daf_delete_log_file('delete-2.xlsx');`]));
+    assert.equal(run('psql', [...args, '--command', digest]), beforeArchiveDelete, 'Archive rejection must roll back completely');
+    assert.equal(run('psql', [...args, '--command', `select public.daf_log_file_exists('delete-2.xlsx');`]).trim(), 't');
+    assert.equal(run('psql', [...args, '--command', `select public.daf_log_file_exists('delete-1.xlsx');`]).trim(), 'f');
+    assert.throws(() => run('psql', [...args, '--command', `begin; update dashboard_private.access_settings set enabled=true;
+        set local request.jwt.claims='{"role":"anon"}'; select public.daf_log_file_exists('delete-2.xlsx'); rollback;`]));
     console.log('PASS: five-process publication fixtures and identical complete summary digest after idempotent plan migration');
 } finally {
     if (started) run('pg_ctl', ['-D', data, '-m', 'immediate', 'stop']);

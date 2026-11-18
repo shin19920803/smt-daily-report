@@ -1172,9 +1172,19 @@ SMT.daf = function (ctx) {
         const normalizedFileName = cleanText(fileName);
         if (!normalizedFileName || !_supabase) return false;
         if (await isDafStagedImportReady()) {
-            const { data, error } = await _supabase.rpc('daf_delete_log_file', { p_file_name: normalizedFileName });
-            if (error || data !== true) {
-                dafRemoteError.value = `五站檔案刪除失敗：${error?.message || '資料庫未確認刪除'}`;
+            let rpcError = null;
+            try {
+                const result = await runDafImportRequest('daf_delete_log_file', { p_file_name: normalizedFileName }, '刪除五站檔案', 60000, 1);
+                if (result !== true) rpcError = new Error('資料庫未確認刪除');
+            } catch (error) { rpcError = error; }
+            // A lost response is not proof of failure. Verify the authoritative heads AND list.
+            let remains, verifyError;
+            try {
+                remains = await runDafImportRequest('daf_log_file_exists', { p_file_name: normalizedFileName }, '刪除後資料庫確認', 12000, 1);
+            } catch (error) { verifyError = error; }
+            if (verifyError || remains !== false) {
+                const error = rpcError || verifyError || new Error('資料庫仍保留此檔案，請重新整理後確認');
+                dafRemoteError.value = `五站檔案刪除未完成：${error.message || '無法確認刪除'}${error.code ? `（${error.code}）` : ''}`;
                 return false;
             }
             return true;
@@ -1936,7 +1946,7 @@ SMT.daf = function (ctx) {
         // 批次必須完整保存；日期篩選僅在統計時執行，不能將裁切的 records 回寫資料庫。
         return { data: detailRows, error: null };
     };
-    const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false, { force = false, start = '', end = '' } = {}) => {
+    const loadDafRemoteRows = async (line = currentDafLine(), includeRecords = false, { force = false, start = '', end = '', allowCacheFallback = true } = {}) => {
         let directResult;
         const controller = new AbortController();
         const abortTimer = setTimeout(() => controller.abort(new Error('Supabase 請求逾時')), DAF_REMOTE_REQUEST_TIMEOUT_MS);
@@ -1951,6 +1961,7 @@ SMT.daf = function (ctx) {
             clearTimeout(abortTimer);
         }
         if (!directResult.error) return { ...directResult, source: 'supabase' };
+        if (!allowCacheFallback) return directResult;
         console.warn(`${processLabel(line)} Supabase 直讀失敗，改用 Cloudflare 備援`, directResult.error);
         try {
             const cachedResult = await withDafRequestTimeout(
@@ -2420,7 +2431,8 @@ SMT.daf = function (ctx) {
             return null;
         }).catch(error => console.warn(`${currentDafLabel()} 儀表板背景更新失敗`, error));
     };
-    const loadDafData = async ({ background = false, force = false, allowDuringUpload = false } = {}) => {
+    const loadDafData = async ({ background = false, force = false, allowDuringUpload = false, authoritative = false } = {}) => {
+        if (dafDeletingFile.value && !authoritative) return true;
         // 上傳前的完整明細比對期間，摘要刷新不可清除明細載入世代；否則仍在等待的
         // Supabase 請求會被誤判為「同步取代」，導致整份檔案被拒絕。
         if (dafUploadInProgress && !allowDuringUpload) {
@@ -2446,7 +2458,7 @@ SMT.daf = function (ctx) {
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
             // 儀表板只讀摘要欄位；完整 records 延後到統計／明細明確操作時才讀取。
             // 五個製程只載入摘要欄位，並行取得後一次替換畫面，避免清單先只出現最新檔案或逐站等待。
-            const remoteResults = await Promise.all(processLines.map(processLine => loadDafRemoteRows(processLine, false, { force })));
+            const remoteResults = await Promise.all(processLines.map(processLine => loadDafRemoteRows(processLine, false, { force, allowCacheFallback: !authoritative })));
             // 若刷新是在上傳開始前啟動，等網路回來時也不可再套用舊摘要或清掉明細快取。
             if (dafUploadInProgress && !allowDuringUpload) {
                 dafRemoteRefreshQueued = true;
@@ -2456,6 +2468,7 @@ SMT.daf = function (ctx) {
             const error = remoteResults.find(result => result.error)?.error || null;
             const usedCloudflareFallback = remoteResults.some(result => result.source === 'cloudflare-fallback');
             const remoteRows = remoteResults.flatMap(result => result.data || []);
+            if (dafDeletingFile.value && !authoritative) return;
             if (requestId !== dafLoadRequestId || currentLine.value !== (isUnifiedTestLine() ? 'TEST' : line)) return;
             if (error) {
                 dafRemoteChecking.value = false;
@@ -3513,6 +3526,7 @@ SMT.daf = function (ctx) {
         return true;
     };
     const uploadDafFiles = async event => {
+        if (dafDeletingFile.value) { event.target.value = ''; return toast('檔案刪除中，請完成後再上傳', 'warning'); }
         const files = [...(event.target.files || [])];
         if (!files.length) return;
         const queue = { files, index: 0, success: 0, rows: 0, duplicates: 0, referenceRows: 0, failed: [], failureDetails: [] };
@@ -3605,16 +3619,33 @@ SMT.daf = function (ctx) {
         dafRemoteRefreshQueued = false;
         toast(`已取消此次 ${currentDafLabel()} 上傳`, 'info');
     };
+    const dafDeletingFile = ref('');
+    const dafDeleteError = ref('');
     const deleteDafBatch = async (id) => {
+        if (dafDeletingFile.value) return;
+        if (dafUploadInProgress) return toast('檔案上傳中，請完成後再刪除', 'warning');
         const batch = dafBatches.value.find(item => item.id === id) || dafSummaryBatches.value.find(item => item.id === id);
         if (!batch || !confirm(`確定刪除 ${batch.fileName} 的全部五大製程批次？`)) return;
-        if (!(await deleteRemoteDafFileBatches(batch.fileName))) return;
-        removeLocalDafFileBatches(batch.fileName);
-        await invalidateDafSummaryCache();
-        // 刪除後立即以 Supabase 最新結果重建清單，避免只刪本機陣列，其他電腦或重新整理又把舊資料帶回來。
-        await loadDafData({ force: true });
-        if (isUnifiedTestLine()) await calculateDafStats(false, { refreshRemote: true, publishShared: true });
-        toast(`${batch.fileName} 的五大製程批次已刪除`, 'info');
+        dafDeletingFile.value = batch.fileName;
+        dafDeleteError.value = '';
+        let deleted = false;
+        try {
+            if (!(await deleteRemoteDafFileBatches(batch.fileName))) throw new Error(dafRemoteError.value || '資料庫未確認刪除');
+            deleted = true;
+            ++dafLoadRequestId; // Ignore summaries requested before the confirmed deletion.
+            removeLocalDafFileBatches(batch.fileName);
+            TEST_PROCESS_IDS.forEach(clearDafProcessDerivedState);
+            const invalidated = await withDafRequestTimeout(invalidateDafSummaryCache(), '刪除後共用快取更新', 10000).catch(() => false);
+            // Never repopulate a confirmed deletion from a stale fallback cache.
+            await loadDafData({ force: true, authoritative: true });
+            if (!dafRemoteReady.value) throw new Error(dafRemoteError.value || '無法讀取刪除後的最新清單');
+            if (!invalidated) throw new Error('共用快取失效未確認，其他電腦請重新整理確認最新資料');
+            if (isUnifiedTestLine()) await calculateDafStats(false, { refreshRemote: true, publishShared: true });
+            toast(`${batch.fileName} 的五大製程批次已刪除`, 'info');
+        } catch (error) {
+            dafDeleteError.value = `${batch.fileName}：${deleted ? '資料庫已刪除，但畫面同步失敗，請重新整理；' : ''}${error?.message || '刪除失敗，請稍後再試'}`;
+            toast(dafDeleteError.value, 'error');
+        } finally { dafDeletingFile.value = ''; }
     };
 
     let reasonChart = null;
@@ -3745,7 +3776,7 @@ SMT.daf = function (ctx) {
     return {
         dafBatches, dafSummaryBatches, dafBatchesByDate, dafVisibleBatchCount, dafStatsFilter, dafStatsResult, dafStatsDisplayResult, dafHistoricalDefectOptions, dafHistoricalDefectOptionsLoading, dafHistoricalDefectOptionsReady, dafHistoricalDefectOptionsError, dafStatsLoading, dafStatsLoadingMessage, dafRemoteReady, dafRemoteChecking, dafRemoteError, dafLastUpload, dafUploadSummary, dafUploadProgress, dafUploadErrorDetail,
         dafModelOptions, dafWorkOrderOptions, dafUnknownModelModal, dafDefectDetail, dafQuickMode, dafQuickLabel, dafQuickRelative,
-        dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess, loadDafHistoricalDefectOptions,
+        dafProcess, dafProcessOptions: TEST_PROCESS_OPTIONS, dafProcessMeta, setDafProcess, loadDafHistoricalDefectOptions, dafDeletingFile, dafDeleteError,
         uploadDafFiles, loadDafData, calculateDafStats, ensureDafProcessDetails, deleteDafBatch, resolveDafUnknownModel, cancelDafUnknownModel, captureDafModelRuleText, openDafUploadErrorDetail, closeDafUploadErrorDetail,
         openDafDefectDetail, closeDafDefectDetail, dafModelDetail, openDafModelStatsDetail, closeDafModelStatsDetail, dafWorkOrderDetail, openDafWorkOrderStatsDetail, closeDafWorkOrderStatsDetail, dafOutputDetail, openDafOutputDetail, openDafTrendDetail, closeDafOutputDetail, setDafQuickMode, shiftDafQuick,
         getDafUploadedDates, getDafDashboardForDate, isDafDashboardDetailsLoaded, ensureDafDashboardDetails,

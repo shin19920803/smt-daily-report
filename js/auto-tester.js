@@ -269,8 +269,9 @@
             });
             const trendScale = computed(() => {
                 const max = Math.max(1, ...trendDays.value.map(day => day.count));
-                const step = Math.max(1, Math.ceil(max / 4));
-                const maxValue = Math.ceil(max / step) * step;
+                // Keep at least 20% plot headroom so every value fits inside the scroll container.
+                const step = Math.max(1, Math.ceil(max * 1.25 / 4));
+                const maxValue = step * 4;
                 const ticks = Array.from({ length: Math.ceil(maxValue / step) + 1 }, (_, index) => Math.max(0, maxValue - index * step));
                 return { max: maxValue, ticks };
             });
@@ -514,8 +515,8 @@
                     <div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h3 class="font-black text-gray-800">每日產能趨勢</h3><span class="text-xs text-gray-400">最近 14 個有數據日期｜不足 14 日全數顯示</span></div>
                     <div v-if="loading && dashboardRows.length === 0" class="empty-state py-10"><i class="fas fa-spinner fa-spin"></i><div class="hint">載入每日摘要…</div></div>
                     <template v-else-if="trendDays.length">
-                        <div class="overflow-x-auto pb-3" role="img" aria-label="近 14 日每日產能直條圖，左側為 QR CODE 數量刻度">
-                            <div class="flex min-w-[600px]">
+                        <div class="overflow-x-auto pt-3 pb-3" role="group" aria-label="近 14 日每日產能直條圖，左側為 QR CODE 數量刻度">
+                            <div class="flex min-w-[760px]">
                                 <div class="relative w-14 h-40 shrink-0 text-right" aria-hidden="true">
                                     <span v-for="tick in trendTicks" :key="'axis-' + tick" class="absolute right-2 -translate-y-1/2 text-[10px] text-gray-500 font-mono" :style="{top: (100 - tick / trendMax * 100) + '%'}">{{ formatCount(tick) }}</span>
                                 </div>
@@ -523,9 +524,10 @@
                                     <div class="relative h-40 border-b border-gray-300">
                                         <div v-for="tick in trendTicks" :key="'grid-' + tick" class="absolute inset-x-0 border-t border-dashed border-gray-200" :style="{top: (100 - tick / trendMax * 100) + '%'}"></div>
                                         <div class="absolute inset-0 grid gap-1" :style="{gridTemplateColumns: 'repeat(' + trendDays.length + ', minmax(36px, 1fr))'}">
-                                            <div v-for="day in trendDays" :key="'bar-' + day.date" class="relative h-full" :title="day.date + '：' + formatCount(day.count) + ' 件'">
-                                                <span class="absolute left-1/2 z-10 -translate-x-1/2 -translate-y-full text-[10px] font-bold text-gray-700 whitespace-nowrap" :style="{bottom: 'calc(' + (day.count / trendMax * 100) + '% + 3px)'}">{{ formatCount(day.count) }}</span>
+                                            <div v-for="day in trendDays" :key="'bar-' + day.date" class="group relative h-full" tabindex="0" role="img" :aria-label="day.date + '：' + formatCount(day.count) + ' 件'" :title="day.date + '：' + formatCount(day.count) + ' 件'">
+                                                <span class="absolute left-1/2 z-10 -translate-x-1/2 text-[10px] font-bold text-gray-700 whitespace-nowrap" :style="{bottom: 'calc(' + (day.count / trendMax * 100) + '% + 4px)'}">{{ formatCount(day.count) }}</span>
                                                 <div class="absolute bottom-0 left-1/2 w-1/2 max-w-10 -translate-x-1/2 rounded-t-md bg-cyan-500" :style="{height: (day.count / trendMax * 100) + '%'}"></div>
+                                                <span role="tooltip" class="pointer-events-none absolute left-0 top-1 z-20 rounded bg-slate-800 px-2 py-1 text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus:opacity-100">{{ day.date }} · {{ formatCount(day.count) }} 件</span>
                                             </div>
                                         </div>
                                     </div>

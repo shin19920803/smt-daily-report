@@ -216,6 +216,18 @@ test('auto tester overview keeps the latest 14 production dates rather than cale
     assert(visibleDays.every(day => day.count > 0));
 });
 
+test('every production bar has an unclipped value and hover/focus quantity tooltip', () => {
+    const panel = AutoTesterPanel.setup({ view: 'dashboard' });
+    for (const count of [1, 473, 1399, 9999, 1000000]) {
+        panel.dashboardRows.value = [{ report_date: '2026-10-20', daily_count: count }];
+        assert(panel.trendMax.value >= count * 1.25, 'tallest bar leaves label headroom');
+        assert.equal(panel.trendTicks.value.at(-1), 0);
+    }
+    assert.match(AutoTesterPanel.template, /role="tooltip"[\s\S]*?group-hover:opacity-100 group-focus:opacity-100/);
+    assert.match(AutoTesterPanel.template, /:aria-label="day\.date \+ '：' \+ formatCount\(day\.count\)/);
+    assert.doesNotMatch(AutoTesterPanel.template, /-translate-y-full/);
+});
+
 test('auto tester dashboard requests a stable recent summary range independent of the selected date', async () => {
     const summaryArgs = [];
     globalThis._supabase = { async rpc(name, args = {}) {

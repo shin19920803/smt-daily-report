@@ -219,7 +219,16 @@ SMT.assembly = function (ctx) {
         const createdTimestamp = Date.parse(item?.createdAt || '');
         return Math.max(idTimestamp, Number.isFinite(createdTimestamp) ? createdTimestamp : 0);
     };
-    const modelScheduleForMinute = (date, minute) => assemblyModelSchedules.value
+    let assemblyScheduleCacheSource = null;
+    const assemblyScheduleMinuteCache = new Map();
+    const modelScheduleForMinute = (date, minute) => {
+        if (assemblyScheduleCacheSource !== assemblyModelSchedules.value) {
+            assemblyScheduleCacheSource = assemblyModelSchedules.value;
+            assemblyScheduleMinuteCache.clear();
+        }
+        const key = `${date}|${minute}`;
+        if (assemblyScheduleMinuteCache.has(key)) return assemblyScheduleMinuteCache.get(key);
+        const result = assemblyModelSchedules.value
         .filter(item => {
             if (item.date !== date) return false;
             const start = timeToMinutes(item.startTime);
@@ -227,6 +236,10 @@ SMT.assembly = function (ctx) {
             return start !== null && end !== null && start <= minute && minute < end;
         })
         .sort((a, b) => modelSchedulePriority(b) - modelSchedulePriority(a))[0] || null;
+        if (assemblyScheduleMinuteCache.size >= 8192) assemblyScheduleMinuteCache.clear();
+        assemblyScheduleMinuteCache.set(key, result);
+        return result;
+    };
     const modelForLogTime = (date, time) => {
         const minute = timeToMinutes(time);
         if (minute === null) return NO_MODEL;
@@ -1200,7 +1213,29 @@ SMT.assembly = function (ctx) {
         refreshAssemblyModelResults();
         toast('Mylar 機種時段已刪除', 'info');
     };
-    const getAssemblyReportForDate = (date) => aggregate(assemblyBatches.value, date, date);
+    // All existing writes replace these refs. Never serialize or scan events just to test freshness.
+    let assemblyDayCacheSources = [];
+    let assemblyDayBatchIndex = new Map();
+    const assemblyDayReportCache = new Map();
+    const getAssemblyReportForDate = (date) => {
+        const sources = [assemblyBatches.value, assemblyModelSchedules.value, assemblyStatusNotes.value];
+        if (sources.some((value, index) => value !== assemblyDayCacheSources[index])) {
+            if (sources[0] !== assemblyDayCacheSources[0]) {
+                assemblyDayBatchIndex = new Map();
+                for (const batch of sources[0]) for (const [day, bucket] of Object.entries(batch.buckets || {})) {
+                    if (!assemblyDayBatchIndex.has(day)) assemblyDayBatchIndex.set(day, []);
+                    assemblyDayBatchIndex.get(day).push({ ...batch, buckets: { [day]: bucket } });
+                }
+            }
+            assemblyDayCacheSources = sources;
+            assemblyDayReportCache.clear();
+        }
+        if (!assemblyDayReportCache.has(date)) {
+            if (assemblyDayReportCache.size >= 64) assemblyDayReportCache.delete(assemblyDayReportCache.keys().next().value);
+            assemblyDayReportCache.set(date, aggregate(assemblyDayBatchIndex.get(date) || [], date, date));
+        }
+        return assemblyDayReportCache.get(date);
+    };
     const getAssemblyUploadedDates = (limit = 14) => {
         const dates = new Set();
         assemblyBatches.value.forEach(batch => Object.entries(batch.buckets || {}).forEach(([date, bucket]) => {
